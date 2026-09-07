@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment / credentials
+.env
+.env.*
+*.key
+*.pem
+
+# Build / packaging
+build/
+dist/
+.coverage
+htmlcov/
+
+# External source/build trees
+external/
+
+# Runtime scratch / checkpoints
+scratch/
+checkpoints/
+*.chk
+*.pkl
+*.tmp
+*.log
+nohup.out
+
+# Local backups
+*.bak
+*.pre_*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
