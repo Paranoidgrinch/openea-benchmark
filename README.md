@@ -117,28 +117,53 @@ the corresponding OpenEA scientific production policies.
 See
 [`provenance/CAPABILITY_GATE_002.md`](provenance/CAPABILITY_GATE_002.md).
 
+### Capability Gate 003 — molecule-level multireference / SOC chain
+
+Molecule-level scientific capability has now been demonstrated on transparent
+reference systems using the verified open-source OpenMolcas stack.
+
+The validation chain includes:
+
+- an official Ge RASSCF/MS-CASPT2/RASSI-SOC regression test;
+- an official LiF diatomic state-averaged RASSCF and multistate-CASPT2 test;
+- an independent OH X2Pi DKH2-CASSCF/AMFI/RASSI-SOC test;
+- an OH state-specific CASPT2/EJOB/RASSI-SOC integration test.
+
+For OH, the two spin-free Pi components remained degenerate, RASSI produced
+two Kramers pairs with Omega = 3/2 below Omega = 1/2, and the electronic
+spin-orbit splitting was `135.5065 cm^-1`.
+
+Supplying state-specific CASPT2 diagonal energies through EJOB preserved both
+the Pi-state degeneracy and the spin-orbit structure.
+
+This establishes scientific **capability**, not a frozen production method.
+Active-space selection, state averaging, CASPT2 variant selection,
+intruder-state handling, relativistic and SOC correction policies, and
+uncertainty assignment remain unresolved.
+
+See
+[`provenance/CAPABILITY_GATE_003.md`](provenance/CAPABILITY_GATE_003.md).
+
 ## Current scientific status
 
-The project has now established open-source software baselines for both:
+The project has now established:
 
-- explicit higher-order single-reference coupled cluster; and
-- multireference / spin-orbit workflow development.
+- an open-source higher-order single-reference coupled-cluster capability;
+- a verified OpenMolcas multireference / spin-orbit software baseline;
+- molecule-level CASSCF, CASPT2, RASSI, and SOC scientific capability.
 
-The next development stage is molecule-level scientific validation of the
-multireference chain
+The next development stage is formal scientific-method specification and
+validation-matrix design.
 
-\[
-\mathrm{CASSCF/RASSCF}
-\rightarrow
-\mathrm{CASPT2}
-\rightarrow
-\mathrm{RASSI/SOC}.
-\]
+Important production decisions remain deliberately unresolved, including the
+single-reference versus multireference escalation logic, active-space policy,
+state averaging, CASPT2 variant and intruder-state handling, basis-set
+convergence, core-valence and relativistic corrections, SOC treatment for
+electron affinities, PEC correction strategies, nuclear motion, and
+uncertainty assignment.
 
-Important production choices remain deliberately unresolved, including active
-space selection, state averaging, intruder-state handling, single-reference
-versus multireference escalation, relativistic and spin-orbit correction
-strategies, basis-set convergence, and uncertainty assignment.
+No prediction calculations begin until those policies and their validation
+criteria have been defined and tested.
 
 ## Relationship to DiatomicEA v0.9
 
