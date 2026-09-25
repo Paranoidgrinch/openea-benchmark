@@ -1,0 +1,234 @@
+benchmark:
+  name: weekend_transfer_2026
+  purpose: >
+    First transferability test of the general OpenEA diatomic
+    electron-affinity workflow developed using FeH as a stress test.
+
+  rules:
+    experimental_values_used_for_state_selection: false
+    molecule_specific_rescue_rules: false
+    allow_unbound_result: true
+    final_unbound_label: UNBOUND
+
+systems:
+
+  OH:
+    atoms:
+      - O
+      - H
+
+    purpose: easy_positive_control
+
+    candidate_neutral_2S:
+      - 1
+      - 3
+
+    candidate_anion_2S:
+      - 0
+      - 2
+
+    initial_R_angstrom: 0.97
+
+    reference:
+      result: BOUND
+      ea_ev: 1.827669
+      uncertainty_ev: 0.000044
+
+    escalation_expectation:
+      crcc23: unlikely
+      scalar_relativistic: false
+      soc: small
+
+  CN:
+    atoms:
+      - C
+      - N
+
+    purpose: strong_ea_multiple_bond_control
+
+    candidate_neutral_2S:
+      - 1
+      - 3
+
+    candidate_anion_2S:
+      - 0
+      - 2
+
+    initial_R_angstrom: 1.17
+
+    reference:
+      result: BOUND
+      ea_ev: 3.8620
+      uncertainty_ev: 0.0050
+
+    escalation_expectation:
+      crcc23: possible
+      scalar_relativistic: false
+      soc: small
+
+  MgH:
+    atoms:
+      - Mg
+      - H
+
+    purpose: metal_hydride_transfer_control
+
+    candidate_neutral_2S:
+      - 1
+      - 3
+
+    candidate_anion_2S:
+      - 0
+      - 2
+
+    initial_R_angstrom: 1.73
+
+    reference:
+      result: BOUND
+      ea_ev: 0.90
+      uncertainty_ev: 0.05
+
+    escalation_expectation:
+      crcc23: unlikely
+      scalar_relativistic: test_optional
+      soc: small
+
+  AlO:
+    atoms:
+      - Al
+      - O
+
+    purpose: ams_relevant_metal_oxide
+
+    candidate_neutral_2S:
+      - 1
+      - 3
+      - 5
+
+    candidate_anion_2S:
+      - 0
+      - 2
+      - 4
+
+    initial_R_angstrom: 1.62
+
+    reference:
+      result: BOUND
+      ea_ev: 2.6110
+      uncertainty_ev: 0.0007
+
+    escalation_expectation:
+      crcc23: possible
+      scalar_relativistic: test
+      soc: assess
+
+  N2:
+    atoms:
+      - N
+      - N
+
+    purpose: unbound_negative_control
+
+    candidate_neutral_2S:
+      - 0
+      - 2
+
+    candidate_anion_2S:
+      - 1
+      - 3
+
+    initial_R_angstrom: 1.10
+
+    reference:
+      result: UNBOUND
+
+    escalation_expectation:
+      bound_state_cc: false
+      diffuse_stability_test: required
+      resonance_warning: true
+
+
+protocol:
+
+  stage_1_state_discovery:
+    method: PBE0
+    basis: def2-TZVPPD
+    multiple_initial_guesses: true
+    determinant_identity: true
+    electronic_manifolds: true
+
+  stage_2_pec_scout:
+    method: PBE0
+    basis: def2-TZVPPD
+
+    relative_grid_angstrom:
+      - -0.15
+      - -0.10
+      - -0.05
+      - 0.00
+      - 0.05
+      - 0.10
+      - 0.15
+
+    require_state_continuity: true
+
+  stage_3_high_level_local_pec:
+    reference: ROHF
+    methods:
+      - CCSD
+      - CCSD(T)
+
+    basis: def2-TZVPPD
+
+    relative_grid_angstrom:
+      - -0.05
+      - -0.025
+      - 0.00
+      - 0.025
+      - 0.05
+
+  stage_4_diagnostics:
+    evaluate:
+      - scf_spin_purity
+      - state_identity
+      - state_continuity
+      - ccsd_singles
+      - triples_correction_variation
+      - ccsd_to_ccsdt_Re_shift
+      - ccsd_to_ccsdt_frequency_shift
+      - quadratic_fit_residual
+
+  stage_5_escalation:
+    method: CR-CC(2,3)_D
+
+    trigger_on:
+      - unstable_perturbative_triples
+      - large_geometry_method_shift
+      - non_smooth_local_pec
+      - concerning_single_reference_diagnostics
+
+  stage_6_basis:
+    baseline:
+      - def2-TZVPPD
+      - def2-QZVPPD
+
+    diffuse_crosscheck_if_needed:
+      - aug-cc-pVTZ
+      - aug-cc-pVQZ
+
+  stage_7_corrections:
+    zpe: true
+    scalar_relativistic: conditional
+    spin_orbit: conditional
+
+  unbound_branch:
+    required_for:
+      - N2
+
+    checks:
+      - increasing_diffuse_basis
+      - anion_spatial_extent
+      - attachment_energy_convergence
+      - bound_vs_continuum_character
+
+    output_if_unbound: UNBOUND
