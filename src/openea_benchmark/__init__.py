@@ -68,7 +68,24 @@ from .minimum_scout import (
     scout_local_pec_minimum,
 )
 
+from .vibrational import (
+    HarmonicVibration,
+    PECPolynomialFit,
+    VibrationalAnalysisResult,
+    VibrationalAnalysisStatus,
+    VibrationalFitSettings,
+    analyze_local_pec_vibration,
+    diatomic_reduced_mass_amu,
+)
+
 __all__ = [
+    "HarmonicVibration",
+    "PECPolynomialFit",
+    "VibrationalAnalysisResult",
+    "VibrationalAnalysisStatus",
+    "VibrationalFitSettings",
+    "analyze_local_pec_vibration",
+    "diatomic_reduced_mass_amu",
     "MinimumCandidate",
     "MinimumScoutResult",
     "MinimumScoutStatus",
