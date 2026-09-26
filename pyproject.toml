@@ -12,7 +12,16 @@ license = "GPL-3.0-only"
 dependencies = [
     "numpy==2.5.3",
     "pyscf==2.14.0",
+    "PyYAML>=6.0.2,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
