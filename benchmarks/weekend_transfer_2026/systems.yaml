@@ -34,7 +34,7 @@ systems:
       ea_ev: 1.827669
       uncertainty_ev: 0.000044
 
-    escalation_expectation:
+    validation_expectation:
       crcc23: unlikely
       scalar_relativistic: false
       soc: small
@@ -61,7 +61,7 @@ systems:
       ea_ev: 3.8620
       uncertainty_ev: 0.0050
 
-    escalation_expectation:
+    validation_expectation:
       crcc23: possible
       scalar_relativistic: false
       soc: small
@@ -88,7 +88,7 @@ systems:
       ea_ev: 0.90
       uncertainty_ev: 0.05
 
-    escalation_expectation:
+    validation_expectation:
       crcc23: unlikely
       scalar_relativistic: test_optional
       soc: small
@@ -117,7 +117,7 @@ systems:
       ea_ev: 2.6110
       uncertainty_ev: 0.0007
 
-    escalation_expectation:
+    validation_expectation:
       crcc23: possible
       scalar_relativistic: test
       soc: assess
@@ -142,7 +142,7 @@ systems:
     reference:
       result: UNBOUND
 
-    escalation_expectation:
+    validation_expectation:
       bound_state_cc: false
       diffuse_stability_test: required
       resonance_warning: true
@@ -222,8 +222,7 @@ protocol:
     spin_orbit: conditional
 
   unbound_branch:
-    required_for:
-      - N2
+    trigger_from_computation_only: true
 
     checks:
       - increasing_diffuse_basis
