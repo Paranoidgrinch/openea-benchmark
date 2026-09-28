@@ -977,34 +977,14 @@ def run_sector_dft_scout(
         ],
     }
 
-    simple_root_tracking = (
+    use_root_fallback = (
         len(
-            covered_geometries
-        )
-        == expected_geometry_count
-        and len(
-            representative_roots
-        )
-        == expected_geometry_count
-        and len(
             manifold_geometries
         )
-        == expected_geometry_count
-        and len(
-            all_manifolds
-        )
-        == expected_geometry_count
-        and all(
-            manifold.alpha_active_rank
-            == 0
-            and manifold.beta_active_rank
-            == 0
-            for manifold
-            in all_manifolds
-        )
+        != expected_geometry_count
     )
 
-    if simple_root_tracking:
+    if use_root_fallback:
         result[
             "tracking_mode"
         ] = "root"

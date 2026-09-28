@@ -50,12 +50,13 @@ class ManifoldBranchGraph:
     """
     Layered continuity graph for ElectronicManifoldPoint objects.
 
-    CONTINUOUS manifold comparisons define graph connectivity.
+    CONTINUOUS comparisons directly connect neighboring manifolds.
 
-    GAUGE_UNRESOLVED comparisons are retained explicitly as unresolved
-    boundaries and are never silently promoted to continuity.
+    GAUGE_UNRESOLVED comparisons may only be promoted by the explicit
+    short unique-topology bridge policy. Raw comparisons remain stored,
+    so bridge provenance never overwrites the original diagnostic.
 
-    DISCONTINUOUS comparisons separate electronic branches.
+    DISCONTINUOUS comparisons are never bridged.
     """
 
     geometry_values: tuple[
@@ -80,6 +81,14 @@ class ManifoldBranchGraph:
     ]
 
     continuous_edges: tuple[
+        tuple[
+            str,
+            str,
+        ],
+        ...,
+    ]
+
+    bridged_edges: tuple[
         tuple[
             str,
             str,
@@ -397,10 +406,21 @@ def build_manifold_branch_graph(
     thresholds: ManifoldThresholds,
 ) -> ManifoldBranchGraph:
     """
-    Construct a conservative layered graph of electronic manifolds.
+    Construct a conservative layered electronic-manifold graph.
 
-    No gauge-unresolved comparison is promoted automatically. Explicit
-    bridge logic remains a separate workflow layer.
+    Raw CONTINUOUS and DISCONTINUOUS decisions come directly from
+    compare_electronic_manifolds().
+
+    A contiguous run of GAUGE_UNRESOLVED edges is bridged only when:
+
+    1. every geometry layer participating in that run contains exactly
+       one manifold;
+    2. no DISCONTINUOUS edge lies inside the run;
+    3. the full geometry span of the unresolved run does not exceed
+       thresholds.bridge_max_span_angstrom.
+
+    This implements a short unique-topology bridge without changing the
+    original manifold-comparison result.
     """
     by_id = (
         _validate_manifolds(
@@ -415,19 +435,28 @@ def build_manifold_branch_graph(
     comparisons = []
 
     continuous_edges = []
-    gauge_edges = []
+    raw_gauge_edges = []
     discontinuous_edges = []
 
-    for (
-        _left_r,
-        left_layer,
-    ), (
-        _right_r,
-        right_layer,
-    ) in zip(
-        layers,
-        layers[1:],
+    adjacent_relations = []
+
+    for layer_index, (
+        (
+            left_r,
+            left_layer,
+        ),
+        (
+            right_r,
+            right_layer,
+        ),
+    ) in enumerate(
+        zip(
+            layers,
+            layers[1:],
+        )
     ):
+        layer_comparisons = []
+
         for left in left_layer:
             for right in right_layer:
                 comparison = (
@@ -441,6 +470,10 @@ def build_manifold_branch_graph(
                 )
 
                 comparisons.append(
+                    comparison
+                )
+
+                layer_comparisons.append(
                     comparison
                 )
 
@@ -461,7 +494,7 @@ def build_manifold_branch_graph(
                     comparison.relation
                     == ManifoldContinuityRelation.GAUGE_UNRESOLVED
                 ):
-                    gauge_edges.append(
+                    raw_gauge_edges.append(
                         edge
                     )
 
@@ -479,6 +512,181 @@ def build_manifold_branch_graph(
                         f"{comparison.relation}"
                     )
 
+        adjacent_relations.append(
+            {
+                "layer_index": (
+                    layer_index
+                ),
+                "left_r": (
+                    left_r
+                ),
+                "right_r": (
+                    right_r
+                ),
+                "left_layer": (
+                    left_layer
+                ),
+                "right_layer": (
+                    right_layer
+                ),
+                "comparisons": tuple(
+                    layer_comparisons
+                ),
+            }
+        )
+
+    #
+    # Identify gauge-unresolved edges that are topologically unique.
+    #
+    # A candidate bridge edge requires exactly one manifold in each
+    # neighboring geometry layer and exactly one raw comparison.
+    #
+    bridge_candidate_indices = []
+
+    for item in adjacent_relations:
+        left_layer = item[
+            "left_layer"
+        ]
+
+        right_layer = item[
+            "right_layer"
+        ]
+
+        layer_comparisons = item[
+            "comparisons"
+        ]
+
+        if (
+            len(
+                left_layer
+            )
+            != 1
+            or len(
+                right_layer
+            )
+            != 1
+            or len(
+                layer_comparisons
+            )
+            != 1
+        ):
+            continue
+
+        comparison = (
+            layer_comparisons[0]
+        )
+
+        if (
+            comparison.relation
+            == ManifoldContinuityRelation.GAUGE_UNRESOLVED
+        ):
+            bridge_candidate_indices.append(
+                item[
+                    "layer_index"
+                ]
+            )
+
+    #
+    # Group consecutive candidate edges into unresolved runs.
+    #
+    candidate_runs = []
+
+    if bridge_candidate_indices:
+        current = [
+            bridge_candidate_indices[0]
+        ]
+
+        for index in (
+            bridge_candidate_indices[1:]
+        ):
+            if (
+                index
+                == current[-1] + 1
+            ):
+                current.append(
+                    index
+                )
+
+            else:
+                candidate_runs.append(
+                    tuple(
+                        current
+                    )
+                )
+
+                current = [
+                    index
+                ]
+
+        candidate_runs.append(
+            tuple(
+                current
+            )
+        )
+
+    bridged_edges = []
+
+    tolerance = 1.0e-12
+
+    for run in candidate_runs:
+        first_index = run[0]
+        last_index = run[-1]
+
+        span = (
+            layers[
+                last_index + 1
+            ][0]
+            - layers[
+                first_index
+            ][0]
+        )
+
+        if (
+            span
+            > (
+                thresholds
+                .bridge_max_span_angstrom
+                + tolerance
+            )
+        ):
+            continue
+
+        for layer_index in run:
+            item = adjacent_relations[
+                layer_index
+            ]
+
+            comparison = (
+                item[
+                    "comparisons"
+                ][0]
+            )
+
+            bridged_edges.append(
+                (
+                    comparison
+                    .left_manifold_id,
+                    comparison
+                    .right_manifold_id,
+                )
+            )
+
+    bridged_edge_set = set(
+        bridged_edges
+    )
+
+    gauge_edges = [
+        edge
+        for edge
+        in raw_gauge_edges
+        if edge
+        not in bridged_edge_set
+    ]
+
+    #
+    # Graph connectivity uses direct-continuous plus explicitly bridged
+    # edges. Remaining gauge-unresolved edges are not graph edges.
+    #
     adjacency = {
         manifold_id: set()
         for manifold_id
@@ -486,7 +694,12 @@ def build_manifold_branch_graph(
     }
 
     for left_id, right_id in (
-        continuous_edges
+        list(
+            continuous_edges
+        )
+        + list(
+            bridged_edges
+        )
     ):
         adjacency[
             left_id
@@ -650,6 +863,9 @@ def build_manifold_branch_graph(
         ),
         continuous_edges=tuple(
             continuous_edges
+        ),
+        bridged_edges=tuple(
+            bridged_edges
         ),
         gauge_unresolved_edges=tuple(
             gauge_edges
