@@ -29,6 +29,12 @@ from .electronic_manifold import (
 from .local_pec import (
     construct_local_pecs,
 )
+from .manifold_pec import (
+    build_manifold_branch_graph,
+    construct_manifold_pecs,
+    scout_manifold_pec_minimum,
+)
+
 from .minimum_scout import (
     MinimumScoutThresholds,
     scout_local_pec_minimum,
@@ -736,6 +742,7 @@ def run_sector_dft_scout(
 
     representative_roots = []
     geometry_records = []
+    all_manifolds = []
 
     for index, r_angstrom in enumerate(
         geometries,
@@ -861,6 +868,9 @@ def run_sector_dft_scout(
                     ),
                 )
             )
+            all_manifolds.extend(
+                manifold_result.manifolds
+            )
 
             geometry_record[
                 "manifold_construction"
@@ -911,6 +921,16 @@ def run_sector_dft_scout(
         }
     )
 
+    manifold_geometries = sorted(
+        {
+            float(
+                manifold.r_angstrom
+            )
+            for manifold
+            in all_manifolds
+        }
+    )
+
     result = {
         "label": label,
         "charge": charge,
@@ -935,6 +955,12 @@ def run_sector_dft_scout(
         "covered_geometries_angstrom": (
             covered_geometries
         ),
+        "manifold_geometry_count": len(
+            manifold_geometries
+        ),
+        "manifold_geometries_angstrom": (
+            manifold_geometries
+        ),
         "representative_roots": [
             root_summary(
                 root
@@ -942,72 +968,209 @@ def run_sector_dft_scout(
             for root
             in representative_roots
         ],
+        "manifolds": [
+            _jsonable(
+                manifold
+            )
+            for manifold
+            in all_manifolds
+        ],
     }
 
+    simple_root_tracking = (
+        len(
+            covered_geometries
+        )
+        == expected_geometry_count
+        and len(
+            representative_roots
+        )
+        == expected_geometry_count
+        and len(
+            manifold_geometries
+        )
+        == expected_geometry_count
+        and len(
+            all_manifolds
+        )
+        == expected_geometry_count
+        and all(
+            manifold.alpha_active_rank
+            == 0
+            and manifold.beta_active_rank
+            == 0
+            for manifold
+            in all_manifolds
+        )
+    )
+
+    if simple_root_tracking:
+        result[
+            "tracking_mode"
+        ] = "root"
+
+        try:
+            graph = build_branch_graph(
+                tuple(
+                    representative_roots
+                ),
+                thresholds=(
+                    WEEKEND_BRANCH_THRESHOLDS
+                ),
+            )
+
+        except Exception as exc:
+            result[
+                "sector_status"
+            ] = "branch_graph_failed"
+
+            result[
+                "branch_graph_error"
+            ] = (
+                f"{type(exc).__name__}: "
+                f"{exc}"
+            )
+
+            return result
+
+        result[
+            "branch_graph"
+        ] = _jsonable(
+            graph
+        )
+
+        result[
+            "branch_graph_unambiguous"
+        ] = bool(
+            graph.is_fully_unambiguous
+        )
+
+        try:
+            pec_result = (
+                construct_local_pecs(
+                    tuple(
+                        representative_roots
+                    ),
+                    graph,
+                )
+            )
+
+        except Exception as exc:
+            result[
+                "sector_status"
+            ] = "local_pec_failed"
+
+            result[
+                "local_pec_error"
+            ] = (
+                f"{type(exc).__name__}: "
+                f"{exc}"
+            )
+
+            return result
+
+        result[
+            "local_pec_construction"
+        ] = _jsonable(
+            pec_result
+        )
+
+        scouts = []
+
+        for pec in (
+            pec_result.pecs
+        ):
+            scout = (
+                scout_local_pec_minimum(
+                    pec,
+                    thresholds=(
+                        WEEKEND_MINIMUM_THRESHOLDS
+                    ),
+                )
+            )
+
+            scouts.append(
+                {
+                    "component_id": (
+                        pec.component_id
+                    ),
+                    "pec": (
+                        _jsonable(
+                            pec
+                        )
+                    ),
+                    "minimum_scout": (
+                        _jsonable(
+                            scout
+                        )
+                    ),
+                }
+            )
+
+        result[
+            "pec_scouts"
+        ] = scouts
+
+        if not pec_result.pecs:
+            result[
+                "sector_status"
+            ] = (
+                "no_resolved_local_pec"
+            )
+
+        elif (
+            not graph
+            .is_fully_unambiguous
+        ):
+            result[
+                "sector_status"
+            ] = (
+                "pec_present_but_graph_ambiguous"
+            )
+
+        else:
+            result[
+                "sector_status"
+            ] = "dft_scout_complete"
+
+        return result
+
+    result[
+        "tracking_mode"
+    ] = "manifold"
+
     if len(
-        covered_geometries
+        manifold_geometries
     ) < 2:
         result[
             "sector_status"
         ] = (
-            "insufficient_geometry_coverage"
+            "insufficient_manifold_geometry_coverage"
         )
 
         return result
 
     try:
-        graph = build_branch_graph(
-            tuple(
-                representative_roots
-            ),
-            thresholds=(
-                WEEKEND_BRANCH_THRESHOLDS
-            ),
-        )
-
-    except Exception as exc:
-        result[
-            "sector_status"
-        ] = "branch_graph_failed"
-
-        result[
-            "branch_graph_error"
-        ] = (
-            f"{type(exc).__name__}: "
-            f"{exc}"
-        )
-
-        return result
-
-    result[
-        "branch_graph"
-    ] = _jsonable(
-        graph
-    )
-
-    result[
-        "branch_graph_unambiguous"
-    ] = bool(
-        graph.is_fully_unambiguous
-    )
-
-    try:
-        pec_result = (
-            construct_local_pecs(
+        manifold_graph = (
+            build_manifold_branch_graph(
                 tuple(
-                    representative_roots
+                    all_manifolds
                 ),
-                graph,
+                thresholds=(
+                    WEEKEND_MANIFOLD_THRESHOLDS
+                ),
             )
         )
 
     except Exception as exc:
         result[
             "sector_status"
-        ] = "local_pec_failed"
+        ] = (
+            "manifold_branch_graph_failed"
+        )
 
         result[
-            "local_pec_error"
+            "manifold_branch_graph_error"
         ] = (
             f"{type(exc).__name__}: "
             f"{exc}"
@@ -1016,18 +1179,57 @@ def run_sector_dft_scout(
         return result
 
     result[
-        "local_pec_construction"
+        "manifold_branch_graph"
     ] = _jsonable(
-        pec_result
+        manifold_graph
     )
 
-    scouts = []
+    result[
+        "manifold_branch_graph_unambiguous"
+    ] = bool(
+        manifold_graph
+        .is_fully_unambiguous
+    )
+
+    try:
+        manifold_pec_result = (
+            construct_manifold_pecs(
+                tuple(
+                    all_manifolds
+                ),
+                manifold_graph,
+            )
+        )
+
+    except Exception as exc:
+        result[
+            "sector_status"
+        ] = (
+            "manifold_pec_failed"
+        )
+
+        result[
+            "manifold_pec_error"
+        ] = (
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        )
+
+        return result
+
+    result[
+        "manifold_pec_construction"
+    ] = _jsonable(
+        manifold_pec_result
+    )
+
+    manifold_scouts = []
 
     for pec in (
-        pec_result.pecs
+        manifold_pec_result.pecs
     ):
         scout = (
-            scout_local_pec_minimum(
+            scout_manifold_pec_minimum(
                 pec,
                 thresholds=(
                     WEEKEND_MINIMUM_THRESHOLDS
@@ -1035,7 +1237,7 @@ def run_sector_dft_scout(
             )
         )
 
-        scouts.append(
+        manifold_scouts.append(
             {
                 "component_id": (
                     pec.component_id
@@ -1054,18 +1256,27 @@ def run_sector_dft_scout(
         )
 
     result[
-        "pec_scouts"
-    ] = scouts
+        "manifold_pec_scouts"
+    ] = manifold_scouts
 
-    if not pec_result.pecs:
+    if not (
+        manifold_pec_result.pecs
+    ):
         result[
             "sector_status"
-        ] = "no_resolved_local_pec"
+        ] = (
+            "no_resolved_manifold_pec"
+        )
 
-    elif not graph.is_fully_unambiguous:
+    elif (
+        not manifold_graph
+        .is_fully_unambiguous
+    ):
         result[
             "sector_status"
-        ] = "pec_present_but_graph_ambiguous"
+        ] = (
+            "manifold_pec_present_but_graph_ambiguous"
+        )
 
     else:
         result[
