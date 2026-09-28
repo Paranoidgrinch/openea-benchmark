@@ -1296,16 +1296,32 @@ def _active_overlap(
     right_mol,
     right_ao,
 ):
-    left_rank = (
-        left_ao.shape[
-            1
-        ]
+    """
+    Compare one spin-channel active manifold across two geometries.
+
+    INACTIVE
+        Both geometries have rank zero in this spin channel. There is no
+        active subspace to compare, but this is not evidence against
+        continuity in another resolved spin channel.
+
+    UNRESOLVED
+        The active subspace exists at only one of the two geometries.
+        Continuity cannot be decided from this channel alone.
+
+    RANK_MISMATCH
+        Both geometries have non-zero active spaces, but their dimensions
+        differ.
+
+    RESOLVED
+        Equal non-zero active ranks; continuity is quantified through the
+        minimum singular value of the cross-geometry active-space overlap.
+    """
+    left_rank = int(
+        left_ao.shape[1]
     )
 
-    right_rank = (
-        right_ao.shape[
-            1
-        ]
+    right_rank = int(
+        right_ao.shape[1]
     )
 
     if (
@@ -1313,7 +1329,7 @@ def _active_overlap(
         and right_rank == 0
     ):
         return (
-            "ABSENT",
+            "INACTIVE",
             None,
         )
 
