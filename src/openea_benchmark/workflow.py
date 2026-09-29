@@ -13,6 +13,12 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 import yaml
 
+from .adaptive_grid import (
+    AdaptiveGridPolicy,
+    GridDecisionAction,
+    decide_adaptive_grid_extension,
+)
+
 from .branch_continuity import (
     BranchThresholds,
 )
@@ -717,195 +723,228 @@ def _representatives_from_dedup(
     )
 
 
-def run_sector_dft_scout(
+def _adaptive_grid_policy_from_protocol(
+    protocol: dict,
+) -> AdaptiveGridPolicy | None:
+    config = (
+        protocol[
+            "stage_2_pec_scout"
+        ].get(
+            "adaptive_extension"
+        )
+    )
+
+    if config is None:
+        return None
+
+    if not bool(
+        config.get(
+            "enabled",
+            False,
+        )
+    ):
+        return None
+
+    return AdaptiveGridPolicy(
+        max_extra_points_per_side=int(
+            config[
+                "max_extra_points_per_side"
+            ]
+        ),
+        max_extra_span_angstrom=float(
+            config[
+                "max_extra_span_angstrom"
+            ]
+        ),
+    )
+
+
+def _run_dft_scout_geometry(
     *,
     label: str,
     atom_a: str,
     atom_b: str,
     charge: int,
     spin_2s: int,
-    geometries: Sequence[float],
+    r_angstrom: float,
     method: DFTMethodSpec,
     guesses: Sequence[str],
     settings: SCFSettings,
-    output_dir: Path,
-) -> dict:
-    checkpoint_dir = (
-        output_dir
-        / "checkpoints"
-    )
-
-    checkpoint_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    representative_roots = []
-    geometry_records = []
-    all_manifolds = []
-
-    for index, r_angstrom in enumerate(
-        geometries,
-        start=1,
-    ):
-        print()
-        print(
-            f"[{label}] q={charge:+d} "
-            f"2S={spin_2s} "
-            f"R={r_angstrom:.6f} A "
-            f"({index}/{len(geometries)})"
-        )
-
-        panel = run_guess_panel(
-            DiatomicSpec(
-                label=label,
-                atom_a=atom_a,
-                atom_b=atom_b,
-                r_angstrom=(
-                    r_angstrom
-                ),
-                charge=charge,
-                spin_2s=spin_2s,
-            ),
-            method,
-            guesses=guesses,
-            settings=settings,
-            checkpoint_dir=(
-                checkpoint_dir
-            ),
-        )
-
-        canonical = tuple(
-            root
-            for root in panel
-            if (
-                root.status
-                == SCFRunStatus.CANONICALIZED
-            )
-        )
-
-        geometry_record = {
-            "r_angstrom": (
+    checkpoint_dir: Path,
+):
+    panel = run_guess_panel(
+        DiatomicSpec(
+            label=label,
+            atom_a=atom_a,
+            atom_b=atom_b,
+            r_angstrom=(
                 r_angstrom
             ),
-            "all_attempts": [
-                root_summary(
-                    root
-                )
-                for root in panel
-            ],
-            "n_attempts": len(
-                panel
-            ),
-            "n_canonical": len(
-                canonical
-            ),
-        }
+            charge=charge,
+            spin_2s=spin_2s,
+        ),
+        method,
+        guesses=guesses,
+        settings=settings,
+        checkpoint_dir=(
+            checkpoint_dir
+        ),
+    )
 
-        if not canonical:
-            geometry_record[
-                "status"
-            ] = "no_canonical_root"
+    canonical = tuple(
+        root
+        for root in panel
+        if (
+            root.status
+            == SCFRunStatus.CANONICALIZED
+        )
+    )
 
-            geometry_records.append(
-                geometry_record
+    geometry_record = {
+        "r_angstrom": (
+            r_angstrom
+        ),
+        "all_attempts": [
+            root_summary(
+                root
             )
+            for root in panel
+        ],
+        "n_attempts": len(
+            panel
+        ),
+        "n_canonical": len(
+            canonical
+        ),
+    }
 
-            _write_json(
-                output_dir
-                / "progress.json",
-                {
-                    "geometries": (
-                        geometry_records
-                    )
-                },
-            )
+    if not canonical:
+        geometry_record[
+            "status"
+        ] = "no_canonical_root"
 
-            continue
+        return (
+            geometry_record,
+            (),
+            (),
+        )
 
-        dedup = (
-            deduplicate_checkpoint_roots(
-                canonical,
-                thresholds=(
+    dedup = (
+        deduplicate_checkpoint_roots(
+            canonical,
+            thresholds=(
+                WEEKEND_IDENTITY_THRESHOLDS
+            ),
+        )
+    )
+
+    representatives = (
+        _representatives_from_dedup(
+            canonical,
+            dedup,
+        )
+    )
+
+    geometry_record[
+        "deduplication"
+    ] = _jsonable(
+        dedup
+    )
+
+    geometry_record[
+        "representative_root_ids"
+    ] = [
+        root.root_id
+        for root
+        in representatives
+    ]
+
+    manifolds = ()
+
+    try:
+        manifold_result = (
+            construct_electronic_manifolds(
+                representatives,
+                identity_thresholds=(
                     WEEKEND_IDENTITY_THRESHOLDS
+                ),
+                manifold_thresholds=(
+                    WEEKEND_MANIFOLD_THRESHOLDS
                 ),
             )
         )
 
-        representatives = (
-            _representatives_from_dedup(
-                canonical,
-                dedup,
-            )
-        )
-
-        representative_roots.extend(
-            representatives
+        manifolds = tuple(
+            manifold_result.manifolds
         )
 
         geometry_record[
-            "deduplication"
+            "manifold_construction"
         ] = _jsonable(
-            dedup
+            manifold_result
         )
 
+    except Exception as exc:
         geometry_record[
-            "representative_root_ids"
-        ] = [
-            root.root_id
-            for root in representatives
-        ]
-
-        try:
-            manifold_result = (
-                construct_electronic_manifolds(
-                    representatives,
-                    identity_thresholds=(
-                        WEEKEND_IDENTITY_THRESHOLDS
-                    ),
-                    manifold_thresholds=(
-                        WEEKEND_MANIFOLD_THRESHOLDS
-                    ),
-                )
-            )
-            all_manifolds.extend(
-                manifold_result.manifolds
-            )
-
-            geometry_record[
-                "manifold_construction"
-            ] = _jsonable(
-                manifold_result
-            )
-
-        except Exception as exc:
-            geometry_record[
-                "manifold_construction_error"
-            ] = (
-                f"{type(exc).__name__}: "
-                f"{exc}"
-            )
-
-        geometry_record[
-            "status"
-        ] = "processed"
-
-        geometry_records.append(
-            geometry_record
+            "manifold_construction_error"
+        ] = (
+            f"{type(exc).__name__}: "
+            f"{exc}"
         )
 
-        #
-        # Progress is written after every geometry.
-        #
-        _write_json(
-            output_dir
-            / "progress.json",
-            {
-                "geometries": (
-                    geometry_records
-                )
-            },
+    geometry_record[
+        "status"
+    ] = "processed"
+
+    return (
+        geometry_record,
+        tuple(
+            representatives
+        ),
+        manifolds,
+    )
+
+
+def _analyze_sector_dft_scout_collected(
+    *,
+    label: str,
+    charge: int,
+    spin_2s: int,
+    method: DFTMethodSpec,
+    requested_geometries: Sequence[
+        float
+    ],
+    geometry_records,
+    representative_roots,
+    all_manifolds,
+) -> dict:
+    geometries = tuple(
+        float(
+            value
         )
+        for value
+        in requested_geometries
+    )
+
+    geometry_records = tuple(
+        sorted(
+            geometry_records,
+            key=lambda record:
+                float(
+                    record[
+                        "r_angstrom"
+                    ]
+                ),
+        )
+    )
+
+    representative_roots = tuple(
+        representative_roots
+    )
+
+    all_manifolds = tuple(
+        all_manifolds
+    )
 
     expected_geometry_count = len(
         geometries
@@ -1266,6 +1305,404 @@ def run_sector_dft_scout(
     return result
 
 
+def run_sector_dft_scout(
+    *,
+    label: str,
+    atom_a: str,
+    atom_b: str,
+    charge: int,
+    spin_2s: int,
+    geometries: Sequence[float],
+    method: DFTMethodSpec,
+    guesses: Sequence[str],
+    settings: SCFSettings,
+    output_dir: Path,
+    adaptive_policy: AdaptiveGridPolicy | None = None,
+) -> dict:
+    checkpoint_dir = (
+        output_dir
+        / "checkpoints"
+    )
+
+    checkpoint_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    initial_geometries = tuple(
+        float(
+            value
+        )
+        for value
+        in geometries
+    )
+
+    if len(
+        initial_geometries
+    ) < 2:
+        raise ValueError(
+            "DFT scout requires at least two "
+            "initial geometries"
+        )
+
+    if tuple(
+        sorted(
+            initial_geometries
+        )
+    ) != initial_geometries:
+        raise ValueError(
+            "initial geometries must be sorted"
+        )
+
+    if len(
+        set(
+            initial_geometries
+        )
+    ) != len(
+        initial_geometries
+    ):
+        raise ValueError(
+            "initial geometries contain duplicates"
+        )
+
+    current_geometries = list(
+        initial_geometries
+    )
+
+    geometry_records_by_r = {}
+
+    representative_roots = []
+    all_manifolds = []
+
+    decision_history = []
+
+    n_extension_steps = 0
+
+    def write_progress():
+        _write_json(
+            output_dir
+            / "progress.json",
+            {
+                "geometries": [
+                    geometry_records_by_r[
+                        r_angstrom
+                    ]
+                    for r_angstrom
+                    in sorted(
+                        geometry_records_by_r
+                    )
+                ],
+                "adaptive_grid": {
+                    "enabled": (
+                        adaptive_policy
+                        is not None
+                    ),
+                    "initial_grid_angstrom": (
+                        initial_geometries
+                    ),
+                    "current_requested_grid_angstrom": (
+                        tuple(
+                            current_geometries
+                        )
+                    ),
+                    "computed_geometries_angstrom": (
+                        tuple(
+                            sorted(
+                                geometry_records_by_r
+                            )
+                        )
+                    ),
+                    "n_extension_steps": (
+                        n_extension_steps
+                    ),
+                    "decision_history": (
+                        decision_history
+                    ),
+                },
+            },
+        )
+
+    def calculate_geometry(
+        r_angstrom: float,
+        *,
+        phase: str,
+        index: int,
+        total: int,
+    ) -> None:
+        r_angstrom = float(
+            r_angstrom
+        )
+
+        if r_angstrom in (
+            geometry_records_by_r
+        ):
+            raise RuntimeError(
+                "attempted duplicate DFT geometry: "
+                f"{r_angstrom:.12f} A"
+            )
+
+        print()
+        print(
+            f"[{label}] q={charge:+d} "
+            f"2S={spin_2s} "
+            f"R={r_angstrom:.6f} A "
+            f"({phase} {index}/{total})"
+        )
+
+        (
+            geometry_record,
+            representatives,
+            manifolds,
+        ) = _run_dft_scout_geometry(
+            label=label,
+            atom_a=atom_a,
+            atom_b=atom_b,
+            charge=charge,
+            spin_2s=spin_2s,
+            r_angstrom=(
+                r_angstrom
+            ),
+            method=method,
+            guesses=guesses,
+            settings=settings,
+            checkpoint_dir=(
+                checkpoint_dir
+            ),
+        )
+
+        geometry_records_by_r[
+            r_angstrom
+        ] = geometry_record
+
+        representative_roots.extend(
+            representatives
+        )
+
+        all_manifolds.extend(
+            manifolds
+        )
+
+        write_progress()
+
+    #
+    # Initial fixed scout grid.
+    #
+    for index, r_angstrom in enumerate(
+        initial_geometries,
+        start=1,
+    ):
+        calculate_geometry(
+            r_angstrom,
+            phase="initial",
+            index=index,
+            total=len(
+                initial_geometries
+            ),
+        )
+
+    def analyze_current():
+        return (
+            _analyze_sector_dft_scout_collected(
+                label=label,
+                charge=charge,
+                spin_2s=spin_2s,
+                method=method,
+                requested_geometries=tuple(
+                    current_geometries
+                ),
+                geometry_records=tuple(
+                    geometry_records_by_r.values()
+                ),
+                representative_roots=tuple(
+                    representative_roots
+                ),
+                all_manifolds=tuple(
+                    all_manifolds
+                ),
+            )
+        )
+
+    result = analyze_current()
+
+    if adaptive_policy is None:
+        result[
+            "adaptive_grid"
+        ] = {
+            "enabled": False,
+            "policy": None,
+            "initial_grid_angstrom": (
+                initial_geometries
+            ),
+            "final_grid_angstrom": tuple(
+                current_geometries
+            ),
+            "n_extension_steps": 0,
+            "n_added_geometries": 0,
+            "decision_history": (),
+            "stop_reason": (
+                "ADAPTIVE_DISABLED"
+            ),
+        }
+
+        return result
+
+    #
+    # Hard guard is deliberately larger than the policy can ever use.
+    # It protects against a programming error in the decision loop.
+    #
+    loop_guard = (
+        2
+        * adaptive_policy
+        .max_extra_points_per_side
+        + 4
+    )
+
+    final_stop_reason = None
+
+    for _iteration in range(
+        loop_guard
+    ):
+        decision = (
+            decide_adaptive_grid_extension(
+                sector_result=result,
+                current_geometries=tuple(
+                    current_geometries
+                ),
+                initial_geometries=(
+                    initial_geometries
+                ),
+                policy=(
+                    adaptive_policy
+                ),
+            )
+        )
+
+        decision_history.append(
+            _jsonable(
+                decision
+            )
+        )
+
+        if (
+            decision.action
+            == GridDecisionAction.STOP
+        ):
+            if (
+                decision.stop_reason
+                is None
+            ):
+                raise RuntimeError(
+                    "adaptive STOP decision "
+                    "has no stop reason"
+                )
+
+            final_stop_reason = (
+                decision
+                .stop_reason
+                .value
+            )
+
+            break
+
+        new_geometries = tuple(
+            float(
+                value
+            )
+            for value
+            in decision
+            .new_geometries_angstrom
+        )
+
+        if not new_geometries:
+            raise RuntimeError(
+                "adaptive EXTEND decision "
+                "contains no geometries"
+            )
+
+        n_extension_steps += 1
+
+        for index, r_angstrom in enumerate(
+            new_geometries,
+            start=1,
+        ):
+            if r_angstrom in (
+                geometry_records_by_r
+            ):
+                raise RuntimeError(
+                    "adaptive policy requested an "
+                    "already-computed geometry: "
+                    f"{r_angstrom:.12f} A"
+                )
+
+            current_geometries.append(
+                r_angstrom
+            )
+
+            current_geometries.sort()
+
+            calculate_geometry(
+                r_angstrom,
+                phase=(
+                    "adaptive "
+                    f"step {n_extension_steps}"
+                ),
+                index=index,
+                total=len(
+                    new_geometries
+                ),
+            )
+
+        result = analyze_current()
+
+    else:
+        raise RuntimeError(
+            "adaptive grid loop guard reached "
+            "before the policy produced STOP"
+        )
+
+    if final_stop_reason is None:
+        raise RuntimeError(
+            "adaptive grid terminated without "
+            "a stop reason"
+        )
+
+    result[
+        "adaptive_grid"
+    ] = {
+        "enabled": True,
+        "policy": _jsonable(
+            adaptive_policy
+        ),
+        "initial_grid_angstrom": (
+            initial_geometries
+        ),
+        "final_grid_angstrom": tuple(
+            current_geometries
+        ),
+        "n_extension_steps": (
+            n_extension_steps
+        ),
+        "n_added_geometries": (
+            len(
+                current_geometries
+            )
+            - len(
+                initial_geometries
+            )
+        ),
+        "decision_history": tuple(
+            decision_history
+        ),
+        "stop_reason": (
+            final_stop_reason
+        ),
+    }
+
+    write_progress()
+
+    return result
+
+
 def _sector_directory_name(
     charge: int,
     spin_2s: int,
@@ -1315,6 +1752,12 @@ def run_system_dft_scout(
         manifest[
             "protocol"
         ]
+    )
+
+    adaptive_policy = (
+        _adaptive_grid_policy_from_protocol(
+            protocol
+        )
     )
 
     method = DFTMethodSpec(
@@ -1407,6 +1850,7 @@ def run_system_dft_scout(
                     guesses=guesses,
                     settings=settings,
                     output_dir=sector_dir,
+                    adaptive_policy=adaptive_policy,
                 )
             )
 

@@ -171,6 +171,10 @@ protocol:
       - 0.15
 
     require_state_continuity: true
+    adaptive_extension:
+      enabled: true
+      max_extra_points_per_side: 4
+      max_extra_span_angstrom: 0.20
 
   stage_3_high_level_local_pec:
     reference: ROHF
