@@ -411,16 +411,17 @@ def build_manifold_branch_graph(
     Raw CONTINUOUS and DISCONTINUOUS decisions come directly from
     compare_electronic_manifolds().
 
-    A contiguous run of GAUGE_UNRESOLVED edges is bridged only when:
+    A GAUGE_UNRESOLVED edge is bridged only when:
 
-    1. every geometry layer participating in that run contains exactly
-       one manifold;
-    2. no DISCONTINUOUS edge lies inside the run;
-    3. the full geometry span of the unresolved run does not exceed
+    1. both adjacent geometry layers contain exactly one manifold;
+    2. the comparison itself is GAUGE_UNRESOLVED rather than
+       DISCONTINUOUS;
+    3. the single adjacent-geometry gap does not exceed
        thresholds.bridge_max_span_angstrom.
 
-    This implements a short unique-topology bridge without changing the
-    original manifold-comparison result.
+    Bridge eligibility is deliberately local. A long PEC may therefore
+    contain many individually safe short bridges without a later geometry
+    retroactively invalidating earlier continuity.
     """
     by_id = (
         _validate_manifolds(
@@ -587,58 +588,32 @@ def build_manifold_branch_graph(
             )
 
     #
-    # Group consecutive candidate edges into unresolved runs.
+    # Bridge decisions are local to each adjacent geometry pair.
     #
-    candidate_runs = []
-
-    if bridge_candidate_indices:
-        current = [
-            bridge_candidate_indices[0]
-        ]
-
-        for index in (
-            bridge_candidate_indices[1:]
-        ):
-            if (
-                index
-                == current[-1] + 1
-            ):
-                current.append(
-                    index
-                )
-
-            else:
-                candidate_runs.append(
-                    tuple(
-                        current
-                    )
-                )
-
-                current = [
-                    index
-                ]
-
-        candidate_runs.append(
-            tuple(
-                current
-            )
-        )
-
+    # bridge_max_span_angstrom limits the size of ONE unresolved
+    # geometry gap. It must not limit the total length of a PEC made
+    # from many individually safe local bridges; otherwise adding a
+    # new geometry can retroactively invalidate already-established
+    # continuity.
+    #
     bridged_edges = []
 
     tolerance = 1.0e-12
 
-    for run in candidate_runs:
-        first_index = run[0]
-        last_index = run[-1]
+    for layer_index in (
+        bridge_candidate_indices
+    ):
+        item = adjacent_relations[
+            layer_index
+        ]
 
         span = (
-            layers[
-                last_index + 1
-            ][0]
-            - layers[
-                first_index
-            ][0]
+            item[
+                "right_r"
+            ]
+            - item[
+                "left_r"
+            ]
         )
 
         if (
@@ -651,25 +626,20 @@ def build_manifold_branch_graph(
         ):
             continue
 
-        for layer_index in run:
-            item = adjacent_relations[
-                layer_index
-            ]
+        comparison = (
+            item[
+                "comparisons"
+            ][0]
+        )
 
-            comparison = (
-                item[
-                    "comparisons"
-                ][0]
+        bridged_edges.append(
+            (
+                comparison
+                .left_manifold_id,
+                comparison
+                .right_manifold_id,
             )
-
-            bridged_edges.append(
-                (
-                    comparison
-                    .left_manifold_id,
-                    comparison
-                    .right_manifold_id,
-                )
-            )
+        )
 
     bridged_edge_set = set(
         bridged_edges

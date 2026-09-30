@@ -329,7 +329,7 @@ def test_rank_mismatch_separates_manifold_components():
         .INSUFFICIENT_POINTS
     }
 
-def test_long_unique_gauge_run_remains_unresolved():
+def test_long_unique_chain_bridges_when_each_local_gap_is_short():
     manifolds = (
         make_manifold(
             "m0",
@@ -363,16 +363,27 @@ def test_long_unique_gauge_run_remains_unresolved():
 
     assert (
         graph.is_fully_unambiguous
-        is False
-    )
-
-    assert not (
-        graph.bridged_edges
+        is True
     )
 
     assert len(
-        graph.gauge_unresolved_edges
+        graph.bridged_edges
     ) == 2
+
+    assert not (
+        graph.gauge_unresolved_edges
+    )
+
+    result = (
+        construct_manifold_pecs(
+            manifolds,
+            graph,
+        )
+    )
+
+    assert len(
+        result.pecs
+    ) == 1
 
 
 def test_short_active_space_gap_is_bridged():
@@ -467,4 +478,108 @@ def test_discontinuous_rank_change_is_never_bridged():
 
     assert not (
         graph.gauge_unresolved_edges
+    )
+
+def test_single_gauge_gap_beyond_bridge_span_remains_unresolved():
+    manifolds = (
+        make_manifold(
+            "m0",
+            1.00,
+            -1.0,
+            alpha_rank=0,
+            beta_rank=0,
+        ),
+        make_manifold(
+            "m1",
+            1.40,
+            -1.1,
+            alpha_rank=0,
+            beta_rank=0,
+        ),
+    )
+
+    graph = (
+        build_manifold_branch_graph(
+            manifolds,
+            thresholds=THRESHOLDS,
+        )
+    )
+
+    assert (
+        graph.is_fully_unambiguous
+        is False
+    )
+
+    assert not (
+        graph.bridged_edges
+    )
+
+    assert len(
+        graph.gauge_unresolved_edges
+    ) == 1
+
+
+def test_adding_short_gauge_points_does_not_destroy_existing_bridges():
+    short = tuple(
+        make_manifold(
+            f"s{index}",
+            1.00 + 0.05 * index,
+            -1.0,
+            alpha_rank=0,
+            beta_rank=0,
+        )
+        for index
+        in range(
+            7
+        )
+    )
+
+    extended = tuple(
+        make_manifold(
+            f"e{index}",
+            1.00 + 0.05 * index,
+            -1.0,
+            alpha_rank=0,
+            beta_rank=0,
+        )
+        for index
+        in range(
+            9
+        )
+    )
+
+    short_graph = (
+        build_manifold_branch_graph(
+            short,
+            thresholds=THRESHOLDS,
+        )
+    )
+
+    extended_graph = (
+        build_manifold_branch_graph(
+            extended,
+            thresholds=THRESHOLDS,
+        )
+    )
+
+    assert (
+        short_graph.is_fully_unambiguous
+        is True
+    )
+
+    assert (
+        extended_graph.is_fully_unambiguous
+        is True
+    )
+
+    assert len(
+        short_graph.bridged_edges
+    ) == 6
+
+    assert len(
+        extended_graph.bridged_edges
+    ) == 8
+
+    assert not (
+        extended_graph.gauge_unresolved_edges
     )
