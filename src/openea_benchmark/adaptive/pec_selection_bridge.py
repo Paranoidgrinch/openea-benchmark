@@ -102,6 +102,23 @@ def _as_sequence(value: Any) -> tuple[Any, ...]:
 def _selection_groups(report: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
     """Accept the current report contract plus a direct-group test contract."""
     if isinstance(report, Mapping):
+        # Current OpenEA state-selection contract: charge_groups is a mapping
+        # such as {"neutral": {...}, "anion": {...}}.  Preserve the charge
+        # labels as stable group identities without mutating the source report.
+        charge_groups = report.get("charge_groups")
+        if isinstance(charge_groups, Mapping):
+            ordered_labels = [label for label in ("neutral", "anion") if label in charge_groups]
+            ordered_labels.extend(sorted(str(k) for k in charge_groups if str(k) not in ordered_labels))
+            groups: list[Mapping[str, Any]] = []
+            for label in ordered_labels:
+                value = charge_groups[label]
+                if not isinstance(value, Mapping):
+                    raise TypeError("charge_groups values must be mappings")
+                copied = dict(value)
+                copied.setdefault("group_id", str(label))
+                groups.append(copied)
+            return tuple(groups)
+
         for key in ("groups", "sectors", "state_groups"):
             groups = _as_sequence(report.get(key))
             if groups:
@@ -111,7 +128,7 @@ def _selection_groups(report: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -
         # Empty explicit groups is a valid unresolved report.
         if any(key in report for key in ("groups", "sectors", "state_groups")):
             return ()
-        raise KeyError("state-selection report has no groups/sectors/state_groups")
+        raise KeyError("state-selection report has no charge_groups/groups/sectors/state_groups")
 
     groups = _as_sequence(report)
     if not all(isinstance(item, Mapping) for item in groups):
@@ -182,6 +199,17 @@ def _minimum_status(candidate: Mapping[str, Any]) -> str:
 
 
 def _sampled_minimum(candidate: Mapping[str, Any]) -> tuple[float | None, float | None]:
+    # Current state_selection.py contract stores the retained bracketed seed
+    # directly on the candidate.  These values remain scout/DFT provenance,
+    # not production uncertainty bounds.
+    direct_r = candidate.get("r_candidate_angstrom")
+    direct_e = candidate.get("energy_hartree")
+    if direct_r is not None or direct_e is not None:
+        return (
+            None if direct_r is None else float(direct_r),
+            None if direct_e is None else float(direct_e),
+        )
+
     # Prefer an explicit retained/source minimum if the report provides one.
     for key in ("source_minimum", "minimum_candidate", "sampled_minimum"):
         value = candidate.get(key)
