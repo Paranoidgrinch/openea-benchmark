@@ -54,6 +54,7 @@ class Stage3ExecutionSettings:
     require_rhf_external_stability: bool = True
     run_ccsd_t: bool = True
     verbose: int = 4
+    artifact_dir: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("scf_conv_tol", "scf_conv_tol_grad", "cc_conv_tol", "cc_conv_tol_normt"):
@@ -64,6 +65,8 @@ class Stage3ExecutionSettings:
             raise ValueError("SCF/CC cycle limits must be positive")
         if self.max_memory_mb <= 0:
             raise ValueError("max_memory_mb must be positive")
+        if self.artifact_dir is not None and not str(self.artifact_dir).strip():
+            raise ValueError("artifact_dir must be non-empty when supplied")
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,7 @@ class Stage3PointResult:
     is_production_ea: bool = False
     ground_state_assigned: bool = False
     authorizes_pruning: bool = False
+    high_level_checkpoint_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -376,6 +380,17 @@ def _run_stage3_point_pyscf(
             mol, request.source_checkpoint_path, project=settings.checkpoint_project
         )
 
+    high_level_checkpoint: Path | None = None
+    if settings.artifact_dir is not None:
+        artifact_dir = Path(settings.artifact_dir)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        safe_request = "".join(
+            ch if ch.isalnum() or ch in "-_." else "_"
+            for ch in request.request_id
+        )
+        high_level_checkpoint = artifact_dir / f"{safe_request}.hf.chk"
+        mf.chkfile = str(high_level_checkpoint)
+
     mf.conv_tol = settings.scf_conv_tol
     mf.conv_tol_grad = settings.scf_conv_tol_grad
     mf.max_cycle = settings.scf_max_cycle
@@ -395,6 +410,11 @@ def _run_stage3_point_pyscf(
         scf_energy_hartree=float(mf.e_tot) if mf.e_tot is not None else None,
         s2=s2,
         multiplicity=multiplicity,
+        high_level_checkpoint_path=(
+            str(high_level_checkpoint)
+            if high_level_checkpoint is not None and high_level_checkpoint.is_file()
+            else None
+        ),
     )
 
     if not mf.converged:
