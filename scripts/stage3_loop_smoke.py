@@ -21,7 +21,10 @@ from openea_benchmark.adaptive.stage3_execution import (
     Stage3ExecutionSettings,
     run_stage3_point,
 )
-from openea_benchmark.adaptive.stage3_loop import run_stage3_refinement_loop
+from openea_benchmark.adaptive.stage3_loop import (
+    Stage3LoopRetrySettings,
+    run_stage3_refinement_loop,
+)
 from openea_benchmark.adaptive.stage3_refinement import Stage3RefinementSettings
 
 
@@ -172,6 +175,10 @@ def main():
             branch_thresholds=BRANCH_THRESHOLDS,
             max_refinement_rounds=args.max_rounds,
             execution_settings=execution,
+            retry_settings=Stage3LoopRetrySettings(
+                max_retries_per_request=1,
+                cycle_multiplier=2.0,
+            ),
         )
 
         payload = {
@@ -187,6 +194,19 @@ def main():
             "minimum_candidates_r_angstrom": [
                 item.r_angstrom for item in outcome.final_pec.minimum_scout.candidates
             ],
+            "failed_results": [
+                {
+                    "request_id": item.request_id,
+                    "status": item.status.value,
+                    "error_type": item.error_type,
+                    "error_message": item.error_message,
+                    "r_angstrom": item.r_angstrom,
+                    "source_root_id": item.source_root_id,
+                    "source_checkpoint_path": item.source_checkpoint_path,
+                }
+                for item in outcome.results
+                if item.status is not PointExecutionStatus.COMPLETED
+            ],
             "rounds": [
                 {
                     "evaluation_index": item.evaluation_index,
@@ -195,6 +215,7 @@ def main():
                     "new_result_statuses": list(item.new_result_statuses),
                     "initialization_review": item.initialization_review_status,
                     "geometry_continuity_review": item.geometry_continuity_review_status,
+                    "execution_attempts": [attempt.to_dict() for attempt in item.execution_attempts],
                 }
                 for item in outcome.rounds
             ],

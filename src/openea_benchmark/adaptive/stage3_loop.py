@@ -20,7 +20,7 @@ Scientific invariants
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from math import isfinite
 from typing import Any, Callable, Sequence
@@ -39,6 +39,52 @@ from .stage3_refinement import (
     build_stage3_refinement_requests,
     plan_stage3_pec_refinement,
 )
+
+
+
+
+@dataclass(frozen=True)
+class Stage3LoopRetrySettings:
+    """Numerical retry policy for one Stage-3 refinement batch.
+
+    Retries never loosen scientific tolerances or stability requirements.
+    They only increase iteration budgets for statuses that are plausibly
+    numerical rather than scientific.
+    """
+
+    max_retries_per_request: int = 1
+    cycle_multiplier: float = 2.0
+    retry_statuses: tuple[PointExecutionStatus, ...] = (
+        PointExecutionStatus.ERROR,
+        PointExecutionStatus.SCF_NOT_CONVERGED,
+        PointExecutionStatus.CCSD_NOT_CONVERGED,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.max_retries_per_request, int) or self.max_retries_per_request < 0:
+            raise ValueError("max_retries_per_request must be an integer >= 0")
+        if not isfinite(float(self.cycle_multiplier)) or float(self.cycle_multiplier) < 1.0:
+            raise ValueError("cycle_multiplier must be finite and >= 1")
+        if len(self.retry_statuses) != len(set(self.retry_statuses)):
+            raise ValueError("retry_statuses must not contain duplicates")
+        if PointExecutionStatus.COMPLETED in self.retry_statuses:
+            raise ValueError("COMPLETED cannot be a retry status")
+        if PointExecutionStatus.SCF_UNSTABLE in self.retry_statuses:
+            raise ValueError("SCF_UNSTABLE is a scientific validity failure and cannot be auto-retried")
+
+
+@dataclass(frozen=True)
+class Stage3ExecutionAttempt:
+    request_id: str
+    attempt_index: int
+    status: str
+    scf_max_cycle: int
+    cc_max_cycle: int
+    error_type: str | None
+    error_message: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class Stage3LoopStatus(str, Enum):
@@ -61,6 +107,7 @@ class Stage3LoopRound:
     initialization_review_status: str
     geometry_continuity_review_status: str
     rationale: str
+    execution_attempts: tuple[Stage3ExecutionAttempt, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -157,6 +204,65 @@ def _resolve(
     )
 
 
+def _settings_for_retry(
+    base: Stage3ExecutionSettings,
+    retry_index: int,
+    retry_settings: Stage3LoopRetrySettings,
+) -> Stage3ExecutionSettings:
+    factor = float(retry_settings.cycle_multiplier) ** int(retry_index)
+    return replace(
+        base,
+        scf_max_cycle=max(base.scf_max_cycle, int(round(base.scf_max_cycle * factor))),
+        cc_max_cycle=max(base.cc_max_cycle, int(round(base.cc_max_cycle * factor))),
+    )
+
+
+def _execute_batch_with_retries(
+    requests: Sequence[Stage3ExecutionRequest],
+    *,
+    settings: Stage3ExecutionSettings,
+    retry_settings: Stage3LoopRetrySettings,
+    runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None,
+) -> tuple[tuple[Stage3PointResult, ...], tuple[Stage3ExecutionAttempt, ...]]:
+    final_results: list[Stage3PointResult] = []
+    attempts: list[Stage3ExecutionAttempt] = []
+
+    for request in requests:
+        retry_index = 0
+        while True:
+            attempt_settings = (
+                settings
+                if retry_index == 0
+                else _settings_for_retry(settings, retry_index, retry_settings)
+            )
+            result = run_stage3_point(request, settings=attempt_settings, runner=runner)
+            attempts.append(Stage3ExecutionAttempt(
+                request_id=request.request_id,
+                attempt_index=retry_index,
+                status=result.status.value,
+                scf_max_cycle=attempt_settings.scf_max_cycle,
+                cc_max_cycle=attempt_settings.cc_max_cycle,
+                error_type=result.error_type,
+                error_message=result.error_message,
+            ))
+
+            if result.status is PointExecutionStatus.COMPLETED:
+                final_results.append(result)
+                break
+
+            can_retry = (
+                result.status in retry_settings.retry_statuses
+                and retry_index < retry_settings.max_retries_per_request
+            )
+            if not can_retry:
+                final_results.append(result)
+                break
+
+            retry_index += 1
+
+    return tuple(final_results), tuple(attempts)
+
+
 def run_stage3_refinement_loop(
     *,
     initial_requests: Sequence[Stage3ExecutionRequest],
@@ -166,6 +272,7 @@ def run_stage3_refinement_loop(
     branch_thresholds: Any,
     max_refinement_rounds: int,
     execution_settings: Stage3ExecutionSettings | None = None,
+    retry_settings: Stage3LoopRetrySettings | None = None,
     audit_settings: Any = None,
     duplicate_energy_tolerance_hartree: float = 1.0e-7,
     runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None = None,
@@ -190,6 +297,7 @@ def run_stage3_refinement_loop(
     rounds: list[Stage3LoopRound] = []
     completed_refinement_rounds = 0
     settings = execution_settings or Stage3ExecutionSettings()
+    retries = retry_settings or Stage3LoopRetrySettings()
 
     while True:
         resolution = _resolve(
@@ -318,9 +426,11 @@ def run_stage3_refinement_loop(
                 rationale="Adaptive refinement produced no new executable geometries under the configured separation policy",
             )
 
-        new_results = tuple(
-            run_stage3_point(item, settings=settings, runner=runner)
-            for item in new_requests
+        new_results, execution_attempts = _execute_batch_with_retries(
+            new_requests,
+            settings=settings,
+            retry_settings=retries,
+            runner=runner,
         )
         rounds.append(Stage3LoopRound(
             evaluation_index=len(rounds),
@@ -334,6 +444,7 @@ def run_stage3_refinement_loop(
             initialization_review_status=init_status,
             geometry_continuity_review_status=continuity_status,
             rationale=plan.rationale,
+            execution_attempts=execution_attempts,
         ))
 
         requests.extend(new_requests)
@@ -343,6 +454,15 @@ def run_stage3_refinement_loop(
         if any(item.status is not PointExecutionStatus.COMPLETED for item in new_results):
             # Re-resolution is deliberately not attempted after a failed batch:
             # the failure itself is the terminal evidence for this orchestration run.
+            failures = [
+                item for item in new_results
+                if item.status is not PointExecutionStatus.COMPLETED
+            ]
+            detail = "; ".join(
+                f"{item.request_id}:{item.status.value}"
+                + (f":{item.error_type}" if item.error_type else "")
+                for item in failures
+            )
             return Stage3LoopResult(
                 status=Stage3LoopStatus.EXECUTION_BLOCKED,
                 job_id=job_id,
@@ -351,5 +471,8 @@ def run_stage3_refinement_loop(
                 results=tuple(results),
                 final_pec=pec,
                 final_refinement_plan=plan,
-                rationale="At least one newly requested Stage-3 point did not complete successfully",
+                rationale=(
+                    "At least one newly requested Stage-3 point remained incomplete "
+                    "after the configured numerical retry policy: " + detail
+                ),
             )

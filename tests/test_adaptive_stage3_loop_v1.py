@@ -6,6 +6,7 @@ from openea_benchmark.adaptive.stage3_execution import (
     Stage3PointResult,
 )
 from openea_benchmark.adaptive.stage3_loop import (
+    Stage3LoopRetrySettings,
     Stage3LoopStatus,
     run_stage3_refinement_loop,
 )
@@ -186,14 +187,13 @@ def test_round_limit_is_not_reported_as_convergence():
     assert out.final_refinement_plan.action.value == "REFINE_SINGLE_BRACKET"
 
 
-def test_execution_failure_is_terminal_and_distinct_from_scientific_unresolved():
+def test_transient_execution_error_is_retried_and_can_recover():
     reqs, results = initial()
-    calls = 0
+    calls = {}
 
-    def failing_runner(req, settings):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
+    def transient_runner(req, settings):
+        calls[req.request_id] = calls.get(req.request_id, 0) + 1
+        if calls[req.request_id] == 1 and len(calls) == 1:
             base = completed(req)
             return Stage3PointResult(**{
                 **base.__dict__,
@@ -201,9 +201,39 @@ def test_execution_failure_is_terminal_and_distinct_from_scientific_unresolved()
                 "ccsd_converged": None,
                 "ccsd_t_total_hartree": None,
                 "error_type": "SyntheticFailure",
-                "error_message": "test",
+                "error_message": "transient",
             })
         return completed(req)
+
+    out = run_stage3_refinement_loop(
+        initial_requests=reqs,
+        initial_results=results,
+        refinement_settings=REFINE,
+        identity_thresholds=None,
+        branch_thresholds=None,
+        max_refinement_rounds=1,
+        runner=transient_runner,
+        resolver=resolver,
+    )
+    assert out.status is Stage3LoopStatus.ROUND_LIMIT_REACHED
+    attempts = out.rounds[0].execution_attempts
+    assert any(item.attempt_index == 1 for item in attempts)
+    assert all(item.status in {"ERROR", "COMPLETED"} for item in attempts)
+
+
+def test_persistent_retryable_failure_remains_execution_blocked():
+    reqs, results = initial()
+
+    def failing_runner(req, settings):
+        base = completed(req)
+        return Stage3PointResult(**{
+            **base.__dict__,
+            "status": PointExecutionStatus.ERROR,
+            "ccsd_converged": None,
+            "ccsd_t_total_hartree": None,
+            "error_type": "PersistentFailure",
+            "error_message": "test",
+        })
 
     out = run_stage3_refinement_loop(
         initial_requests=reqs,
@@ -216,7 +246,83 @@ def test_execution_failure_is_terminal_and_distinct_from_scientific_unresolved()
         resolver=resolver,
     )
     assert out.status is Stage3LoopStatus.EXECUTION_BLOCKED
-    assert "ERROR" in out.rounds[-1].new_result_statuses
+    first_request = out.rounds[-1].new_request_ids[0]
+    attempts = [a for a in out.rounds[-1].execution_attempts if a.request_id == first_request]
+    assert [a.attempt_index for a in attempts] == [0, 1]
+    assert all(a.status == "ERROR" for a in attempts)
+    assert "PersistentFailure" in out.rationale
+
+
+def test_scf_unstable_is_not_auto_retried():
+    reqs, results = initial()
+    calls = 0
+
+    def unstable_runner(req, settings):
+        nonlocal calls
+        calls += 1
+        base = completed(req)
+        return Stage3PointResult(**{
+            **base.__dict__,
+            "status": PointExecutionStatus.SCF_UNSTABLE,
+            "ccsd_converged": None,
+            "ccsd_t_total_hartree": None,
+        })
+
+    out = run_stage3_refinement_loop(
+        initial_requests=reqs,
+        initial_results=results,
+        refinement_settings=REFINE,
+        identity_thresholds=None,
+        branch_thresholds=None,
+        max_refinement_rounds=3,
+        runner=unstable_runner,
+        resolver=resolver,
+    )
+    assert out.status is Stage3LoopStatus.EXECUTION_BLOCKED
+    assert calls == len(out.rounds[-1].new_request_ids)
+    assert all(a.attempt_index == 0 for a in out.rounds[-1].execution_attempts)
+
+
+def test_retry_increases_cycle_budgets_without_relaxing_other_settings():
+    reqs, results = initial()
+    seen = []
+
+    def inspect_runner(req, settings):
+        seen.append((req.request_id, settings))
+        attempts_for_request = sum(1 for rid, _ in seen if rid == req.request_id)
+        if attempts_for_request == 1:
+            base = completed(req)
+            return Stage3PointResult(**{
+                **base.__dict__,
+                "status": PointExecutionStatus.CCSD_NOT_CONVERGED,
+                "ccsd_converged": False,
+                "ccsd_t_total_hartree": None,
+            })
+        return completed(req)
+
+    out = run_stage3_refinement_loop(
+        initial_requests=reqs,
+        initial_results=results,
+        refinement_settings=REFINE,
+        identity_thresholds=None,
+        branch_thresholds=None,
+        max_refinement_rounds=1,
+        retry_settings=Stage3LoopRetrySettings(
+            max_retries_per_request=1,
+            cycle_multiplier=2.0,
+        ),
+        runner=inspect_runner,
+        resolver=resolver,
+    )
+    assert out.status is Stage3LoopStatus.ROUND_LIMIT_REACHED
+    first_id = out.rounds[0].new_request_ids[0]
+    pair = [settings for rid, settings in seen if rid == first_id]
+    assert len(pair) == 2
+    assert pair[1].scf_max_cycle == pair[0].scf_max_cycle * 2
+    assert pair[1].cc_max_cycle == pair[0].cc_max_cycle * 2
+    assert pair[1].scf_conv_tol == pair[0].scf_conv_tol
+    assert pair[1].cc_conv_tol == pair[0].cc_conv_tol
+    assert pair[1].require_internal_stability == pair[0].require_internal_stability
 
 
 def test_unresolved_identity_stops_without_new_calculation():
