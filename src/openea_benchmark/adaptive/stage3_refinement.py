@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .stage3_execution import Stage3ExecutionRequest, Stage3PointResult
+from .stage3_naming import refinement_request_id
 from .stage3_pec import (
     HighLevelMinimumStatus,
     HighLevelPEC,
@@ -464,13 +465,13 @@ def build_stage3_refinement_requests(
             if not str(checkpoint).strip():
                 raise ValueError(f"Canonical high-level checkpoint path is empty: {seed_id}")
 
-            safe_seed = "".join(
-                ch if ch.isalnum() or ch in "-_." else "_"
-                for ch in seed_id
-            )
-            request_id = (
-                f"{pec.job_id}__refine{refinement_round:02d}"
-                f"__g{geometry_index:03d}__seed{seed_index:02d}_{safe_seed}"
+            request_id = refinement_request_id(
+                job_id=pec.job_id,
+                refinement_round=refinement_round,
+                geometry_index=geometry_index,
+                seed_index=seed_index,
+                seed_request_id=seed_id,
+                target_r_angstrom=proposal.r_angstrom,
             )
             output.append(Stage3ExecutionRequest(
                 request_id=request_id,

@@ -31,6 +31,8 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from .stage3_naming import checkpoint_artifact_basename
+
 
 class PointExecutionStatus(str, Enum):
     COMPLETED = "COMPLETED"
@@ -384,11 +386,9 @@ def _run_stage3_point_pyscf(
     if settings.artifact_dir is not None:
         artifact_dir = Path(settings.artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        safe_request = "".join(
-            ch if ch.isalnum() or ch in "-_." else "_"
-            for ch in request.request_id
+        high_level_checkpoint = artifact_dir / checkpoint_artifact_basename(
+            request.request_id
         )
-        high_level_checkpoint = artifact_dir / f"{safe_request}.hf.chk"
         mf.chkfile = str(high_level_checkpoint)
 
     mf.conv_tol = settings.scf_conv_tol

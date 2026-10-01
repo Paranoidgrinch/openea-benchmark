@@ -457,3 +457,36 @@ def test_duplicate_energy_tolerance_is_validated():
         assert "duplicate_energy_tolerance" in str(exc)
     else:
         raise AssertionError("expected invalid tolerance")
+
+
+def test_filename_too_long_error_is_deterministic_and_not_retried():
+    reqs, results = initial()
+    calls = 0
+
+    def filename_runner(req, settings):
+        nonlocal calls
+        calls += 1
+        base = completed(req)
+        return Stage3PointResult(**{
+            **base.__dict__,
+            "status": PointExecutionStatus.ERROR,
+            "ccsd_converged": None,
+            "ccsd_t_total_hartree": None,
+            "error_type": "OSError",
+            "error_message": "[Errno 36] File name too long",
+        })
+
+    out = run_stage3_refinement_loop(
+        initial_requests=reqs,
+        initial_results=results,
+        refinement_settings=REFINE,
+        identity_thresholds=None,
+        branch_thresholds=None,
+        max_refinement_rounds=3,
+        runner=filename_runner,
+        resolver=resolver,
+    )
+    assert out.status is Stage3LoopStatus.EXECUTION_BLOCKED
+    assert calls == len(out.rounds[-1].new_request_ids)
+    assert all(a.attempt_index == 0 for a in out.rounds[-1].execution_attempts)
+    assert all(a.error_type == "OSError" for a in out.rounds[-1].execution_attempts)

@@ -217,6 +217,33 @@ def _settings_for_retry(
     )
 
 
+def _is_retryable_result(
+    result: Stage3PointResult,
+    retry_settings: Stage3LoopRetrySettings,
+) -> bool:
+    if result.status not in retry_settings.retry_statuses:
+        return False
+    if result.status is not PointExecutionStatus.ERROR:
+        return True
+
+    # Deterministic contract/filesystem failures do not improve with a larger
+    # SCF/CC iteration budget.  Keep other ERROR cases eligible for the single
+    # bounded retry because some backend/IO failures can be transient.
+    error_type = (result.error_type or "").strip()
+    message = (result.error_message or "").lower()
+    if error_type in {
+        "ValueError",
+        "TypeError",
+        "AssertionError",
+        "FileNotFoundError",
+        "PermissionError",
+    }:
+        return False
+    if "file name too long" in message or "[errno 36]" in message:
+        return False
+    return True
+
+
 def _execute_batch_with_retries(
     requests: Sequence[Stage3ExecutionRequest],
     *,
@@ -251,7 +278,7 @@ def _execute_batch_with_retries(
                 break
 
             can_retry = (
-                result.status in retry_settings.retry_statuses
+                _is_retryable_result(result, retry_settings)
                 and retry_index < retry_settings.max_retries_per_request
             )
             if not can_retry:
