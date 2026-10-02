@@ -19,3 +19,16 @@ from .workflow import (
     ElectronicEAWorkflowResult, ElectronicEAWorkflowStatus,
     evaluate_stage3_electronic_ea,
 )
+
+
+from .basis_convergence import (
+    BasisConvergenceAction,
+    BasisConvergenceSettings,
+    BasisConvergenceStatus,
+    CardinalConvergenceAssessment,
+    DiffuseConvergenceAssessment,
+    EAIntervalEV,
+    ElectronicEABasisPoint,
+    assess_cardinal_convergence,
+    assess_diffuse_convergence,
+)
