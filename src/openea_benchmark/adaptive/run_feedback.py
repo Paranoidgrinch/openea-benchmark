@@ -14,13 +14,15 @@ class WorkflowProgress:
     completed_steps:list[str]=field(default_factory=list)
     next_steps:list[str]=field(default_factory=list)
     details:dict[str,Any]=field(default_factory=dict)
+    started_at_utc:str=''
     updated_at_utc:str=''
 
 class ProgressReporter:
     def __init__(self, *, run_id:str, workflow:str, status_file:Path):
         if not run_id.strip() or not workflow.strip(): raise ValueError('run_id/workflow must be non-empty')
         self.status_file=Path(status_file); self.status_file.parent.mkdir(parents=True, exist_ok=True)
-        self.state=WorkflowProgress(run_id,workflow,ProgressStatus.RUNNING,'INITIALIZING')
+        now=datetime.now(timezone.utc).isoformat()
+        self.state=WorkflowProgress(run_id,workflow,ProgressStatus.RUNNING,'INITIALIZING',started_at_utc=now)
         self._publish()
     def update(self, *, current_step:str, completed_steps=None, next_steps=None, details=None, status:str=ProgressStatus.RUNNING):
         self.state.status=status; self.state.current_step=current_step

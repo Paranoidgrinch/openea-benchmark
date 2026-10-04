@@ -36,6 +36,21 @@ class FragmentExecutionStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class AtomicFragmentSCFRetrySettings:
+    """Numerical-only fallback from DIIS SCF to CIAH/Newton SCF."""
+
+    enable_newton_retry: bool = True
+    newton_cycle_multiplier: int = 2
+    newton_min_cycles: int = 200
+
+    def __post_init__(self) -> None:
+        if self.newton_cycle_multiplier < 1:
+            raise ValueError("newton_cycle_multiplier must be >= 1")
+        if self.newton_min_cycles < 1:
+            raise ValueError("newton_min_cycles must be >= 1")
+
+
+@dataclass(frozen=True)
 class AtomicFragmentRequest:
     fragment_id: str
     element: str
@@ -90,6 +105,10 @@ class AtomicFragmentResult:
     external_instability_waived: bool = False
     external_instability_waiver_reason: str | None = None
     two_electron_ccsd_exact_space: bool = False
+    scf_solver_path: tuple[str, ...] = ()
+    scf_primary_converged: bool | None = None
+    scf_newton_attempted: bool = False
+    scf_newton_converged: bool | None = None
 
     def __post_init__(self) -> None:
         if self.state_manifold_resolved:
@@ -144,6 +163,7 @@ def _empty_result(
 def _run_atomic_fragment_pyscf(
     request: AtomicFragmentRequest,
     settings: Stage3ExecutionSettings,
+    retry_settings: AtomicFragmentSCFRetrySettings,
 ) -> AtomicFragmentResult:
     import pyscf
     from pyscf import cc, gto, scf
@@ -170,6 +190,33 @@ def _run_atomic_fragment_pyscf(
     mf.max_memory = settings.max_memory_mb
     mf.kernel()
 
+    primary_converged = bool(mf.converged)
+    solver_path = ["PRIMARY_DIIS"]
+    newton_attempted = False
+    newton_converged = None
+
+    if not primary_converged and retry_settings.enable_newton_retry:
+        newton_attempted = True
+        solver_path.append("CIAH_NEWTON_FROM_PRIMARY_ORBITALS")
+        newton_mf = mf.newton()
+        newton_mf.conv_tol = settings.scf_conv_tol
+        newton_mf.conv_tol_grad = settings.scf_conv_tol_grad
+        newton_mf.max_cycle = max(
+            settings.scf_max_cycle * retry_settings.newton_cycle_multiplier,
+            retry_settings.newton_min_cycles,
+        )
+        newton_mf.max_memory = settings.max_memory_mb
+        newton_mf.kernel()
+        newton_converged = bool(newton_mf.converged)
+        if newton_mf.mo_coeff is not None:
+            mf.mo_coeff = newton_mf.mo_coeff
+        if newton_mf.mo_occ is not None:
+            mf.mo_occ = newton_mf.mo_occ
+        if newton_mf.mo_energy is not None:
+            mf.mo_energy = newton_mf.mo_energy
+        mf.e_tot = newton_mf.e_tot
+        mf.converged = newton_converged
+
     try:
         s2, multiplicity = mf.spin_square()
         s2 = float(s2)
@@ -183,6 +230,10 @@ def _run_atomic_fragment_pyscf(
         scf_energy_hartree=float(mf.e_tot) if mf.e_tot is not None else None,
         s2=s2,
         multiplicity=multiplicity,
+        scf_solver_path=tuple(solver_path),
+        scf_primary_converged=primary_converged,
+        scf_newton_attempted=newton_attempted,
+        scf_newton_converged=newton_converged,
     )
     if not mf.converged:
         return _empty_result(
@@ -320,15 +371,17 @@ def run_atomic_fragment(
     request: AtomicFragmentRequest,
     *,
     settings: Stage3ExecutionSettings | None = None,
-    runner: Callable[
-        [AtomicFragmentRequest, Stage3ExecutionSettings],
-        AtomicFragmentResult,
-    ] | None = None,
+    retry_settings: AtomicFragmentSCFRetrySettings | None = None,
+    runner: Callable[..., AtomicFragmentResult] | None = None,
 ) -> AtomicFragmentResult:
     settings = settings or Stage3ExecutionSettings()
+    retry_settings = retry_settings or AtomicFragmentSCFRetrySettings()
     implementation = runner or _run_atomic_fragment_pyscf
     try:
-        result = implementation(request, settings)
+        if runner is None:
+            result = implementation(request, settings, retry_settings)
+        else:
+            result = implementation(request, settings)
     except Exception as exc:
         return _empty_result(
             request,
