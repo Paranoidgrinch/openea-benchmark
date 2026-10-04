@@ -58,9 +58,29 @@ def main():
             reporter.update(current_step=f'REUSE_{basis}',completed_steps=['PREFLIGHT','LOAD_CHECKPOINT',*[f'BASIS_LEVEL_{x}_AVAILABLE' for x in sorted(live)]],next_steps=['ASSESS_DIFFUSE'],details={'basis':basis,'source':'CHECKPOINT'})
             return point
         reporter.update(current_step=f'CALCULATE_{basis}',completed_steps=['PREFLIGHT','LOAD_CHECKPOINT',*[f'BASIS_LEVEL_{x}_AVAILABLE' for x in sorted(live)]],next_steps=[f'COMPLETE_{basis}','SAVE_CHECKPOINT','ASSESS_DIFFUSE'],details={'basis':basis,'augmentation_level':level})
-        cmd=[sys.executable,str(smoke),'--basis',basis,'--max-rounds',str(args.max_rounds),'--target-half-width-ev',str(args.target_half_width_ev),'--neutral-center',str(args.neutral_center),'--anion-center',str(args.anion_center),'--half-width',str(args.half_width)]
+        child_dir=run_dir/'basis_stage_checkpoints'/basis
+        child_status=run_dir/'child_status'/f'{level}_{basis}.json'
+        child_status.parent.mkdir(parents=True,exist_ok=True)
+        child_stdout_file=run_dir/'child_outputs'/f'{level}_{basis}.json'
+        child_stdout_file.parent.mkdir(parents=True,exist_ok=True)
+        cmd=[sys.executable,str(smoke),'--basis',basis,'--max-rounds',str(args.max_rounds),'--target-half-width-ev',str(args.target_half_width_ev),'--neutral-center',str(args.neutral_center),'--anion-center',str(args.anion_center),'--half-width',str(args.half_width),'--stage-checkpoint-dir',str(child_dir),'--status-file',str(child_status),'--child-run-id',f'{args.run_id}__{basis}']
+        reporter.update(current_step=f'CALCULATE_{basis}',completed_steps=['PREFLIGHT','LOAD_CHECKPOINT',*[f'BASIS_LEVEL_{x}_AVAILABLE' for x in sorted(live)]],next_steps=[f'CHILD_NEUTRAL_PEC_{basis}',f'CHILD_ANION_PEC_{basis}',f'CHILD_FRAGMENTS_{basis}',f'COMPLETE_{basis}','SAVE_CHECKPOINT','ASSESS_DIFFUSE'],details={'basis':basis,'augmentation_level':level,'child_status_file':str(child_status),'child_stage_checkpoint_dir':str(child_dir)})
         proc=subprocess.run(cmd,check=False,text=True,stdout=subprocess.PIPE,stderr=None)
-        if proc.returncode!=0: raise RuntimeError(f'{basis}: electronic-EA smoke exited with code {proc.returncode}')
+        child_stdout_file.write_text(proc.stdout or '',encoding='utf-8')
+        if proc.returncode!=0:
+            summary=None
+            try:
+                summary=json.loads(proc.stdout) if proc.stdout.strip() else None
+            except json.JSONDecodeError:
+                summary=None
+            print(f'[OPENEA][CHILD-FAILURE] basis={basis} exit_code={proc.returncode} output_file={child_stdout_file}',file=sys.stderr,flush=True)
+            if proc.stdout.strip():
+                print(proc.stdout,file=sys.stderr,flush=True)
+            if isinstance(summary,dict) and summary.get('fragment_failure'):
+                failed=[x for x in summary['fragment_failure'] if x.get('status')!='COMPLETED']
+                short='; '.join(f"{x.get('fragment_id')}:{x.get('status')}:{x.get('error_type')}:{x.get('error_message')}" for x in failed)
+                raise RuntimeError(f'{basis}: fragment failure after reusable PEC checkpoints: {short}; full child output: {child_stdout_file}')
+            raise RuntimeError(f'{basis}: electronic-EA smoke exited with code {proc.returncode}; full child output: {child_stdout_file}')
         payload=json.loads(proc.stdout); ea=payload['electronic_ea']
         if ea['decision_status']!='BOUND': raise RuntimeError(f"{basis}: electronic EA is {ea['decision_status']}")
         point=ElectronicEABasisPoint(basis_name=basis,cardinal_number=args.cardinal,augmentation_level=level,method_signature=METHOD_SIGNATURE,ea=EAIntervalEV(float(ea['lower_ev']),float(ea['central_ev']),float(ea['upper_ev'])),decision_status='BOUND',evidence_quality='CONVERGENCE_ESTIMATED',is_production_ea=False)

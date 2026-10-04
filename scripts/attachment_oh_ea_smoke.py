@@ -18,10 +18,15 @@ settings. The resulting number must not be interpreted as a recommended OH EA.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
+
+from openea_benchmark.adaptive.run_feedback import ProgressReporter
+from openea_benchmark.adaptive.stage_checkpoint import StageCheckpointStore
 
 from pyscf import gto, scf
 
@@ -315,9 +320,48 @@ def main():
     parser.add_argument("--anion-center", type=float, default=0.97)
     parser.add_argument("--half-width", type=float, default=0.02)
     parser.add_argument("--target-half-width-ev", type=float, default=0.05)
+    parser.add_argument("--stage-checkpoint-dir")
+    parser.add_argument("--status-file")
+    parser.add_argument("--child-run-id", default="oh_ea_child")
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="openea_oh_ea_smoke_") as tmpdir:
+    signature = json.dumps(
+        {
+            "workflow": "OH_ELECTRONIC_EA_CHILD_V1",
+            "basis": args.basis,
+            "max_rounds": args.max_rounds,
+            "neutral_center": args.neutral_center,
+            "anion_center": args.anion_center,
+            "half_width": args.half_width,
+            "target_half_width_ev": args.target_half_width_ev,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    reporter = None
+    if args.status_file:
+        reporter = ProgressReporter(
+            run_id=args.child_run_id,
+            workflow="OH_ELECTRONIC_EA_BASIS_POINT",
+            status_file=Path(args.status_file),
+        )
+
+    store = None
+    if args.stage_checkpoint_dir:
+        store = StageCheckpointStore(
+            Path(args.stage_checkpoint_dir),
+            signature=signature,
+        )
+
+    if args.stage_checkpoint_dir:
+        work = Path(args.stage_checkpoint_dir) / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        ctx = contextlib.nullcontext(str(work))
+    else:
+        ctx = tempfile.TemporaryDirectory(prefix="openea_oh_ea_smoke_")
+
+    with ctx as tmpdir:
         tmp = Path(tmpdir)
         execution = Stage3ExecutionSettings(
             scf_conv_tol=1.0e-9,
@@ -328,50 +372,139 @@ def main():
             artifact_dir=str(tmp / "high_level"),
         )
 
-        neutral = run_oh_state_loop(
-            tmp=tmp,
-            label="neutral",
-            charge=0,
-            spin_2s=1,
-            center_r=args.neutral_center,
-            basis=args.basis,
-            half_width=args.half_width,
-            max_rounds=args.max_rounds,
-            execution=execution,
-        )
-        anion = run_oh_state_loop(
-            tmp=tmp,
-            label="anion",
-            charge=-1,
-            spin_2s=0,
-            center_r=args.anion_center,
-            basis=args.basis,
-            half_width=args.half_width,
-            max_rounds=args.max_rounds,
-            execution=execution,
-        )
-
-        fragment_results = [
-            run_atomic_fragment(request, settings=execution)
-            for request in fragment_specs(args.basis)
-        ]
-        if any(
-            result.status is not FragmentExecutionStatus.COMPLETED
-            for result in fragment_results
-        ):
-            print(
-                json.dumps(
-                    {
-                        "fragment_failure": [
-                            result.to_dict()
-                            for result in fragment_results
-                        ]
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
+        completed = []
+        if reporter:
+            reporter.update(
+                current_step="NEUTRAL_PEC",
+                completed_steps=completed,
+                next_steps=["ANION_PEC", "ATOMIC_FRAGMENTS", "ATTACHMENT_DECISION"],
+                details={"basis": args.basis},
             )
-            raise SystemExit(2)
+        if store and store.has("neutral_loop"):
+            neutral = store.load("neutral_loop")
+            if reporter:
+                reporter.update(
+                    current_step="REUSE_NEUTRAL_PEC",
+                    completed_steps=["NEUTRAL_PEC"],
+                    next_steps=["ANION_PEC", "ATOMIC_FRAGMENTS", "ATTACHMENT_DECISION"],
+                    details={"basis": args.basis, "source": "STAGE_CHECKPOINT"},
+                )
+        else:
+            neutral = run_oh_state_loop(
+                tmp=tmp,
+                label="neutral",
+                charge=0,
+                spin_2s=1,
+                center_r=args.neutral_center,
+                basis=args.basis,
+                half_width=args.half_width,
+                max_rounds=args.max_rounds,
+                execution=execution,
+            )
+            if store:
+                store.save("neutral_loop", neutral)
+        completed = ["NEUTRAL_PEC"]
+
+        if reporter:
+            reporter.update(
+                current_step="ANION_PEC",
+                completed_steps=completed,
+                next_steps=["ATOMIC_FRAGMENTS", "ATTACHMENT_DECISION"],
+                details={"basis": args.basis},
+            )
+        if store and store.has("anion_loop"):
+            anion = store.load("anion_loop")
+            if reporter:
+                reporter.update(
+                    current_step="REUSE_ANION_PEC",
+                    completed_steps=completed + ["ANION_PEC"],
+                    next_steps=["ATOMIC_FRAGMENTS", "ATTACHMENT_DECISION"],
+                    details={"basis": args.basis, "source": "STAGE_CHECKPOINT"},
+                )
+        else:
+            anion = run_oh_state_loop(
+                tmp=tmp,
+                label="anion",
+                charge=-1,
+                spin_2s=0,
+                center_r=args.anion_center,
+                basis=args.basis,
+                half_width=args.half_width,
+                max_rounds=args.max_rounds,
+                execution=execution,
+            )
+            if store:
+                store.save("anion_loop", anion)
+        completed = ["NEUTRAL_PEC", "ANION_PEC"]
+
+        fragment_results = []
+        specs = fragment_specs(args.basis)
+        for index, request in enumerate(specs, start=1):
+            key = f"fragment_{request.fragment_id}"
+            if reporter:
+                reporter.update(
+                    current_step=f"FRAGMENT_{request.fragment_id}",
+                    completed_steps=completed + [
+                        f"FRAGMENT_{x.fragment_id}" for x in fragment_results
+                    ],
+                    next_steps=[
+                        *[f"FRAGMENT_{x.fragment_id}" for x in specs[index:]],
+                        "ATTACHMENT_DECISION",
+                    ],
+                    details={
+                        "basis": args.basis,
+                        "fragment": request.fragment_id,
+                        "fragment_index": index,
+                        "fragment_count": len(specs),
+                    },
+                )
+            if store and store.has(key):
+                item = store.load(key)
+            else:
+                item = run_atomic_fragment(request, settings=execution)
+                if store:
+                    store.save(key, item)
+            fragment_results.append(item)
+
+            if item.status is not FragmentExecutionStatus.COMPLETED:
+                failure = {
+                    "stage": "ATOMIC_FRAGMENTS",
+                    "basis": args.basis,
+                    "failed_fragment": request.fragment_id,
+                    "fragment_failure": [
+                        result.to_dict() for result in fragment_results
+                    ],
+                }
+                if reporter:
+                    reporter.blocked(
+                        current_step=f"FRAGMENT_FAILED_{request.fragment_id}",
+                        completed_steps=completed + [
+                            f"FRAGMENT_{x.fragment_id}"
+                            for x in fragment_results[:-1]
+                        ],
+                        next_steps=[
+                            "INSPECT_FRAGMENT_FAILURE",
+                            "RERUN_SAME_BASIS_TO_REUSE_PEC_AND_COMPLETED_FRAGMENTS",
+                        ],
+                        details={
+                            "basis": args.basis,
+                            "failed_fragment": request.fragment_id,
+                            "status": item.status.value,
+                            "error_type": item.error_type,
+                            "error_message": item.error_message,
+                        },
+                    )
+                print(json.dumps(failure, indent=2, sort_keys=True))
+                raise SystemExit(2)
+
+        completed = ["NEUTRAL_PEC", "ANION_PEC", "ATOMIC_FRAGMENTS"]
+        if reporter:
+            reporter.update(
+                current_step="ATTACHMENT_DECISION",
+                completed_steps=completed,
+                next_steps=["FINALIZE_ELECTRONIC_EA"],
+                details={"basis": args.basis},
+            )
 
         by_id = {result.fragment_id: result for result in fragment_results}
         channels = (
@@ -405,23 +538,14 @@ def main():
             "neutral_stage3_status": neutral.status.value,
             "anion_stage3_status": anion.status.value,
             "neutral_minimum_candidates_r_angstrom": [
-                x.r_angstrom
-                for x in neutral.final_pec.minimum_scout.candidates
+                x.r_angstrom for x in neutral.final_pec.minimum_scout.candidates
             ],
             "anion_minimum_candidates_r_angstrom": [
-                x.r_angstrom
-                for x in anion.final_pec.minimum_scout.candidates
+                x.r_angstrom for x in anion.final_pec.minimum_scout.candidates
             ],
-            "neutral_equilibrium": equilibrium_payload(
-                result.neutral_equilibrium
-            ),
-            "anion_equilibrium": equilibrium_payload(
-                result.anion_equilibrium
-            ),
-            "fragments": [
-                item.to_dict()
-                for item in fragment_results
-            ],
+            "neutral_equilibrium": equilibrium_payload(result.neutral_equilibrium),
+            "anion_equilibrium": equilibrium_payload(result.anion_equilibrium),
+            "fragments": [item.to_dict() for item in fragment_results],
             "dissociation_channels": [
                 {
                     "channel_id": channel.channel_id,
@@ -433,22 +557,16 @@ def main():
                 for channel in channels
             ],
             "anion_binding": (
-                None
-                if result.anion_binding is None
-                else {
+                None if result.anion_binding is None else {
                     "status": result.anion_binding.status.value,
                     "evidence": list(result.anion_binding.evidence),
-                    "energy_margin_hartree": (
-                        result.anion_binding.energy_margin_hartree
-                    ),
+                    "energy_margin_hartree": result.anion_binding.energy_margin_hartree,
                 }
             ),
             "electronic_ea": {
                 "workflow_status": result.status.value,
                 "decision_status": result.ea_decision.status.value,
-                "precision_status": (
-                    result.ea_decision.precision_status.value
-                ),
+                "precision_status": result.ea_decision.precision_status.value,
                 "lower_ev": result.ea_decision.ea_lower_ev,
                 "central_ev": result.ea_decision.ea_central_ev,
                 "upper_ev": result.ea_decision.ea_upper_ev,
@@ -461,23 +579,32 @@ def main():
             "ground_state_assigned": result.ground_state_assigned,
             "authorizes_pruning": result.authorizes_pruning,
             "scientific_caveats": [
-                "aug-cc-pVDZ/default smoke settings are validation-only",
+                "basis-run settings are validation-only",
                 "atomic fragment states are explicitly requested, not autonomously state-manifold resolved",
                 "fragment thresholds are scalar same-level smoke evidence without production uncertainty intervals",
                 "ZPE and downstream high-accuracy corrections are not included",
             ],
         }
+        if reporter:
+            reporter.completed(
+                current_step="ELECTRONIC_EA_BASIS_POINT_COMPLETE",
+                completed_steps=[
+                    "NEUTRAL_PEC",
+                    "ANION_PEC",
+                    "ATOMIC_FRAGMENTS",
+                    "ATTACHMENT_DECISION",
+                ],
+                next_steps=["RETURN_RESULT_TO_PARENT_WORKFLOW"],
+                details={
+                    "basis": args.basis,
+                    "ea_central_ev": result.ea_decision.ea_central_ev,
+                },
+            )
         print(json.dumps(payload, indent=2, sort_keys=True))
 
-        if neutral.status.value in (
-            "EXECUTION_BLOCKED",
-            "SCIENTIFICALLY_UNRESOLVED",
-        ):
+        if neutral.status.value in ("EXECUTION_BLOCKED", "SCIENTIFICALLY_UNRESOLVED"):
             raise SystemExit(3)
-        if anion.status.value in (
-            "EXECUTION_BLOCKED",
-            "SCIENTIFICALLY_UNRESOLVED",
-        ):
+        if anion.status.value in ("EXECUTION_BLOCKED", "SCIENTIFICALLY_UNRESOLVED"):
             raise SystemExit(3)
         if (
             result.is_production_ea
