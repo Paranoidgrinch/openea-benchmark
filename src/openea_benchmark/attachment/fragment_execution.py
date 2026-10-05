@@ -17,6 +17,7 @@ turn a smoke-test threshold into production dissociation evidence.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from enum import Enum
 from math import isfinite
@@ -33,6 +34,41 @@ class FragmentExecutionStatus(str, Enum):
     SCF_UNSTABLE = "SCF_UNSTABLE"
     CCSD_NOT_CONVERGED = "CCSD_NOT_CONVERGED"
     ERROR = "ERROR"
+
+
+@contextmanager
+def _temporary_numpy_linalg_legacy_alias():
+    """Restore NumPy's removed ``numpy.linalg.linalg`` alias temporarily.
+
+    NumPy 2.4 removed the deprecated public path ``numpy.linalg.linalg``.
+    Some scientific-code paths still import objects through that path.  The
+    compatibility alias is installed only for the narrow PySCF Newton/CIAH
+    call and is removed immediately afterwards.  No numerical function is
+    replaced: when available, the alias points to NumPy's private ``_linalg``
+    module that superseded the removed module.
+    """
+    import numpy as np
+
+    if hasattr(np.linalg, "linalg"):
+        yield False
+        return
+
+    target = getattr(np.linalg, "_linalg", None)
+    if target is None:
+        # Fail closed: do not manufacture a compatibility target if NumPy no
+        # longer exposes the implementation module.
+        raise RuntimeError(
+            "NumPy lacks both numpy.linalg.linalg and numpy.linalg._linalg; "
+            "cannot provide the narrow Newton compatibility alias"
+        )
+
+    setattr(np.linalg, "linalg", target)
+    try:
+        yield True
+    finally:
+        # Remove only the alias created by this context.
+        if getattr(np.linalg, "linalg", None) is target:
+            delattr(np.linalg, "linalg")
 
 
 @dataclass(frozen=True)
@@ -198,24 +234,54 @@ def _run_atomic_fragment_pyscf(
     if not primary_converged and retry_settings.enable_newton_retry:
         newton_attempted = True
         solver_path.append("CIAH_NEWTON_FROM_PRIMARY_ORBITALS")
-        newton_mf = mf.newton()
-        newton_mf.conv_tol = settings.scf_conv_tol
-        newton_mf.conv_tol_grad = settings.scf_conv_tol_grad
-        newton_mf.max_cycle = max(
-            settings.scf_max_cycle * retry_settings.newton_cycle_multiplier,
-            retry_settings.newton_min_cycles,
-        )
-        newton_mf.max_memory = settings.max_memory_mb
-        newton_mf.kernel()
-        newton_converged = bool(newton_mf.converged)
-        if newton_mf.mo_coeff is not None:
-            mf.mo_coeff = newton_mf.mo_coeff
-        if newton_mf.mo_occ is not None:
-            mf.mo_occ = newton_mf.mo_occ
-        if newton_mf.mo_energy is not None:
-            mf.mo_energy = newton_mf.mo_energy
-        mf.e_tot = newton_mf.e_tot
-        mf.converged = newton_converged
+        try:
+            with _temporary_numpy_linalg_legacy_alias() as compat_applied:
+                if compat_applied:
+                    solver_path.append("NUMPY24_LINALG_COMPAT_ALIAS")
+                newton_mf = mf.newton()
+                newton_mf.conv_tol = settings.scf_conv_tol
+                newton_mf.conv_tol_grad = settings.scf_conv_tol_grad
+                newton_mf.max_cycle = max(
+                    settings.scf_max_cycle * retry_settings.newton_cycle_multiplier,
+                    retry_settings.newton_min_cycles,
+                )
+                newton_mf.max_memory = settings.max_memory_mb
+                # PySCF's SOSCF/Newton solver is seeded explicitly with the
+                # orbitals/occupancies from the failed primary ROHF attempt.
+                # This remains the same HF state and basis; only the numerical
+                # optimizer changes.
+                newton_mf.kernel(mf.mo_coeff, mf.mo_occ)
+                newton_converged = bool(newton_mf.converged)
+                if newton_mf.mo_coeff is not None:
+                    mf.mo_coeff = newton_mf.mo_coeff
+                if newton_mf.mo_occ is not None:
+                    mf.mo_occ = newton_mf.mo_occ
+                if newton_mf.mo_energy is not None:
+                    mf.mo_energy = newton_mf.mo_energy
+                mf.e_tot = newton_mf.e_tot
+                mf.converged = newton_converged
+        except Exception as exc:
+            # Preserve the primary SCF evidence and the attempted solver path.
+            # The outer generic error handler would otherwise erase precisely
+            # the metadata needed to diagnose numerical compatibility issues.
+            import numpy as np
+            return _empty_result(
+                request,
+                FragmentExecutionStatus.ERROR,
+                pyscf_version=getattr(pyscf, "__version__", None),
+                scf_converged=False,
+                scf_energy_hartree=(
+                    float(mf.e_tot) if mf.e_tot is not None else None
+                ),
+                scf_solver_path=tuple(solver_path),
+                scf_primary_converged=primary_converged,
+                scf_newton_attempted=True,
+                scf_newton_converged=False,
+                error_type=type(exc).__name__,
+                error_message=(
+                    f"{exc}; numpy={getattr(np, '__version__', 'unknown')}"
+                ),
+            )
 
     try:
         s2, multiplicity = mf.spin_square()
