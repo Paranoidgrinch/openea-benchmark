@@ -74,3 +74,33 @@ class StageCheckpointStore:
         # TRUST BOUNDARY: only files written by this OpenEA run directory.
         with path.open("rb") as handle:
             return pickle.load(handle)
+
+    def remove(self, key: str) -> bool:
+        """Remove one reusable stage checkpoint if it exists."""
+        path = self.path_for(key)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def load_if_valid(
+        self,
+        key: str,
+        *,
+        validator,
+        invalidate_invalid: bool = True,
+    ) -> Any | None:
+        """Load a checkpoint only when it still satisfies a reuse contract.
+
+        Failed or obsolete scientific results must not become sticky merely
+        because they were serialized.  If validation fails, the checkpoint is
+        removed by default so the current solver/policy gets a fresh attempt.
+        """
+        if not self.has(key):
+            return None
+        value = self.load(key)
+        if bool(validator(value)):
+            return value
+        if invalidate_invalid:
+            self.remove(key)
+        return None

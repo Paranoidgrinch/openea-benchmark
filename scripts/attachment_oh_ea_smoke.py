@@ -458,12 +458,61 @@ def main():
                         "fragment_count": len(specs),
                     },
                 )
-            if store and store.has(key):
-                item = store.load(key)
-            else:
+            item = None
+            if store:
+                had_checkpoint = store.has(key)
+                item = store.load_if_valid(
+                    key,
+                    validator=lambda value: (
+                        getattr(value, "status", None)
+                        is FragmentExecutionStatus.COMPLETED
+                    ),
+                    invalidate_invalid=True,
+                )
+                if had_checkpoint and item is None and reporter:
+                    reporter.update(
+                        current_step=f"INVALIDATE_FAILED_{request.fragment_id}",
+                        completed_steps=completed + [
+                            f"FRAGMENT_{x.fragment_id}" for x in fragment_results
+                        ],
+                        next_steps=[
+                            f"RETRY_FRAGMENT_{request.fragment_id}",
+                            *[f"FRAGMENT_{x.fragment_id}" for x in specs[index:]],
+                            "ATTACHMENT_DECISION",
+                        ],
+                        details={
+                            "basis": args.basis,
+                            "fragment": request.fragment_id,
+                            "reason": "CHECKPOINT_NOT_COMPLETED",
+                        },
+                    )
+                elif item is not None and reporter:
+                    reporter.update(
+                        current_step=f"REUSE_FRAGMENT_{request.fragment_id}",
+                        completed_steps=completed + [
+                            f"FRAGMENT_{x.fragment_id}" for x in fragment_results
+                        ] + [f"FRAGMENT_{request.fragment_id}"],
+                        next_steps=[
+                            *[f"FRAGMENT_{x.fragment_id}" for x in specs[index:]],
+                            "ATTACHMENT_DECISION",
+                        ],
+                        details={
+                            "basis": args.basis,
+                            "fragment": request.fragment_id,
+                            "source": "STAGE_CHECKPOINT",
+                        },
+                    )
+
+            if item is None:
                 item = run_atomic_fragment(request, settings=execution)
-                if store:
+                # Only scientifically reusable success is checkpointed.
+                # Failure evidence remains in child JSON/status output.
+                if (
+                    store
+                    and item.status is FragmentExecutionStatus.COMPLETED
+                ):
                     store.save(key, item)
+
             fragment_results.append(item)
 
             if item.status is not FragmentExecutionStatus.COMPLETED:
