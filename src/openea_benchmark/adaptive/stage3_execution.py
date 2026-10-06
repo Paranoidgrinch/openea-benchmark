@@ -20,6 +20,9 @@ Scientific invariants
   orbital representation.
 * ROHF external stability is never fabricated: PySCF does not currently
   provide that test.  Internal stability is checked.
+* The CC correlation space is explicit through ``settings.frozen_core``;
+  legacy/default execution is all-electron, while frozen-core requests use
+  PySCF ``CCSD.set_frozen()``.
 * A numerical result is not a production EA, not a ground-state assignment,
   and not permission to prune another state.
 """
@@ -55,6 +58,7 @@ class Stage3ExecutionSettings:
     require_internal_stability: bool = True
     require_rhf_external_stability: bool = True
     run_ccsd_t: bool = True
+    frozen_core: bool = False
     verbose: int = 4
     artifact_dir: str | None = None
 
@@ -468,6 +472,11 @@ def _run_stage3_point_pyscf(
         semicanonicalization = "RHF_CANONICAL_REFERENCE"
 
     mycc = cc.CCSD(cc_mf)
+    # Correlation space must be explicit. PySCF correlates all electrons
+    # when frozen is None. For a valence frozen-core calculation use
+    # PySCF's documented automatic chemical-core rule.
+    if settings.frozen_core:
+        mycc.set_frozen()
     mycc.conv_tol = settings.cc_conv_tol
     mycc.conv_tol_normt = settings.cc_conv_tol_normt
     mycc.max_cycle = settings.cc_max_cycle
