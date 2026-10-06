@@ -21,6 +21,7 @@ Scientific invariants
 * ROHF external stability is never fabricated: PySCF does not currently
   provide that test.  Internal stability is checked.
 * Orbital basis assignment may be element-specific through ``request.basis_by_element`` while ``request.basis`` remains the human-readable provenance label.
+* Scalar-relativistic execution is explicit through ``settings.scalar_relativistic``; v1 supports `NONE` and spin-free `SFX2C1E` and never conflates this with SOC.
 * The CC correlation space is explicit through ``settings.frozen_core``;
   legacy/default execution is all-electron, while frozen-core requests use
   PySCF ``CCSD.set_frozen()``.
@@ -60,6 +61,7 @@ class Stage3ExecutionSettings:
     require_rhf_external_stability: bool = True
     run_ccsd_t: bool = True
     frozen_core: bool = False
+    scalar_relativistic: str = "NONE"
     verbose: int = 4
     artifact_dir: str | None = None
 
@@ -72,6 +74,10 @@ class Stage3ExecutionSettings:
             raise ValueError("SCF/CC cycle limits must be positive")
         if self.max_memory_mb <= 0:
             raise ValueError("max_memory_mb must be positive")
+        if self.scalar_relativistic not in {"NONE", "SFX2C1E"}:
+            raise ValueError(
+                "scalar_relativistic must be NONE or SFX2C1E"
+            )
         if self.artifact_dir is not None and not str(self.artifact_dir).strip():
             raise ValueError("artifact_dir must be non-empty when supplied")
 
@@ -402,6 +408,11 @@ def _run_stage3_point_pyscf(
         dm0 = scf.rohf.init_guess_by_chkfile(
             mol, request.source_checkpoint_path, project=settings.checkpoint_project
         )
+
+    if settings.scalar_relativistic == "SFX2C1E":
+        # Spin-free one-electron X2C.  PySCF propagates the transformed
+        # Hamiltonian into post-SCF methods built from this mean-field object.
+        mf = mf.sfx2c1e()
 
     high_level_checkpoint: Path | None = None
     if settings.artifact_dir is not None:
