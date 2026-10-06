@@ -31,10 +31,19 @@ from openea_benchmark.attachment.core_valence_correction import (
     assess_core_valence, cv_point_from_results,
 )
 
-BASIS_BY_X={
-    3:"aug-cc-pwcvtz",
-    4:"aug-cc-pwcvqz",
-    5:"aug-cc-pwcv5z",
+BASIS_BY_X = {
+    3: {
+        "label": "O:aug-cc-pwCVTZ|H:aug-cc-pVTZ",
+        "by_element": {"O": "aug-cc-pwcvtz", "H": "aug-cc-pvtz"},
+    },
+    4: {
+        "label": "O:aug-cc-pwCVQZ|H:aug-cc-pVQZ",
+        "by_element": {"O": "aug-cc-pwcvqz", "H": "aug-cc-pvqz"},
+    },
+    5: {
+        "label": "O:aug-cc-pwCV5Z|H:aug-cc-pV5Z",
+        "by_element": {"O": "aug-cc-pwcv5z", "H": "aug-cc-pv5z"},
+    },
 }
 
 def default_run_id():
@@ -42,12 +51,12 @@ def default_run_id():
         "oh_core_valence_"+datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     )
 
-def make_source(path, role, basis, r, max_memory):
+def make_source(path, role, basis_by_element, r, max_memory):
     if path.is_file():
         return
     charge=0 if role=="neutral" else -1
     spin=1 if role=="neutral" else 0
-    mol=gto.M(atom=f"O 0 0 0; H 0 0 {r}",basis=basis,charge=charge,spin=spin,
+    mol=gto.M(atom=f"O 0 0 0; H 0 0 {r}",basis=dict(basis_by_element),charge=charge,spin=spin,
               unit="Angstrom",symmetry=False,verbose=0,max_memory=max_memory)
     mf=scf.ROHF(mol) if spin else scf.RHF(mol)
     mf.chkfile=str(path); mf.conv_tol=1e-9; mf.max_cycle=100
@@ -56,7 +65,9 @@ def make_source(path, role, basis, r, max_memory):
         m2=mf.newton(); m2.chkfile=str(path); m2.conv_tol=1e-9; m2.max_cycle=100
         m2.kernel(mo_coeff=mf.mo_coeff,mo_occ=mf.mo_occ)
         if not m2.converged:
-            raise RuntimeError(f"SCF failed {role} {basis}")
+            raise RuntimeError(
+                f"SCF failed {role} mixed_basis={dict(basis_by_element)}"
+            )
 
 def main():
     p=argparse.ArgumentParser()
@@ -84,21 +95,29 @@ def main():
     completed=["REFERENCE_GEOMETRIES_LOADED"]
 
     for x in range(3,args.max_cardinal+1):
-        basis=BASIS_BY_X[x]
-        # preflight basis availability before any CC work for this cardinal
-        for atom in ("O","H"):
-            gto.basis.load(basis,atom)
+        basis_spec = BASIS_BY_X[x]
+        basis = basis_spec["label"]
+        basis_by_element = dict(basis_spec["by_element"])
+
+        # H has no inner core shell.  Use pwCVXZ on O and the matching
+        # cardinal valence family pVXZ on H.
+        for atom, atom_basis in basis_by_element.items():
+            gto.basis.load(atom_basis, atom)
 
         totals={}
         for role in ("neutral","anion"):
-            src=src_dir/f"{role}__{basis}.chk"
-            make_source(src,role,basis,geoms[role].r_angstrom,args.max_memory_mb)
+            safe_basis = basis.replace(":", "_").replace("|", "__")
+            src=src_dir/f"{role}__{safe_basis}.chk"
+            make_source(
+                src, role, basis_by_element, geoms[role].r_angstrom,
+                args.max_memory_mb,
+            )
 
             for frozen in (True,False):
                 space="FC" if frozen else "AE"
                 label=f"X{x}:{role}:{space}"
-                pkl=points_dir/f"{role}__{basis}__{space}.pkl"
-                js=points_dir/f"{role}__{basis}__{space}.json"
+                pkl=points_dir/f"{role}__{safe_basis}__{space}.pkl"
+                js=points_dir/f"{role}__{safe_basis}__{space}.json"
 
                 result=None
                 if pkl.is_file():
@@ -115,13 +134,22 @@ def main():
                         current_step=f"CALCULATE_{label}",
                         completed_steps=completed,
                         next_steps=["SAVE_POINT","CONTINUE_CORE_VALENCE_SERIES"],
-                        details={"basis":basis,"role":role,
-                                 "correlation_space":"FROZEN_CORE" if frozen else "ALL_ELECTRON"}
+                        details={
+                            "basis": basis,
+                            "basis_by_element": basis_by_element,
+                            "role": role,
+                            "correlation_space": (
+                                "FROZEN_CORE" if frozen else "ALL_ELECTRON"
+                            ),
+                        }
                     )
                     request=make_cbs_single_point_request(
-                        role=role,basis=basis,cardinal_number=x,
+                        role=role,
+                        basis=basis,
+                        cardinal_number=x,
                         r_angstrom=geoms[role].r_angstrom,
                         source_checkpoint_path=src,
+                        basis_by_element=basis_by_element,
                     )
                     settings=Stage3ExecutionSettings(
                         scf_conv_tol=1e-9,scf_conv_tol_grad=1e-6,cc_conv_tol=1e-8,
@@ -182,7 +210,11 @@ def main():
     payload.update({
         "run_id":args.run_id,
         "reference_run_id":args.reference_run_id,
-        "basis_family":"aug-cc-pwCVXZ",
+        "basis_family":"O:aug-cc-pwCVXZ | H:aug-cc-pVXZ",
+        "basis_assignment_policy":(
+            "Core-valence basis on O; matching valence basis on H, "
+            "which has no core shell."
+        ),
         "definition":"Delta_CV = EA_all_electron - EA_frozen_core in same core-valence basis",
         "target_change_ev":args.target_change_ev,
         "is_production_ea":False,

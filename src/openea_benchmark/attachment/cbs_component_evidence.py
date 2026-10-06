@@ -128,7 +128,8 @@ def load_reference_geometries(*, run_dir: Path, reference_basis: str = "d-aug-cc
 
 
 def make_cbs_single_point_request(*, role: str, basis: str, cardinal_number: int,
-                                  r_angstrom: float, source_checkpoint_path: Path):
+                                  r_angstrom: float, source_checkpoint_path: Path,
+                                  basis_by_element: dict[str, str] | None = None):
     if role not in {"neutral", "anion"}:
         raise ValueError("role must be neutral or anion")
     charge = 0 if role == "neutral" else -1
@@ -151,6 +152,9 @@ def make_cbs_single_point_request(*, role: str, basis: str, cardinal_number: int
         dft_center_r_angstrom=float(r_angstrom),
         dft_center_energy_hartree=0.0,
         requires_independent_state_identity_validation=False,
+        basis_by_element=(
+            None if basis_by_element is None else dict(basis_by_element)
+        ),
         authorizes_pruning=False,
     )
 

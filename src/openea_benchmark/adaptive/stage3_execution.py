@@ -20,6 +20,7 @@ Scientific invariants
   orbital representation.
 * ROHF external stability is never fabricated: PySCF does not currently
   provide that test.  Internal stability is checked.
+* Orbital basis assignment may be element-specific through ``request.basis_by_element`` while ``request.basis`` remains the human-readable provenance label.
 * The CC correlation space is explicit through ``settings.frozen_core``;
   legacy/default execution is all-electron, while frozen-core requests use
   PySCF ``CCSD.set_frozen()``.
@@ -98,6 +99,7 @@ class Stage3ExecutionRequest:
     dft_center_r_angstrom: float
     dft_center_energy_hartree: float
     requires_independent_state_identity_validation: bool
+    basis_by_element: Mapping[str, str] | None = None
     authorizes_pruning: bool = False
 
     def __post_init__(self) -> None:
@@ -111,6 +113,17 @@ class Stage3ExecutionRequest:
             raise ValueError("Execution geometry must be positive and finite")
         if not self.basis.strip():
             raise ValueError("Execution request requires a basis")
+        if self.basis_by_element is not None:
+            expected_elements = {str(x) for x in self.atoms}
+            provided_elements = {str(x) for x in self.basis_by_element}
+            if provided_elements != expected_elements:
+                raise ValueError(
+                    "basis_by_element must provide exactly the request atoms: "
+                    f"expected={sorted(expected_elements)} "
+                    f"provided={sorted(provided_elements)}"
+                )
+            if any(not str(v).strip() for v in self.basis_by_element.values()):
+                raise ValueError("basis_by_element contains an empty basis name")
         if "CCSD" not in self.methods:
             raise ValueError("Stage-3 execution requires CCSD")
         if self.requested_reference.upper() != "ROHF":
@@ -366,7 +379,11 @@ def _run_stage3_point_pyscf(
     ]
     mol = gto.M(
         atom=atom_spec,
-        basis=request.basis,
+        basis=(
+            dict(request.basis_by_element)
+            if request.basis_by_element is not None
+            else request.basis
+        ),
         charge=request.charge,
         spin=request.spin_2s,
         unit="Angstrom",

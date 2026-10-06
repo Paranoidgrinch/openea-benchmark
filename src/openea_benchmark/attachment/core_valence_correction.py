@@ -3,7 +3,7 @@
 At a fixed reference geometry and fixed core-valence basis X:
     Delta_CV(X) = EA_all-electron(X) - EA_frozen-core(X)
 
-The correction is evaluated with aug-cc-pwCVXZ.  No extrapolation formula is
+For OH the correction uses aug-cc-pwCVXZ on O and the matching aug-cc-pVXZ basis on H, because H has no inner core shell.  No extrapolation formula is
 assumed in v1.  Instead the highest-cardinal correction is used as central
 value and the latest cardinal change is a convergence uncertainty.
 
