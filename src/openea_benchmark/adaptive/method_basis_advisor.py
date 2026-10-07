@@ -10,7 +10,12 @@ from openea_benchmark.attachment.basis_convergence import (
     DiffuseConvergenceAssessment,
 )
 
-from .model import ReferenceCharacterAssessment, ReferenceCharacterStatus
+from .model import (
+    ReferenceCharacterAssessment,
+    ReferenceCharacterStatus,
+    Review,
+    ReviewStatus,
+)
 
 # Backward-compatible source alias.  New code should use
 # ReferenceCharacterStatus / ReferenceCharacterAssessment explicitly.
@@ -92,6 +97,7 @@ class MethodBasisEvidence:
     scalar_relativity_need: CorrectionNeed
     cardinal: CardinalConvergenceAssessment | None = None
     diffuse: DiffuseConvergenceAssessment | None = None
+    expanded_reference_diagnostics: Review | None = None
 
     @property
     def reference_status(self) -> ReferenceCharacterStatus:
@@ -166,8 +172,13 @@ def advise_method_basis(
     if status is ReferenceCharacterStatus.UNRESOLVED:
         actions.append(AdvisorAction.RESOLVE_REFERENCE_CHARACTER)
     elif status is ReferenceCharacterStatus.BORDERLINE:
-        actions.append(AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS)
-        audit.append('BORDERLINE_SINGLE_REFERENCE_REQUIRES_EXPANDED_DIAGNOSTICS')
+        expanded = ev.expanded_reference_diagnostics
+        if expanded is None or expanded.status is not ReviewStatus.CLEARED:
+            actions.append(AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS)
+            audit.append('BORDERLINE_SINGLE_REFERENCE_REQUIRES_EXPANDED_DIAGNOSTICS')
+        else:
+            audit.append('BORDERLINE_EXPANDED_REFERENCE_DIAGNOSTICS_CLEARED')
+        audit.append('BORDERLINE_REQUIRES_ENLARGED_UNCERTAINTY')
     elif status is ReferenceCharacterStatus.SAFE_SINGLE_REFERENCE:
         audit.append('REFERENCE_CHARACTER_SAFE_SINGLE_REFERENCE')
     elif status is ReferenceCharacterStatus.MULTIREFERENCE_RISK:
@@ -230,6 +241,7 @@ def advise_method_basis(
 
     blockers = {
         AdvisorAction.RESOLVE_REFERENCE_CHARACTER,
+        AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS,
         AdvisorAction.RESOLVE_ATTACHMENT_CHARACTER,
         AdvisorAction.ENTER_MULTIREFERENCE_BRANCH,
         AdvisorAction.ENTER_ATTACHMENT_RESOLUTION_BRANCH,
@@ -242,9 +254,9 @@ def advise_method_basis(
         AdvisorAction.TEST_SCALAR_RELATIVITY,
         AdvisorAction.SELECT_RELATIVISTIC_COMPATIBLE_BASIS,
     }
-    # BORDERLINE is intentionally not a hard blocker here: it may proceed on
-    # the SR path, but the explicit EXPAND_REFERENCE_DIAGNOSTICS action remains
-    # visible and uncertainty must later be enlarged.
+    # BORDERLINE may remain on the SR branch, but production is not authorized
+    # until the explicitly requested expanded diagnostics have been reviewed.
+    # Even after clearance, its uncertainty budget must remain enlarged.
     if (
         branch is HighAccuracyBranch.SINGLE_REFERENCE_CC
         and ev.cardinal is not None

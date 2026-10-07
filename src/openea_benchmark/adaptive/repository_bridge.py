@@ -335,4 +335,5 @@ def gates_with_state_completeness(
         state_completeness=state_completeness,
         attachment_resolution=base.attachment_resolution,
         energy_reliability=base.energy_reliability,
+        energy_subgates=base.energy_subgates,
     )

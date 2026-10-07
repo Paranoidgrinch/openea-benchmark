@@ -26,3 +26,31 @@ def test_cleared_axes_proceed_cbs(): assert AdvisorAction.PROCEED_COMPONENT_RESO
 def test_missing_diffuse_blocks_cbs(): assert AdvisorAction.PROCEED_COMPONENT_RESOLVED_CBS not in advise_method_basis(profile(),ev(cardinal=card_ok())).actions
 def test_never_production():
     p=advise_method_basis(profile(),ev()); assert not p.is_production_ea and not p.authorizes_pruning
+
+
+def test_borderline_reference_blocks_component_cbs_until_expanded_diagnostics_clear():
+    borderline = ReferenceCharacterAssessment(
+        ReferenceCharacterStatus.BORDERLINE,
+        ('ref',),
+        ('borderline',),
+    )
+    unresolved_plan = advise_method_basis(
+        profile(),
+        ev(reference_character=borderline, cardinal=card_ok(), diffuse=diff_ok()),
+    )
+    assert AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS in unresolved_plan.actions
+    assert AdvisorAction.PROCEED_COMPONENT_RESOLVED_CBS not in unresolved_plan.actions
+
+    expanded = Review(ReviewStatus.CLEARED, ('expanded',), 'expanded diagnostics complete')
+    cleared_plan = advise_method_basis(
+        profile(),
+        ev(
+            reference_character=borderline,
+            cardinal=card_ok(),
+            diffuse=diff_ok(),
+            expanded_reference_diagnostics=expanded,
+        ),
+    )
+    assert AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS not in cleared_plan.actions
+    assert AdvisorAction.PROCEED_COMPONENT_RESOLVED_CBS in cleared_plan.actions
+    assert 'BORDERLINE_REQUIRES_ENLARGED_UNCERTAINTY' in cleared_plan.evidence

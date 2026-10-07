@@ -51,6 +51,14 @@ class MethodRole(str, Enum):
     VALIDATION = 'VALIDATION'
 
 
+class ScientificResolutionStatus(str, Enum):
+    """Canonical terminal scientific outcome of OpenEA."""
+
+    BOUND = 'BOUND'
+    UNBOUND = 'UNBOUND'
+    UNRESOLVED = 'UNRESOLVED'
+
+
 class ReferenceCharacterStatus(str, Enum):
     """Outcome of the mandatory reference-character gate.
 
@@ -266,25 +274,113 @@ class EAEstimate:
         return total
 
 
-@dataclass(frozen=True)
-class GateSet:
-    """G1: state coverage, G2: attachment/continuum, G3: EA sign reliability.
+def _review_closes_gate(review: Review) -> bool:
+    """Return whether a reviewed requirement is scientifically closed.
 
-    `CLEARED` on G3 does not imply that the *precision target* is achieved.
-    It means the supplied EA interval is defensible for sign classification.
+    NOT_APPLICABLE closes a gate only because Review itself requires an
+    explicit physical rationale for that status.
     """
-    state_completeness: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
-    attachment_resolution: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
-    energy_reliability: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+
+    return review.status in (ReviewStatus.CLEARED, ReviewStatus.NOT_APPLICABLE)
+
+
+@dataclass(frozen=True)
+class EnergyReliabilityGateSet:
+    """Canonical G3 decomposition from the OpenEA-v1 production contract.
+
+    G3a reference-method validity
+    G3b basis/diffuse convergence
+    G3c correlation reliability
+    G3d missing physical corrections
+    G3e uncertainty closure
+    """
+
+    reference_method_validity: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    basis_diffuse_convergence: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    correlation_reliability: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    physical_corrections: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    uncertainty_closure: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
 
     def open_gates(self) -> tuple[str, ...]:
         return tuple(
             name for name, item in (
-                ('G1_STATE_COMPLETENESS', self.state_completeness),
-                ('G2_ATTACHMENT_RESOLUTION', self.attachment_resolution),
-                ('G3_ENERGY_RELIABILITY', self.energy_reliability),
-            ) if item.status != ReviewStatus.CLEARED
+                ('G3A_REFERENCE_METHOD_VALIDITY', self.reference_method_validity),
+                ('G3B_BASIS_DIFFUSE_CONVERGENCE', self.basis_diffuse_convergence),
+                ('G3C_CORRELATION_RELIABILITY', self.correlation_reliability),
+                ('G3D_PHYSICAL_CORRECTIONS', self.physical_corrections),
+                ('G3E_UNCERTAINTY_CLOSURE', self.uncertainty_closure),
+            ) if not _review_closes_gate(item)
         )
+
+    @property
+    def is_closed(self) -> bool:
+        return not self.open_gates()
+
+    def aggregate_review(self) -> Review:
+        """Legacy-compatible composite G3 review derived from the subgates."""
+
+        evidence = tuple(dict.fromkeys(
+            evidence_id
+            for review in (
+                self.reference_method_validity,
+                self.basis_diffuse_convergence,
+                self.correlation_reliability,
+                self.physical_corrections,
+                self.uncertainty_closure,
+            )
+            for evidence_id in review.evidence_ids
+        ))
+        if self.is_closed:
+            if evidence:
+                return Review(
+                    ReviewStatus.CLEARED,
+                    evidence,
+                    'G3a-G3e are individually closed.',
+                )
+            return Review(
+                ReviewStatus.NOT_APPLICABLE,
+                (),
+                'All G3 subgates are physically not applicable.',
+            )
+        return Review(
+            ReviewStatus.UNRESOLVED,
+            evidence,
+            'Open G3 subgates: ' + ', '.join(self.open_gates()),
+        )
+
+
+@dataclass(frozen=True)
+class GateSet:
+    """G1/G2 plus legacy or component-resolved G3 scientific gates.
+
+    Existing callers may continue to provide ``energy_reliability`` only.
+    New production code should provide ``energy_subgates``; when present,
+    G3a-G3e are authoritative and the legacy composite cannot hide an open
+    subgate.  Precision-target achievement remains a separate assessment.
+    """
+
+    state_completeness: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    attachment_resolution: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    energy_reliability: Review = field(default_factory=lambda: Review(ReviewStatus.PENDING))
+    energy_subgates: EnergyReliabilityGateSet | None = None
+
+    @property
+    def effective_energy_reliability(self) -> Review:
+        if self.energy_subgates is not None:
+            return self.energy_subgates.aggregate_review()
+        return self.energy_reliability
+
+    def open_gates(self) -> tuple[str, ...]:
+        open_items: list[str] = []
+        if not _review_closes_gate(self.state_completeness):
+            open_items.append('G1_STATE_COMPLETENESS')
+        if not _review_closes_gate(self.attachment_resolution):
+            open_items.append('G2_ATTACHMENT_RESOLUTION')
+        if self.energy_subgates is not None:
+            open_items.extend(self.energy_subgates.open_gates())
+        elif not _review_closes_gate(self.energy_reliability):
+            open_items.append('G3_ENERGY_RELIABILITY')
+        return tuple(open_items)
 
 
 def ground_state_interval(candidate_intervals: Iterable[Interval]) -> Interval:

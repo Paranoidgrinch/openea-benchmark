@@ -23,7 +23,21 @@ from enum import Enum, IntEnum
 from math import inf, isfinite
 from typing import Iterable
 
-from .model import DiagnosticID, DiagnosticRecord, MethodRole, ReviewStatus
+from .model import (
+    DiagnosticID,
+    DiagnosticRecord,
+    MethodRole,
+    ReferenceCharacterAssessment,
+    ReferenceCharacterStatus,
+    Review,
+    ReviewStatus,
+    ScientificResolutionStatus,
+)
+from .multireference import (
+    MRBranchStatus,
+    MRProductionCapability,
+    resolve_multireference_branch,
+)
 from .pec_selection_bridge import CandidateEnergyEvidence, StateSelectionBridgeResult
 
 
@@ -44,6 +58,133 @@ class ActionKind(str, Enum):
     RESOLVE_PEC_ASYMPTOTES = "RESOLVE_PEC_ASYMPTOTES"
     HIGH_ACCURACY_CANDIDATE_COMPARISON = "HIGH_ACCURACY_CANDIDATE_COMPARISON"
     INVESTIGATE_DIAGNOSTIC = "INVESTIGATE_DIAGNOSTIC"
+
+
+class ProductionRouteStatus(str, Enum):
+    READY_SINGLE_REFERENCE = "READY_SINGLE_REFERENCE"
+    READY_MULTIREFERENCE = "READY_MULTIREFERENCE"
+    DIAGNOSTICS_REQUIRED = "DIAGNOSTICS_REQUIRED"
+    TERMINAL_UNRESOLVED = "TERMINAL_UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class ProductionRoutePlan:
+    """Method-family route after the mandatory Reference Character Gate.
+
+    A route marked READY is permission to enter a production branch, not a
+    claim that the EA itself is already resolved.  BORDERLINE references are
+    not production-ready until expanded diagnostics have themselves been
+    reviewed and cleared.  MR risk fails closed unless a validated MR
+    capability is explicitly supplied.
+    """
+
+    status: ProductionRouteStatus
+    method_role: MethodRole | None
+    method_family: tuple[str, ...]
+    required_actions: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    scientific_status: ScientificResolutionStatus | None = None
+    terminal_reason: str | None = None
+    rationale: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.rationale.strip():
+            raise ValueError("Production route requires a rationale")
+        if self.status in (
+            ProductionRouteStatus.READY_SINGLE_REFERENCE,
+            ProductionRouteStatus.READY_MULTIREFERENCE,
+        ):
+            if self.method_role is not MethodRole.PRODUCTION or not self.method_family:
+                raise ValueError("Ready production route requires a production method family")
+            if self.scientific_status is not None or self.terminal_reason is not None:
+                raise ValueError("Ready production route cannot carry a terminal scientific result")
+        if self.status is ProductionRouteStatus.TERMINAL_UNRESOLVED:
+            if self.scientific_status is not ScientificResolutionStatus.UNRESOLVED:
+                raise ValueError("Terminal unresolved route must carry UNRESOLVED")
+            if not self.terminal_reason:
+                raise ValueError("Terminal unresolved route requires a reason code")
+
+
+def _review_closed(review: Review | None) -> bool:
+    return review is not None and review.status is ReviewStatus.CLEARED
+
+
+def plan_production_route(
+    reference_character: ReferenceCharacterAssessment,
+    *,
+    expanded_reference_diagnostics: Review | None = None,
+    mr_capability: MRProductionCapability | None = None,
+) -> ProductionRoutePlan:
+    """Bind the Reference Character Gate to the production planner.
+
+    This function is intentionally method-family level.  It does not launch a
+    calculation and cannot turn reconnaissance evidence into a production EA.
+    """
+
+    evidence = tuple(dict.fromkeys(
+        reference_character.evidence_ids
+        + (() if expanded_reference_diagnostics is None else expanded_reference_diagnostics.evidence_ids)
+    ))
+
+    if reference_character.status is ReferenceCharacterStatus.SAFE_SINGLE_REFERENCE:
+        return ProductionRoutePlan(
+            ProductionRouteStatus.READY_SINGLE_REFERENCE,
+            MethodRole.PRODUCTION,
+            ('CCSD(T)',),
+            (),
+            evidence,
+            rationale='Reference Character Gate authorizes the single-reference CCSD(T) production branch.',
+        )
+
+    if reference_character.status is ReferenceCharacterStatus.BORDERLINE:
+        if not _review_closed(expanded_reference_diagnostics):
+            return ProductionRoutePlan(
+                ProductionRouteStatus.DIAGNOSTICS_REQUIRED,
+                None,
+                (),
+                ('EXPAND_REFERENCE_DIAGNOSTICS', 'ENLARGE_REFERENCE_CHARACTER_UNCERTAINTY'),
+                evidence,
+                rationale='BORDERLINE reference character requires reviewed expanded diagnostics before production.',
+            )
+        return ProductionRoutePlan(
+            ProductionRouteStatus.READY_SINGLE_REFERENCE,
+            MethodRole.PRODUCTION,
+            ('CCSD(T)',),
+            ('ENLARGE_REFERENCE_CHARACTER_UNCERTAINTY',),
+            evidence,
+            rationale='Expanded diagnostics allow the BORDERLINE state to enter the single-reference branch with enlarged uncertainty.',
+        )
+
+    if reference_character.status is ReferenceCharacterStatus.MULTIREFERENCE_RISK:
+        mr = resolve_multireference_branch(mr_capability)
+        if mr.status is MRBranchStatus.PRODUCTION_AUTHORIZED:
+            return ProductionRoutePlan(
+                ProductionRouteStatus.READY_MULTIREFERENCE,
+                MethodRole.PRODUCTION,
+                mr.method_family,
+                (),
+                tuple(dict.fromkeys(evidence + mr.evidence_ids)),
+                rationale=mr.rationale,
+            )
+        return ProductionRoutePlan(
+            ProductionRouteStatus.TERMINAL_UNRESOLVED,
+            None,
+            (),
+            (),
+            tuple(dict.fromkeys(evidence + mr.evidence_ids)),
+            scientific_status=mr.scientific_status,
+            terminal_reason=mr.reason_code,
+            rationale=mr.rationale,
+        )
+
+    return ProductionRoutePlan(
+        ProductionRouteStatus.DIAGNOSTICS_REQUIRED,
+        None,
+        (),
+        ('RESOLVE_REFERENCE_CHARACTER',),
+        evidence,
+        rationale='Reference character is unresolved; no production method is authorized.',
+    )
 
 
 @dataclass(frozen=True)

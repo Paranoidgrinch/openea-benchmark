@@ -13,8 +13,10 @@ from .model import (
     UncertaintyComponent,
     ErrorBudget,
     EAEstimate,
+    EnergyReliabilityGateSet,
     GateSet,
     MethodRole,
+    ScientificResolutionStatus,
     ReferenceCharacterStatus,
     ReferenceCharacterAssessment,
     ground_state_interval,
@@ -31,6 +33,22 @@ from .decision import (
 from .diagnostics import DIAGNOSTIC_CATALOG, PlannedDiagnostic, next_diagnostics
 from .adapters import stability_diagnostic_from_root
 from .reference_character import assess_reference_character
+from .scientific_gates import (
+    basis_diffuse_convergence_review,
+    build_energy_reliability_gates,
+    correlation_reliability_review,
+    physical_corrections_review,
+    reference_method_validity_review,
+    uncertainty_closure_review,
+)
+from .multireference import (
+    MRBranchResolution,
+    MRBranchStatus,
+    MRCapabilityStatus,
+    MRProductionCapability,
+    resolve_multireference_branch,
+)
+from .planner import ProductionRoutePlan, ProductionRouteStatus, plan_production_route
 from .precision_controller import (
     PrecisionActionCandidate,
     PrecisionPlan,
@@ -42,13 +60,21 @@ from .precision_controller import (
 
 __all__ = [
     'DiagnosticID', 'DiagnosticRecord', 'EvidenceQuality', 'Review', 'ReviewStatus',
-    'Interval', 'UncertaintyComponent', 'ErrorBudget', 'EAEstimate', 'GateSet',
-    'MethodRole', 'ReferenceCharacterStatus', 'ReferenceCharacterAssessment',
+    'Interval', 'UncertaintyComponent', 'ErrorBudget', 'EAEstimate',
+    'EnergyReliabilityGateSet', 'GateSet', 'MethodRole',
+    'ScientificResolutionStatus', 'ReferenceCharacterStatus', 'ReferenceCharacterAssessment',
     'ground_state_interval', 'ea_from_state_intervals',
     'DecisionInput', 'DecisionOutput', 'DecisionCategory', 'PrecisionStatus',
     'evaluate_decision', 'evaluate_estimate', 'DIAGNOSTIC_CATALOG',
     'PlannedDiagnostic', 'next_diagnostics', 'stability_diagnostic_from_root',
-    'assess_reference_character', 'PrecisionActionCandidate', 'PrecisionPlan',
-    'PrecisionPlanningStatus', 'PrecisionTargetAssessment',
-    'assess_precision_target', 'plan_precision_refinement',
+    'assess_reference_character', 'reference_method_validity_review',
+    'basis_diffuse_convergence_review', 'correlation_reliability_review',
+    'physical_corrections_review', 'uncertainty_closure_review',
+    'build_energy_reliability_gates', 'MRCapabilityStatus',
+    'MRProductionCapability', 'MRBranchStatus', 'MRBranchResolution',
+    'resolve_multireference_branch', 'ProductionRouteStatus',
+    'ProductionRoutePlan', 'plan_production_route',
+    'PrecisionActionCandidate', 'PrecisionPlan', 'PrecisionPlanningStatus',
+    'PrecisionTargetAssessment', 'assess_precision_target',
+    'plan_precision_refinement',
 ]

@@ -14,11 +14,13 @@ multireference character from one raw scalar threshold.  D03 is the composite
 multireference review and may be marked `CONFIRMED` only after the required
 multi-indicator scientific assessment.
 
-`SAFE_SINGLE_REFERENCE` and `BORDERLINE` can enter the CCSD(T) branch;
-`BORDERLINE` retains an explicit expanded-diagnostics requirement.
-`MULTIREFERENCE_RISK` blocks single-reference production and enters the MR
-interface.  The method/basis advisor does not select a production MR method on
-its own.
+`SAFE_SINGLE_REFERENCE` can enter the CCSD(T) production branch directly.
+`BORDERLINE` remains a single-reference candidate but is **not production-ready**
+until an explicit expanded-reference-diagnostics review is `CLEARED`; after
+that clearance it may enter CCSD(T) only with an enlarged reference-character
+uncertainty contribution. `MULTIREFERENCE_RISK` blocks single-reference
+production and enters the MR interface.  The method/basis advisor does not
+select a production MR method on its own.
 
 ## Method roles
 

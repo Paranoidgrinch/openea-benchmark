@@ -5,13 +5,12 @@ from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
 
-from .model import EAEstimate, GateSet, Interval
+from .model import EAEstimate, GateSet, Interval, ScientificResolutionStatus
 
 
-class DecisionCategory(str, Enum):
-    BOUND = 'BOUND'
-    UNBOUND = 'UNBOUND'
-    UNRESOLVED = 'UNRESOLVED'
+# Backward-compatible public alias. New architecture code should use the
+# canonical ScientificResolutionStatus contract from adaptive.model.
+DecisionCategory = ScientificResolutionStatus
 
 
 class PrecisionStatus(str, Enum):
