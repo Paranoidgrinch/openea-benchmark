@@ -42,6 +42,70 @@ class EvidenceQuality(str, Enum):
     UNKNOWN = 'UNKNOWN'
 
 
+class MethodRole(str, Enum):
+    """Canonical scientific role of a method or calculation."""
+
+    PRODUCTION = 'PRODUCTION'
+    DIAGNOSTIC = 'DIAGNOSTIC'
+    REFINEMENT = 'REFINEMENT'
+    VALIDATION = 'VALIDATION'
+
+
+class ReferenceCharacterStatus(str, Enum):
+    """Outcome of the mandatory reference-character gate.
+
+    The two aliases preserve source compatibility with the pre-refactor advisor
+    while serializing to the new canonical vocabulary.
+    """
+
+    SAFE_SINGLE_REFERENCE = 'SAFE_SINGLE_REFERENCE'
+    BORDERLINE = 'BORDERLINE'
+    MULTIREFERENCE_RISK = 'MULTIREFERENCE_RISK'
+    UNRESOLVED = 'UNRESOLVED'
+
+    # Transitional source-level aliases; do not use in new provenance.
+    SINGLE_REFERENCE = SAFE_SINGLE_REFERENCE
+    MULTIREFERENCE = MULTIREFERENCE_RISK
+
+
+@dataclass(frozen=True)
+class ReferenceCharacterAssessment:
+    """Reviewed gate result with explicit evidence and consequences.
+
+    This object records a scientific assessment; it does not infer reference
+    character from one scalar diagnostic.  `MULTIREFERENCE_RISK` routes away
+    from the single-reference production path.  `BORDERLINE` may use that path
+    only with expanded diagnostics and uncertainty.
+    """
+
+    status: ReferenceCharacterStatus
+    evidence_ids: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
+    diagnostic_ids: tuple[DiagnosticID, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.status is not ReferenceCharacterStatus.UNRESOLVED:
+            if not self.evidence_ids or any(not x.strip() for x in self.evidence_ids):
+                raise ValueError('Resolved reference-character assessment requires evidence IDs')
+        if not self.reasons or any(not x.strip() for x in self.reasons):
+            raise ValueError('Reference-character assessment requires explicit reasons')
+
+    @property
+    def authorizes_single_reference(self) -> bool:
+        return self.status in (
+            ReferenceCharacterStatus.SAFE_SINGLE_REFERENCE,
+            ReferenceCharacterStatus.BORDERLINE,
+        )
+
+    @property
+    def requires_expanded_diagnostics(self) -> bool:
+        return self.status is ReferenceCharacterStatus.BORDERLINE
+
+    @property
+    def requires_multireference_branch(self) -> bool:
+        return self.status is ReferenceCharacterStatus.MULTIREFERENCE_RISK
+
+
 @dataclass(frozen=True)
 class Review:
     """An epistemic review, not merely a software exit status.
@@ -115,6 +179,55 @@ class UncertaintyComponent:
                 raise ValueError('UNKNOWN requires an explicitly missing interval')
         elif self.correction_ev is None or not self.evidence_ids:
             raise ValueError('Estimated correction requires interval and evidence IDs')
+
+
+@dataclass(frozen=True)
+class ErrorBudget:
+    """Canonical component-resolved uncertainty budget for an EA.
+
+    Component intervals are additive correction ranges.  Their half-widths are
+    used only to identify the currently dominant *documented* uncertainty.
+    Unknown components keep the budget open and therefore block automatic
+    precision-refinement recommendations.
+    """
+
+    baseline_offset_ev: Interval
+    baseline_evidence_ids: tuple[str, ...]
+    components: tuple[UncertaintyComponent, ...] = ()
+    baseline_name: str = 'BASELINE'
+
+    def __post_init__(self) -> None:
+        if not self.baseline_name.strip():
+            raise ValueError('Baseline name must be nonempty')
+        if not self.baseline_evidence_ids or any(not x.strip() for x in self.baseline_evidence_ids):
+            raise ValueError('Error-budget baseline requires evidence IDs')
+        names = [self.baseline_name] + [term.name for term in self.components]
+        if len(set(names)) != len(names):
+            raise ValueError('Duplicate error-budget component names')
+
+    @property
+    def missing_components(self) -> tuple[str, ...]:
+        return tuple(c.name for c in self.components if c.correction_ev is None)
+
+    @property
+    def is_closed(self) -> bool:
+        return not self.missing_components
+
+    def uncertainty_half_widths(self) -> tuple[tuple[str, float], ...] | None:
+        if not self.is_closed:
+            return None
+        items = [(self.baseline_name, self.baseline_offset_ev.half_width)]
+        for component in self.components:
+            assert component.correction_ev is not None
+            items.append((component.name, component.correction_ev.half_width))
+        return tuple(items)
+
+    def dominant_uncertainty_source(self) -> str | None:
+        items = self.uncertainty_half_widths()
+        if items is None or not items:
+            return None
+        # Stable tie-break by component name makes planning reproducible.
+        return max(items, key=lambda item: (item[1], item[0]))[0]
 
 
 @dataclass(frozen=True)

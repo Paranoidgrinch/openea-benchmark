@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-"""OH post-CCSD(T) evidence using CCpy.
+"""OH CCSDT triples-reliability diagnostic using CCpy.
 
-The calculation is performed at the fixed high-level reference geometries
-already established by OpenEA.
+The production-facing calculation is performed at the fixed high-level
+reference geometries already established by OpenEA:
 
-Frozen-core valence correction:
-    Delta_T3(X) = EA_CCSDT(X)  - EA_CCSD(T)(X)
-    Delta_T4(X) = EA_CCSDTQ(X) - EA_CCSDT(X)
+    Delta_T3(X) = EA_CCSDT(X) - EA_CCSD(T)(X)
 
-Basis sequence:
-    aug-cc-pVDZ (X=2)
-    aug-cc-pVTZ (X=3)
-
-CCSDTQ is always evaluated at DZ.  It is evaluated at TZ only when the
-direct DZ quadruples correction is larger than the configured small-term
-threshold.
+for aug-cc-pV{D,T}Z.  OpenEA v1 never escalates this diagnostic to CCSDTQ.
+A DZ CCSDTQ point can be requested explicitly with
+``--validation-include-ccsdtq-dz`` for validation/research provenance only; it
+is ignored by the production triples-reliability assessment.
 """
 from __future__ import annotations
 
@@ -212,7 +207,14 @@ def main():
     p.add_argument("--run-root", default="runs")
     p.add_argument("--run-id", default=default_run_id())
     p.add_argument("--triples-target-ev", type=float, default=0.001)
+    # Accepted for command-line compatibility with old run recipes.  It no
+    # longer controls any production decision.
     p.add_argument("--quadruples-target-ev", type=float, default=0.001)
+    p.add_argument(
+        "--validation-include-ccsdtq-dz",
+        action="store_true",
+        help="Run a manual DZ CCSDTQ validation point; never triggers further escalation.",
+    )
     p.add_argument("--max-memory-mb", type=int, default=96000)
     args = p.parse_args()
 
@@ -245,11 +247,14 @@ def main():
     completed = ["REFERENCE_GEOMETRIES_LOADED", "CCPY_PREFLIGHT_VERIFIED"]
     points: list[PostCCPoint] = []
 
-    # First obtain T3-(T) at DZ and TZ.  At DZ also obtain full connected T4.
+    # Production-facing path: obtain T3-(T) at DZ and TZ only.  A CCSDTQ DZ
+    # point is opt-in validation evidence and cannot trigger further work.
     for x in (2, 3):
         basis = BASIS_BY_X[x]
         energies = {}
-        methods = ("CCSD(T)", "CCSDT", "CCSDTQ") if x == 2 else ("CCSD(T)", "CCSDT")
+        methods = ("CCSD(T)", "CCSDT")
+        if x == 2 and args.validation_include_ccsdtq_dz:
+            methods = methods + ("CCSDTQ",)
         for method in methods:
             for role in ("neutral", "anion"):
                 label = f"X{x}:{role}:{method}"
@@ -285,7 +290,7 @@ def main():
             energies[("neutral", "CCSDT")],
             energies[("anion", "CCSDT")],
         )
-        if x == 2:
+        if x == 2 and args.validation_include_ccsdtq_dz:
             ea_q = electron_affinity(
                 energies[("neutral", "CCSDTQ")],
                 energies[("anion", "CCSDTQ")],
@@ -312,64 +317,8 @@ def main():
         max_quadruples_cardinal=3,
     )
 
-    # Only escalate full CCSDTQ to aug-TZ if the directly computed DZ T4
-    # correction is too large to be conservatively bounded by its own magnitude.
-    if assessment.action == "COMPUTE_T4_X3":
-        basis = BASIS_BY_X[3]
-        energies = {}
-        for method in ("CCSDT", "CCSDTQ"):
-            for role in ("neutral", "anion"):
-                label = f"X3:{role}:{method}"
-                reporter.update(
-                    current_step=f"CALCULATE_{label}",
-                    completed_steps=completed,
-                    next_steps=["SAVE_METHOD_RESULT", "REASSESS_POST_CC"],
-                    details={
-                        "basis": basis,
-                        "role": role,
-                        "method": method,
-                        "correlation_space": "FROZEN_CORE",
-                    },
-                )
-                result = run_method(
-                    role=role,
-                    basis=basis,
-                    cardinal=3,
-                    r_angstrom=geoms[role],
-                    method=method,
-                    point_dir=point_dir,
-                    max_memory_mb=args.max_memory_mb,
-                )
-                energies[(role, method)] = result
-                if label not in completed:
-                    completed.append(label)
-
-        ea_tfull = electron_affinity(
-            energies[("neutral", "CCSDT")],
-            energies[("anion", "CCSDT")],
-        )
-        ea_q = electron_affinity(
-            energies[("neutral", "CCSDTQ")],
-            energies[("anion", "CCSDTQ")],
-        )
-        points = [
-            p if p.cardinal != 3 else PostCCPoint(
-                cardinal=3,
-                basis=p.basis,
-                ea_ccsd_t_ev=p.ea_ccsd_t_ev,
-                ea_ccsdt_ev=p.ea_ccsdt_ev,
-                delta_t3_ev=p.delta_t3_ev,
-                ea_ccsdtq_ev=ea_q,
-                delta_t4_ev=ea_q - ea_tfull,
-            )
-            for p in points
-        ]
-        assessment = assess_post_ccsd_t(
-            points,
-            triples_target_ev=args.triples_target_ev,
-            quadruples_target_ev=args.quadruples_target_ev,
-            max_quadruples_cardinal=3,
-        )
+    # No automatic CCSDTQ escalation.  Large/unstable Delta_T3 returns
+    # POST_CC_WARNING -> REASSESS_REFERENCE_CHARACTER from the assessor.
 
     payload = assessment.to_dict()
     payload.update({
@@ -381,17 +330,19 @@ def main():
         "nfrozen_spatial_orbitals": 1,
         "definition": {
             "delta_t3": "EA_CCSDT - EA_CCSD(T)",
-            "delta_t4": "EA_CCSDTQ - EA_CCSDT",
+            "delta_t4": "VALIDATION_ONLY: EA_CCSDTQ - EA_CCSDT",
         },
+        "method_role": "DIAGNOSTIC",
+        "ccsdtq_policy": "MANUAL_VALIDATION_ONLY_NO_AUTOMATIC_ESCALATION",
         "scope": [
-            "Valence post-CCSD(T) correction at fixed reference geometries.",
+            "CCSDT triples-reliability diagnostic at fixed reference geometries.",
             "Nonrelativistic Hamiltonian; scalar relativity and SOC are separate.",
             "Diffuse aug-cc-pVXZ bases are used for both neutral and anion.",
             "No uncomputed higher-order term is assigned zero.",
-            "No post-CC basis extrapolation is assumed in v1.",
+            "No automatic CCSDTQ escalation is permitted in the v1 production path.",
         ],
         "next_after_clear": [
-            "ADD_POST_CCSDT_CORRECTION_TO_ELECTRONIC_BASELINE",
+            "OPTIONALLY_ADD_SMALL_STABLE_DELTA_T3_TO_ELECTRONIC_BASELINE",
             "ASSESS_SOC",
             "SOLVE_NUCLEAR_MOTION",
         ],

@@ -32,7 +32,7 @@ DIAGNOSTIC_CATALOG: dict[DiagnosticID, DiagnosticSpec] = {
     DiagnosticID.D05_REFERENCE_SENSITIVITY: DiagnosticSpec(DiagnosticID.D05_REFERENCE_SENSITIVITY, 'G3', 'Are correlated results reference sensitive?',
         'Distinct physical roots and compatible correlated controls', 'Additional reference or MR route', 1),
     DiagnosticID.D06_TRIPLES_RELIABILITY: DiagnosticSpec(DiagnosticID.D06_TRIPLES_RELIABILITY, 'G3', 'Is post-(T) residual acceptable?',
-        'CCSD/(T), amplitudes, CCSDT control where justified', 'Iterative triples, higher correlation or D03', 1),
+        'CCSD/(T), amplitudes, CCSDT control where justified', 'Reference-character reassessment; do not automatically escalate coupled-cluster rank', 1),
     DiagnosticID.D07_DIFFUSE_BASIS: DiagnosticSpec(DiagnosticID.D07_DIFFUSE_BASIS, 'G2', 'Is extra-electron diffusity resolved?',
         'Augmentation convergence of energy and attachment density', 'd-aug/exponent variation + conditioning checks', 0),
     DiagnosticID.D08_ATTACHMENT: DiagnosticSpec(DiagnosticID.D08_ATTACHMENT, 'G2', 'Is attachment physically bound/resolved?',

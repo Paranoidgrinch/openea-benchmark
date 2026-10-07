@@ -23,7 +23,7 @@ from enum import Enum, IntEnum
 from math import inf, isfinite
 from typing import Iterable
 
-from .model import DiagnosticID, DiagnosticRecord, ReviewStatus
+from .model import DiagnosticID, DiagnosticRecord, MethodRole, ReviewStatus
 from .pec_selection_bridge import CandidateEnergyEvidence, StateSelectionBridgeResult
 
 
@@ -94,6 +94,7 @@ class AdaptiveAction:
     priority: ActionPriority
     sequence_rank: int
     diagnostic_id: DiagnosticID
+    method_role: MethodRole
     target_refs: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     reason: str
@@ -115,6 +116,18 @@ class AdaptivePlan:
     @property
     def next_action(self) -> AdaptiveAction | None:
         return self.actions[0] if self.actions else None
+
+
+_ACTION_METHOD_ROLE = {
+    ActionKind.AUDIT_STATE_SELECTION: MethodRole.DIAGNOSTIC,
+    ActionKind.COMPLETE_STATE_SELECTION: MethodRole.DIAGNOSTIC,
+    ActionKind.RESOLVE_STATE_CONTINUITY: MethodRole.DIAGNOSTIC,
+    ActionKind.EXTEND_OPEN_PEC: MethodRole.REFINEMENT,
+    ActionKind.CONSTRUCT_RELEVANT_PECS: MethodRole.DIAGNOSTIC,
+    ActionKind.RESOLVE_PEC_ASYMPTOTES: MethodRole.DIAGNOSTIC,
+    ActionKind.HIGH_ACCURACY_CANDIDATE_COMPARISON: MethodRole.DIAGNOSTIC,
+    ActionKind.INVESTIGATE_DIAGNOSTIC: MethodRole.DIAGNOSTIC,
+}
 
 
 _ROUTE_TO_KIND = {
@@ -204,6 +217,7 @@ def _action_from_diagnostic(
         priority=ActionPriority.P0_PREREQUISITE,
         sequence_rank=sequence_rank,
         diagnostic_id=record.identifier,
+        method_role=_ACTION_METHOD_ROLE[kind],
         target_refs=tuple(targets),
         evidence_ids=record.review.evidence_ids,
         reason=record.review.rationale or f"{record.identifier.value} remains open",
@@ -255,6 +269,7 @@ def plan_from_state_selection_bridge(
                 priority=ActionPriority.P0_PREREQUISITE,
                 sequence_rank=-10,
                 diagnostic_id=DiagnosticID.D04_STATE_COMPETITION,
+                method_role=MethodRole.DIAGNOSTIC,
                 target_refs=seeds.blocked_candidate_refs,
                 evidence_ids=bridge.state_competition.review.evidence_ids,
                 reason=(
@@ -280,6 +295,7 @@ def plan_from_state_selection_bridge(
                 priority=ActionPriority.P0_PREREQUISITE,
                 sequence_rank=5,
                 diagnostic_id=DiagnosticID.D04_STATE_COMPETITION,
+                method_role=MethodRole.DIAGNOSTIC,
                 target_refs=(),
                 evidence_ids=bridge.state_competition.review.evidence_ids,
                 reason="High-accuracy candidate comparison requested but no reproducible bracketed seed is available",

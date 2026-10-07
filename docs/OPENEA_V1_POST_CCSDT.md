@@ -1,52 +1,45 @@
-# OpenEA v1 — post-CCSD(T) correlation
+# OpenEA v1 — CCSDT triples-reliability diagnostic
 
-The post-CCSD(T) layer resolves higher-order valence correlation into two
-physically distinct increments:
+## Canonical role
 
-    Delta_T3(X) = EA[CCSDT]  - EA[CCSD(T)]
-    Delta_T4(X) = EA[CCSDTQ] - EA[CCSDT]
+CCSDT is a **DIAGNOSTIC**, not a mandatory production rung.  It tests the
+reliability of the perturbative triples approximation in CCSD(T):
 
-All energies entering a difference use the same:
+    Delta_T3(X) = EA[CCSDT](X) - EA[CCSD(T)](X)
 
-- fixed neutral/anion reference geometry;
-- aug-cc-pVXZ orbital basis;
-- frozen-core definition;
-- nonrelativistic Hamiltonian;
-- CCpy reference wavefunction.
+The comparison uses matched geometry, basis, frozen-core definition,
+Hamiltonian, and reference semantics.
 
-The correction is therefore additive to the frozen-core valence CBS
-baseline. Core-valence and scalar-relativistic corrections remain separate.
+## Decision policy
 
-## Basis policy
+A CCSDT diagnostic may be authorized when correlation uncertainty is relevant
+to the active error budget, when reference-character evidence is borderline,
+or during explicit validation/benchmark work.
 
-Higher-order coupled-cluster corrections converge faster with basis size than
-the dominant CCSD(T) valence energy and are much more expensive. OpenEA v1
-therefore uses:
+For the active tolerance `triples_target_ev`:
 
-- aug-cc-pVDZ and aug-cc-pVTZ for `T3-(T)`;
-- full CCSDTQ at aug-cc-pVDZ for connected quadruples;
-- aug-cc-pVTZ CCSDTQ only if the DZ quadruples increment is too large to
-  bound conservatively.
+- **small and basis-stable Delta_T3**: the diagnostic is `CLEARED`; the latest
+  Delta_T3 may be used as an optional post-CCSD(T) correction and the latest
+  cardinal change provides a residual convergence bound;
+- **only one cardinal available**: request one further CCSDT control point;
+- **large or basis-unstable Delta_T3**: return `POST_CC_WARNING` and
+  `REASSESS_REFERENCE_CHARACTER`.
 
-No post-CCSD(T) extrapolation formula is imposed.
+A large or unstable Delta_T3 does **not** request CCSDTQ.
 
-## Uncertainty policy
+## CCSDTQ and legacy data
 
-`T3-(T)` is accepted when the DZ->TZ change is below its configured target.
+CCSDTQ is not part of the automatic OpenEA-v1 production graph.  Existing
+CCSDTQ fields remain readable in `PostCCPoint` solely so historical validation
+records and checkpoints retain provenance.  Such values are not added to the
+production correction by `assess_post_ccsd_t`.
 
-For connected quadruples, if the directly computed DZ correction is already
-small, its full absolute magnitude is retained as a conservative basis
-uncertainty. It is not silently set to zero.
+The OH helper script can run a DZ CCSDTQ point only through the explicit
+`--validation-include-ccsdtq-dz` opt-in.  That point is validation/research
+evidence and cannot trigger further coupled-cluster escalation.
 
-If the DZ quadruples term is larger than the threshold, TZ CCSDTQ is
-requested and the DZ->TZ change becomes the evidence-based convergence bound.
+## Separation from other physics
 
-The layer fails closed if the computed evidence does not satisfy its targets.
-
-## Implementation
-
-CCpy is used because it provides CCSD(T), CCSDT, and CCSDTQ implementations
-for RHF/ROHF/UHF references. For OH one O(1s) spatial orbital is frozen.
-
-This layer is nonrelativistic. Scalar relativity and SOC are additive
-corrections handled elsewhere in OpenEA.
+The diagnostic is a frozen-core, nonrelativistic valence-correlation test.
+Core-valence, scalar relativity, SOC, and nuclear motion remain independent
+error-budget components and must not be hidden inside this term.
