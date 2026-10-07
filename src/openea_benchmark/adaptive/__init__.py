@@ -85,6 +85,16 @@ from .core_valence_runner import (
     CoreValenceSubcalculation,
     run_adaptive_core_valence_series,
 )
+from .scalar_relativity_runner import (
+    AdaptiveScalarRelativityResult,
+    AdaptiveScalarRelativityStatus,
+    ScalarRelativityBasisSpec,
+    ScalarRelativityCardinalEvidence,
+    ScalarRelativityHamiltonian,
+    ScalarRelativityStateSpec,
+    ScalarRelativitySubcalculation,
+    run_adaptive_scalar_relativity_series,
+)
 from .production_execution import (
     CapabilityImplementation,
     ExecutionAdapter,
@@ -142,4 +152,8 @@ __all__ = [
     'CoreValenceStateSpec', 'CoreValenceBasisSpec', 'CoreValenceSubcalculation',
     'CoreValenceCardinalEvidence', 'AdaptiveCoreValenceResult',
     'run_adaptive_core_valence_series',
+    'ScalarRelativityHamiltonian', 'AdaptiveScalarRelativityStatus',
+    'ScalarRelativityStateSpec', 'ScalarRelativityBasisSpec',
+    'ScalarRelativitySubcalculation', 'ScalarRelativityCardinalEvidence',
+    'AdaptiveScalarRelativityResult', 'run_adaptive_scalar_relativity_series',
 ]

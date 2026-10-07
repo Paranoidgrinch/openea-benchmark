@@ -5,10 +5,11 @@ It deliberately does not infer missing calculation inputs and does not reuse
 molecule-specific validation scripts as universal production runners.
 
 The current repository contains generic adaptive runners for cardinal,
-diffuse, and matched all-electron/frozen-core core-valence convergence. Other
-production components (scalar relativity, CCSDT triples diagnostics, SOC,
-nuclear motion) may have assessment logic or molecule-specific validation
-scripts, but they are not therefore universal executable capabilities.
+diffuse, matched all-electron/frozen-core core-valence convergence, and
+matched NR/SFX2C1E scalar-relativity convergence. Other production components
+(CCSDT triples diagnostics, SOC, nuclear motion) may have assessment logic or
+molecule-specific validation scripts, but they are not therefore universal
+executable capabilities.
 
 Scientific invariants
 ---------------------
@@ -31,6 +32,7 @@ from typing import Any, Callable, Mapping
 from .adaptive_cardinal_runner import run_adaptive_cardinal_series
 from .adaptive_diffuse_runner import run_adaptive_diffuse_series
 from .core_valence_runner import run_adaptive_core_valence_series
+from .scalar_relativity_runner import run_adaptive_scalar_relativity_series
 
 from .production_evidence import (
     CBS_DIFFUSE_RESIDUAL,
@@ -156,6 +158,7 @@ _FORBIDDEN_TOKENS = ("CCSDTQ", "T4", "CCSDTQP", "FCI")
 _CARDINAL_RUNNER_ID = f"{run_adaptive_cardinal_series.__module__}.{run_adaptive_cardinal_series.__qualname__}"
 _DIFFUSE_RUNNER_ID = f"{run_adaptive_diffuse_series.__module__}.{run_adaptive_diffuse_series.__qualname__}"
 _CORE_VALENCE_RUNNER_ID = f"{run_adaptive_core_valence_series.__module__}.{run_adaptive_core_valence_series.__qualname__}"
+_SCALAR_RELATIVITY_RUNNER_ID = f"{run_adaptive_scalar_relativity_series.__module__}.{run_adaptive_scalar_relativity_series.__qualname__}"
 
 
 def _is_forbidden_high_order_action(action_id: str) -> bool:
@@ -265,10 +268,10 @@ def classify_closure_action(action: ProductionClosureAction) -> ProductionExecut
         return ProductionExecutionRequest(
             action,
             ExecutionCapability.SCALAR_RELATIVITY,
-            CapabilityImplementation.ASSESSMENT_ONLY,
-            ExecutionDisposition.CAPABILITY_GAP,
-            None,
-            "Generic scalar-relativity assessment exists, but no universal production runner currently builds and executes the matched NR/SFX2C1E calculations.",
+            CapabilityImplementation.GENERIC_RUNNER_AVAILABLE,
+            ExecutionDisposition.NEEDS_BOUND_CONTEXT,
+            _SCALAR_RELATIVITY_RUNNER_ID,
+            "A generic matched all-electron NR/SFX2C1E scalar-relativity runner exists; validated neutral/anion state provenance and an explicit relativistically suitable per-element basis policy must be bound before execution.",
         )
 
     if component == POST_CC:

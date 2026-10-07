@@ -51,7 +51,7 @@ def test_cardinal_and_diffuse_map_only_to_existing_generic_runners():
     assert residual.capability is ExecutionCapability.BASIS_DIFFUSE
 
 
-def test_cv_is_generic_but_scalar_and_postcc_remain_capability_gaps():
+def test_cv_and_scalar_are_generic_but_postcc_remains_capability_gap():
     cv = classify_closure_action(action('COMPUTE_X4', CORE_VALENCE))
     assert cv.capability is ExecutionCapability.CORE_VALENCE
     assert cv.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
@@ -59,11 +59,15 @@ def test_cv_is_generic_but_scalar_and_postcc_remain_capability_gaps():
     assert cv.runner_id.endswith('run_adaptive_core_valence_series')
 
     sr = classify_closure_action(action('COMPUTE_X4', SCALAR_RELATIVITY))
+    assert sr.capability is ExecutionCapability.SCALAR_RELATIVITY
+    assert sr.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert sr.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+    assert sr.runner_id.endswith('run_adaptive_scalar_relativity_series')
+
     post = classify_closure_action(action('COMPUTE_T3_X3', POST_CC, priority=ClosurePriority.CORRELATION, role=MethodRole.DIAGNOSTIC))
-    for request in (sr, post):
-        assert request.implementation is CapabilityImplementation.ASSESSMENT_ONLY
-        assert request.disposition is ExecutionDisposition.CAPABILITY_GAP
-        assert request.runner_id is None
+    assert post.implementation is CapabilityImplementation.ASSESSMENT_ONLY
+    assert post.disposition is ExecutionDisposition.CAPABILITY_GAP
+    assert post.runner_id is None
 
 
 def test_postcc_warning_returns_to_reference_review():

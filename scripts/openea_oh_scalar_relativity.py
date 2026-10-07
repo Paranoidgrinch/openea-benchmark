@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Adaptive scalar-relativistic OH correction.
+"""OH validation driver for the scalar-relativistic correction.
+
+This script preserves the historical OH validation workflow and its explicit
+O/H DK-basis policy.  It is not the universal OpenEA production runner.  New
+production orchestration should bind molecule/state/basis context to
+``adaptive.scalar_relativity_runner.run_adaptive_scalar_relativity_series``.
 
 For each cardinal number:
   O : aug-cc-pCVXZ-DK

@@ -16,8 +16,8 @@ context.
 | Cardinal convergence | runner available | `adaptive_cardinal_runner.run_adaptive_cardinal_series`; requires explicitly bound molecule/state/evaluator context |
 | Diffuse convergence | runner available | `adaptive_diffuse_runner.run_adaptive_diffuse_series`; requires explicitly bound context |
 | CBS model closure | assessment only | CBS extrapolation exists, but arbitrary missing-evidence jobs are not yet routed universally |
-| Core-valence | assessment only | generic assessment exists; current execution script is OH-specific and is not a universal production runner |
-| Scalar relativity | assessment only | generic assessment exists; current execution script is OH-specific |
+| Core-valence | runner available | `core_valence_runner.run_adaptive_core_valence_series`; requires validated state provenance and explicit per-element CV basis policy |
+| Scalar relativity | runner available | `scalar_relativity_runner.run_adaptive_scalar_relativity_series`; matched all-electron NR/SFX2C1E CCSD(T), explicit relativistically suitable basis policy |
 | CCSDT / DeltaT3 | assessment only | diagnostic semantics are generic, current execution script remains validation-specific |
 | Fixed-geometry transfer | not implemented as universal adapter | Stage-3 machinery exists but no production closure adapter yet |
 | Scalar-relativistic remainder | not implemented | must remain open/bounded externally until implemented |
@@ -50,7 +50,7 @@ charge, spin, or checkpoint provenance.
 
 ## Fail-closed rules
 
-* OH validation scripts are not promoted to universal runners.
+* OH validation scripts are not promoted to universal runners; generic CV/SR execution is implemented in separate molecule-independent modules.
 * CCSDTQ/T4/higher-rank automatic actions are policy-blocked.
 * Review/repair actions remain diagnostic/review work, not blind calculations.
 * Missing SOC/nuclear-motion support remains a visible capability gap.

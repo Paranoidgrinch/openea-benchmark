@@ -61,3 +61,13 @@ No scalar-relativistic extrapolation is assumed in v1.
 
 The output remains an electronic intermediate, not a production
 adiabatic electron affinity.
+
+## Generic production execution
+
+The OH driver documented above is retained as validation provenance.  Generic
+OpenEA production execution is implemented separately in
+`adaptive/scalar_relativity_runner.py`; see
+`OPENEA_V1_GENERIC_SCALAR_RELATIVITY_RUNNER.md`.  The generic runner requires
+explicit validated state provenance and an explicit per-element
+relativistically suitable basis policy and does not inherit the OH O/H basis
+mapping as a universal rule.
