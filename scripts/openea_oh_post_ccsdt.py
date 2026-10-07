@@ -66,10 +66,7 @@ def make_mean_field(*, role: str, basis: str, r_angstrom: float, max_memory_mb: 
         charge=charge,
         spin=spin,
         unit="Angstrom",
-        # CCpy's PySCF interface labels MO symmetries unconditionally.
-        # Explicit C1 supplies valid irrep metadata without imposing any
-        # nontrivial spatial-symmetry constraint on the OH wavefunction.
-        symmetry="C1",
+        symmetry=False,
         cart=False,
         verbose=0,
         max_memory=max_memory_mb,
@@ -86,24 +83,6 @@ def make_mean_field(*, role: str, basis: str, r_angstrom: float, max_memory_mb: 
         mf = mf2
     if not mf.converged:
         raise RuntimeError(f"SCF failed for {role} {basis}")
-
-    # CCpy Driver.from_pyscf() calls pyscf.symm.label_orb_symm().
-    # Fail here, before any expensive CC iteration, if the required
-    # symmetry metadata is absent or malformed.
-    mol = mf.mol
-    if (
-        mol.groupname != "C1"
-        or mol.irrep_name is None
-        or mol.symm_orb is None
-        or len(mol.irrep_name) != 1
-        or len(mol.symm_orb) != 1
-    ):
-        raise RuntimeError(
-            "CCpy symmetry preflight failed: expected explicit C1 metadata, "
-            f"got groupname={mol.groupname!r}, "
-            f"irrep_name={mol.irrep_name!r}, "
-            f"symm_orb_count={None if mol.symm_orb is None else len(mol.symm_orb)}"
-        )
     return mf
 
 
@@ -150,7 +129,14 @@ def extract_ccsd_t_correction(driver) -> tuple[float, dict]:
 
 
 def run_method(*, role, basis, cardinal, r_angstrom, method, point_dir, max_memory_mb):
-    path = point_dir / f"X{cardinal}__{role}__{method.replace('(', '').replace(')', '')}.json"
+    method_token = {
+        "CCSD(T)": "CCSD_pT",
+        "CCSDT": "CCSDT",
+        "CCSDTQ": "CCSDTQ",
+    }.get(method)
+    if method_token is None:
+        raise ValueError(f"Unsupported post-CC method for checkpoint naming: {method}")
+    path = point_dir / f"X{cardinal}__{role}__{method_token}.json"
     if path.is_file():
         data = json.loads(path.read_text(encoding="utf-8"))
         if (
@@ -256,39 +242,7 @@ def main():
         for atom in ("O", "H"):
             gto.basis.load(basis, atom)
 
-    # Validate the actual PySCF -> CCpy symmetry contract before production
-    # coupled-cluster work starts.  C1 is intentionally used: it gives CCpy
-    # the irrep metadata it requires without exploiting higher OH symmetry.
-    for basis in BASIS_BY_X.values():
-        probe = gto.M(
-            atom=f"O 0 0 0; H 0 0 {neutral_geom.r_angstrom}",
-            basis=basis,
-            charge=0,
-            spin=1,
-            unit="Angstrom",
-            symmetry="C1",
-            cart=False,
-            verbose=0,
-            max_memory=min(args.max_memory_mb, 4000),
-        )
-        if (
-            probe.groupname != "C1"
-            or probe.irrep_name is None
-            or probe.symm_orb is None
-            or len(probe.irrep_name) != 1
-            or len(probe.symm_orb) != 1
-        ):
-            raise RuntimeError(
-                f"CCpy C1 preflight failed for {basis}: "
-                f"groupname={probe.groupname!r}, "
-                f"irrep_name={probe.irrep_name!r}"
-            )
-
-    completed = [
-        "REFERENCE_GEOMETRIES_LOADED",
-        "CCPY_PREFLIGHT_VERIFIED",
-        "CCPY_C1_SYMMETRY_METADATA_VERIFIED",
-    ]
+    completed = ["REFERENCE_GEOMETRIES_LOADED", "CCPY_PREFLIGHT_VERIFIED"]
     points: list[PostCCPoint] = []
 
     # First obtain T3-(T) at DZ and TZ.  At DZ also obtain full connected T4.
@@ -425,11 +379,6 @@ def main():
         "basis_family": "aug-cc-pVXZ",
         "correlation_space": "FROZEN_CORE",
         "nfrozen_spatial_orbitals": 1,
-        "pyscf_symmetry": "C1",
-        "symmetry_policy": (
-            "Explicit C1 supplies CCpy-required orbital-symmetry metadata "
-            "without exploiting nontrivial spatial symmetry."
-        ),
         "definition": {
             "delta_t3": "EA_CCSDT - EA_CCSD(T)",
             "delta_t4": "EA_CCSDTQ - EA_CCSDT",
