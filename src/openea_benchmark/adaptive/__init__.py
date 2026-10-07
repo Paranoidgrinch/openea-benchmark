@@ -75,6 +75,19 @@ from .production_evidence import (
     post_cc_evidence,
     scalar_relativity_evidence,
 )
+from .production_execution import (
+    CapabilityImplementation,
+    ExecutionAdapter,
+    ExecutionAttempt,
+    ExecutionAttemptStatus,
+    ExecutionCapability,
+    ExecutionDisposition,
+    ProductionExecutionPlan,
+    ProductionExecutionRequest,
+    build_production_execution_plan,
+    classify_closure_action,
+    execute_next_closure_action,
+)
 from .precision_controller import (
     PrecisionActionCandidate,
     PrecisionPlan,
@@ -111,4 +124,8 @@ __all__ = [
     'CORE_VALENCE', 'SCALAR_RELATIVITY', 'SCALAR_RELATIVITY_REMAINDER',
     'SOC', 'NUCLEAR_MOTION', 'POST_CC', 'CBS_DIFFUSE_RESIDUAL',
     'CBS_GEOMETRY_TRANSFER', 'REFERENCE_CHARACTER',
+    'ExecutionCapability', 'CapabilityImplementation', 'ExecutionDisposition',
+    'ProductionExecutionRequest', 'ProductionExecutionPlan', 'ExecutionAdapter',
+    'ExecutionAttemptStatus', 'ExecutionAttempt', 'classify_closure_action',
+    'build_production_execution_plan', 'execute_next_closure_action',
 ]
