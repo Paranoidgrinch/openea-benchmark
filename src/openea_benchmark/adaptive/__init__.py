@@ -126,6 +126,14 @@ from .production_execution import (
     classify_closure_action,
     execute_next_closure_action,
 )
+from .scientific_resolution import (
+    PhysicalValidityAssessment,
+    PhysicalValidityStatus,
+    ScientificResolutionPath,
+    ScientificResolutionResult,
+    physical_validity_from_binding,
+    resolve_scientific_outcome,
+)
 from .precision_controller import (
     PrecisionActionCandidate,
     PrecisionPlan,
@@ -180,4 +188,7 @@ __all__ = [
     'CCSDTDiagnosticExecutionSettings', 'CCSDTMethodRequest',
     'CCSDTMethodResult', 'CCSDTSubcalculation', 'CCSDTCardinalEvidence',
     'AdaptiveCCSDTDiagnosticResult', 'run_adaptive_ccsdt_diagnostic_series',
+    'PhysicalValidityStatus', 'PhysicalValidityAssessment',
+    'ScientificResolutionPath', 'ScientificResolutionResult',
+    'physical_validity_from_binding', 'resolve_scientific_outcome',
 ]
