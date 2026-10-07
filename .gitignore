@@ -48,3 +48,23 @@ Thumbs.db
 # Local benchmark result bundles
 *_results.tar.gz
 runs/
+
+# --- OpenEA local/runtime artifacts ---
+.venv/
+runs/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+*_overlay.zip
+oh_frozen_core_cbs.json
+nohup.out
+
+# Experimental external checkout; not part of OpenEA v1
+external/pymbe/
+# --- end OpenEA local/runtime artifacts ---
