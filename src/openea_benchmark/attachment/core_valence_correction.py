@@ -1,14 +1,20 @@
 """Adaptive convergence policy for the additive core-valence correction.
 
-At a fixed reference geometry and fixed core-valence basis X:
+At a fixed molecular-state geometry and a fixed, explicitly selected
+core-valence orbital basis for cardinal X::
+
     Delta_CV(X) = EA_all-electron(X) - EA_frozen-core(X)
 
-For OH the correction uses aug-cc-pwCVXZ on O and the matching aug-cc-pVXZ basis on H, because H has no inner core shell.  No extrapolation formula is
-assumed in v1.  Instead the highest-cardinal correction is used as central
-value and the latest cardinal change is a convergence uncertainty.
+The neutral and anion may have different equilibrium geometries for an
+adiabatic EA, but each all-electron/frozen-core pair must be matched in basis,
+geometry, state sector, Hamiltonian, and correlation treatment.  Basis-family
+selection is deliberately outside this assessment module.
 
-TZ/QZ are evaluated first.  If their change exceeds the target, 5Z is
-requested.  With three points, contraction is also required.
+No extrapolation formula is assumed in v1.  The highest-cardinal correction is
+used as the central value and the latest cardinal change as a convergence
+bound.  Two cardinal points may clear if the latest change is within target;
+with three or more points, contraction of the increment is additionally
+required.
 """
 from __future__ import annotations
 

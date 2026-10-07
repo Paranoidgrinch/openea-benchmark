@@ -24,20 +24,24 @@ correction is defined in a single common core-valence basis:
 
     Delta_CV(X) = EA_AE(X) - EA_FC(X)
 
-The basis family is `aug-cc-pwCVXZ`, which is specifically designed for
-core-valence correlation.
+The production runner does not hard-code one basis family.  It requires an
+explicit, cardinally matched element-to-basis policy whose suitability has
+already been established for the system.  Correlation-consistent core-valence
+families such as `aug-cc-pwCVXZ` are one important policy where available.
 
-The initial evidence is TZ/QZ. The highest-cardinal value is the central
-correction and the latest change is the convergence bound. If TZ/QZ differs
-by more than the configured target, 5Z is requested automatically.
+The initial evidence is normally TZ/QZ. The highest-cardinal value is the
+central correction and the latest change is the convergence bound. If TZ/QZ
+differs by more than the configured target, the assessment requests the next
+cardinal only when an explicit basis policy for that cardinal exists.
 
-No arbitrary CV extrapolation formula is imposed in v1.
+No arbitrary CV extrapolation formula is imposed in v1, and an ECP/core-
+replacement model is not silently treated as an all-electron CV correction.
 
 
-## Mixed basis rule for OH
+## OH validation policy (not a generic OpenEA rule)
 
-The `aug-cc-pwCVXZ` family is not defined for H because hydrogen has no
-inner core shell.  OH therefore uses a cardinally matched mixed basis:
+For the existing OH validation calculation, H has no inner core shell.  The
+explicit validation policy therefore uses a cardinally matched mixed basis:
 
 - O: `aug-cc-pwCVTZ/QZ/5Z`
 - H: `aug-cc-pVTZ/QZ/5Z`
@@ -48,3 +52,13 @@ Thus `Delta_CV = EA_AE - EA_FC` remains a clean core-valence correction.
 
 OpenEA persists both a human-readable mixed-basis label and the explicit
 element-to-basis mapping as provenance.
+
+
+## Generic execution layer
+
+`openea_benchmark.adaptive.core_valence_runner` now executes the matched AE/FC
+series for arbitrary validated diatomic state specifications and explicit
+basis policies.  It preserves neutral/anion state provenance, supports
+subpoint checkpoint/resume, and feeds the resulting cardinal points into the
+existing `assess_core_valence()` convergence policy.  See
+`OPENEA_V1_GENERIC_CORE_VALENCE_RUNNER.md`.

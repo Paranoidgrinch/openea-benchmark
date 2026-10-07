@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""Adaptive OH core-valence correction using aug-cc-pwCVXZ.
+"""Legacy OH validation driver for the core-valence correction.
 
-For each cardinal basis and each molecular role, the same converged SCF
-checkpoint is reused for two CCSD(T) calculations:
-  * frozen-core
-  * all-electron
+This script preserves the historical OH evidence path and its explicit mixed
+O/H basis policy.  It is not the universal production runner.  Generic OpenEA
+execution is implemented in ``adaptive.core_valence_runner`` and requires
+explicit state and basis-policy context.
 
-The additive core-valence correction is the difference between the two EAs.
-TZ and QZ are run first.  5Z is requested only if the correction is not yet
-converged.
-
-No PECs or atomic fragments are recomputed.
+No PECs or atomic fragments are recomputed here.
 """
 from __future__ import annotations
 import argparse, json, os, pickle

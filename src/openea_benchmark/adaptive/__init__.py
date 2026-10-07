@@ -75,6 +75,16 @@ from .production_evidence import (
     post_cc_evidence,
     scalar_relativity_evidence,
 )
+from .core_valence_runner import (
+    AdaptiveCoreValenceResult,
+    AdaptiveCoreValenceStatus,
+    CoreValenceBasisSpec,
+    CoreValenceCardinalEvidence,
+    CoreValenceCorrelationSpace,
+    CoreValenceStateSpec,
+    CoreValenceSubcalculation,
+    run_adaptive_core_valence_series,
+)
 from .production_execution import (
     CapabilityImplementation,
     ExecutionAdapter,
@@ -128,4 +138,8 @@ __all__ = [
     'ProductionExecutionRequest', 'ProductionExecutionPlan', 'ExecutionAdapter',
     'ExecutionAttemptStatus', 'ExecutionAttempt', 'classify_closure_action',
     'build_production_execution_plan', 'execute_next_closure_action',
+    'CoreValenceCorrelationSpace', 'AdaptiveCoreValenceStatus',
+    'CoreValenceStateSpec', 'CoreValenceBasisSpec', 'CoreValenceSubcalculation',
+    'CoreValenceCardinalEvidence', 'AdaptiveCoreValenceResult',
+    'run_adaptive_core_valence_series',
 ]

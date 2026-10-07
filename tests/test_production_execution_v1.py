@@ -51,11 +51,16 @@ def test_cardinal_and_diffuse_map_only_to_existing_generic_runners():
     assert residual.capability is ExecutionCapability.BASIS_DIFFUSE
 
 
-def test_cv_scalar_and_postcc_are_not_promoted_from_assessment_or_oh_scripts():
+def test_cv_is_generic_but_scalar_and_postcc_remain_capability_gaps():
     cv = classify_closure_action(action('COMPUTE_X4', CORE_VALENCE))
+    assert cv.capability is ExecutionCapability.CORE_VALENCE
+    assert cv.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert cv.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+    assert cv.runner_id.endswith('run_adaptive_core_valence_series')
+
     sr = classify_closure_action(action('COMPUTE_X4', SCALAR_RELATIVITY))
     post = classify_closure_action(action('COMPUTE_T3_X3', POST_CC, priority=ClosurePriority.CORRELATION, role=MethodRole.DIAGNOSTIC))
-    for request in (cv, sr, post):
+    for request in (sr, post):
         assert request.implementation is CapabilityImplementation.ASSESSMENT_ONLY
         assert request.disposition is ExecutionDisposition.CAPABILITY_GAP
         assert request.runner_id is None
