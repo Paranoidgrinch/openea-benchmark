@@ -5,11 +5,11 @@ It deliberately does not infer missing calculation inputs and does not reuse
 molecule-specific validation scripts as universal production runners.
 
 The current repository contains generic adaptive runners for cardinal,
-diffuse, matched all-electron/frozen-core core-valence convergence, and
-matched NR/SFX2C1E scalar-relativity convergence. Other production components
-(CCSDT triples diagnostics, SOC, nuclear motion) may have assessment logic or
-molecule-specific validation scripts, but they are not therefore universal
-executable capabilities.
+diffuse, matched all-electron/frozen-core core-valence convergence, matched
+NR/SFX2C1E scalar-relativity convergence, and explicitly authorized CCSDT
+triples-reliability diagnostics. Other production components (SOC and nuclear
+motion) may have assessment logic or molecule-specific validation scripts, but
+they are not therefore universal executable capabilities.
 
 Scientific invariants
 ---------------------
@@ -33,6 +33,7 @@ from .adaptive_cardinal_runner import run_adaptive_cardinal_series
 from .adaptive_diffuse_runner import run_adaptive_diffuse_series
 from .core_valence_runner import run_adaptive_core_valence_series
 from .scalar_relativity_runner import run_adaptive_scalar_relativity_series
+from .ccsdt_diagnostic_runner import run_adaptive_ccsdt_diagnostic_series
 
 from .production_evidence import (
     CBS_DIFFUSE_RESIDUAL,
@@ -159,6 +160,7 @@ _CARDINAL_RUNNER_ID = f"{run_adaptive_cardinal_series.__module__}.{run_adaptive_
 _DIFFUSE_RUNNER_ID = f"{run_adaptive_diffuse_series.__module__}.{run_adaptive_diffuse_series.__qualname__}"
 _CORE_VALENCE_RUNNER_ID = f"{run_adaptive_core_valence_series.__module__}.{run_adaptive_core_valence_series.__qualname__}"
 _SCALAR_RELATIVITY_RUNNER_ID = f"{run_adaptive_scalar_relativity_series.__module__}.{run_adaptive_scalar_relativity_series.__qualname__}"
+_CCSDT_DIAGNOSTIC_RUNNER_ID = f"{run_adaptive_ccsdt_diagnostic_series.__module__}.{run_adaptive_ccsdt_diagnostic_series.__qualname__}"
 
 
 def _is_forbidden_high_order_action(action_id: str) -> bool:
@@ -281,13 +283,22 @@ def classify_closure_action(action: ProductionClosureAction) -> ProductionExecut
                 ExecutionCapability.REFERENCE_CHARACTER,
                 "POST_CC_WARNING must return to the Reference Character Gate rather than launch a higher-rank calculation.",
             )
+        if action_id.startswith("COMPUTE_T3_X"):
+            return ProductionExecutionRequest(
+                action,
+                ExecutionCapability.POST_CC_TRIPLES,
+                CapabilityImplementation.GENERIC_RUNNER_AVAILABLE,
+                ExecutionDisposition.NEEDS_BOUND_CONTEXT,
+                _CCSDT_DIAGNOSTIC_RUNNER_ID,
+                "A generic, explicitly authorized CCSDT triples-reliability runner exists; validated neutral/anion state provenance, frozen-core definition, basis policy, source checkpoints, and authorization evidence must be bound before execution.",
+            )
         return ProductionExecutionRequest(
             action,
             ExecutionCapability.POST_CC_TRIPLES,
             CapabilityImplementation.ASSESSMENT_ONLY,
             ExecutionDisposition.CAPABILITY_GAP,
             None,
-            "CCSDT assessment logic exists, but the current executable path is validation-specific; a universal CCSDT runner is not yet implemented.",
+            "Post-CC diagnostic assessment exists, but this action is not a recognized executable DeltaT3 calculation request.",
         )
 
     if component == REFERENCE_CHARACTER:

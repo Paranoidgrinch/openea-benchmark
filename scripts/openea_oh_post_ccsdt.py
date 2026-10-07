@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""OH CCSDT triples-reliability diagnostic using CCpy.
+"""OH validation/research driver for the CCSDT triples-reliability diagnostic.
 
-The production-facing calculation is performed at the fixed high-level
+Generic OpenEA execution now lives in
+``openea_benchmark.adaptive.ccsdt_diagnostic_runner``.  This script is retained
+for OH validation provenance and its optional manual CCSDTQ-DZ research point.
+
+The diagnostic calculation is performed at the fixed high-level
 reference geometries already established by OpenEA:
 
     Delta_T3(X) = EA_CCSDT(X) - EA_CCSD(T)(X)

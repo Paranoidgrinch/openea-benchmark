@@ -27,6 +27,23 @@ For the active tolerance `triples_target_ev`:
 
 A large or unstable Delta_T3 does **not** request CCSDTQ.
 
+## Generic execution
+
+`adaptive/ccsdt_diagnostic_runner.py` is the molecule-independent execution
+layer.  It requires resolved neutral/anion state provenance, an explicit
+all-electron orbital-basis policy, an explicit frozen-core orbital count and
+upstream authorization for every cardinal that may require new CCSDT work.
+Compatible completed checkpoints can be reused without reauthorizing their
+compute cost.
+
+The default backend uses the already validated PySCF/CCpy C1 interface.  C1
+is metadata-only and imposes no nontrivial spatial-symmetry restriction.
+CCSD(T) and CCSDT reference energies must match within a configured tolerance
+before DeltaT3 is formed.
+
+The OH script remains a validation/research driver; it is not the generic
+production-facing execution path.
+
 ## CCSDTQ and legacy data
 
 CCSDTQ is not part of the automatic OpenEA-v1 production graph.  Existing

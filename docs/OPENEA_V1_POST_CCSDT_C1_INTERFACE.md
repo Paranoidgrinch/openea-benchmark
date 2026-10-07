@@ -1,56 +1,19 @@
-# OpenEA v1 — post-CCSD(T) correlation
+# OpenEA v1 — CCSDT diagnostic CCpy/PySCF C1 interface
 
-The post-CCSD(T) layer resolves higher-order valence correlation into two
-physically distinct increments:
+This document records the validated symmetry-interface requirement used by
+the generic CCSDT triples-reliability runner.
 
-    Delta_T3(X) = EA[CCSDT]  - EA[CCSD(T)]
-    Delta_T4(X) = EA[CCSDTQ] - EA[CCSDT]
+The production-facing quantity is
 
-All energies entering a difference use the same:
+    Delta_T3(X) = EA[CCSDT] - EA[CCSD(T)]
 
-- fixed neutral/anion reference geometry;
-- aug-cc-pVXZ orbital basis;
-- frozen-core definition;
-- nonrelativistic Hamiltonian;
-- CCpy reference wavefunction.
+with matched fixed geometry, orbital basis, explicitly declared frozen-core
+space, nonrelativistic Hamiltonian and reference semantics.  CCSDTQ is not an
+automatic production step; any historical CCSDTQ evidence is validation-only.
 
-The correction is therefore additive to the frozen-core valence CBS
-baseline. Core-valence and scalar-relativistic corrections remain separate.
-
-## Basis policy
-
-Higher-order coupled-cluster corrections converge faster with basis size than
-the dominant CCSD(T) valence energy and are much more expensive. OpenEA v1
-therefore uses:
-
-- aug-cc-pVDZ and aug-cc-pVTZ for `T3-(T)`;
-- full CCSDTQ at aug-cc-pVDZ for connected quadruples;
-- aug-cc-pVTZ CCSDTQ only if the DZ quadruples increment is too large to
-  bound conservatively.
-
-No post-CCSD(T) extrapolation formula is imposed.
-
-## Uncertainty policy
-
-`T3-(T)` is accepted when the DZ->TZ change is below its configured target.
-
-For connected quadruples, if the directly computed DZ correction is already
-small, its full absolute magnitude is retained as a conservative basis
-uncertainty. It is not silently set to zero.
-
-If the DZ quadruples term is larger than the threshold, TZ CCSDTQ is
-requested and the DZ->TZ change becomes the evidence-based convergence bound.
-
-The layer fails closed if the computed evidence does not satisfy its targets.
-
-## Implementation
-
-CCpy is used because it provides CCSD(T), CCSDT, and CCSDTQ implementations
-for RHF/ROHF/UHF references. For OH one O(1s) spatial orbital is frozen.
-
-This layer is nonrelativistic. Scalar relativity and SOC are additive
-corrections handled elsewhere in OpenEA.
-
+The generic runner lives in
+`adaptive/ccsdt_diagnostic_runner.py`; the OH script is retained as a
+validation/research driver.
 
 ## PySCF / CCpy symmetry interface
 

@@ -182,6 +182,11 @@ method is admitted to scientific workflow development.
 
 ### Capability Gate 001 — higher-order coupled cluster
 
+> **OpenEA-v1 role note:** this gate establishes software capability only.
+> The current production architecture uses CCSDT only as an optional
+> triples-reliability diagnostic. CCSDTQ remains validation/research capability
+> and is not an automatic production escalation step.
+
 An open-source single-reference stack based on PySCF and CCpy has been
 runtime-validated for:
 

@@ -1,7 +1,10 @@
-"""Experimental, method-independent OpenEA v1 scientific decision layer.
+"""OpenEA v1 adaptive scientific decision and execution layer.
 
-This package consumes externally validated evidence. It NEVER runs quantum
-chemistry or reads experimental reference EAs. Not a production policy yet.
+Decision objects remain separated from electronic-structure execution.  The
+package also exposes explicit, fail-closed generic runners whose expensive
+backends are invoked only after scientific planning and runtime context have
+been bound.  Experimental reference EAs are never used as hidden production
+inputs.
 """
 from .model import (
     DiagnosticID,
@@ -95,6 +98,21 @@ from .scalar_relativity_runner import (
     ScalarRelativitySubcalculation,
     run_adaptive_scalar_relativity_series,
 )
+from .ccsdt_diagnostic_runner import (
+    AdaptiveCCSDTDiagnosticResult,
+    AdaptiveCCSDTDiagnosticStatus,
+    CCSDTCardinalEvidence,
+    CCSDTDiagnosticAuthorization,
+    CCSDTDiagnosticBasisSpec,
+    CCSDTDiagnosticExecutionSettings,
+    CCSDTDiagnosticMethod,
+    CCSDTDiagnosticStateSpec,
+    CCSDTMethodExecutionStatus,
+    CCSDTMethodRequest,
+    CCSDTMethodResult,
+    CCSDTSubcalculation,
+    run_adaptive_ccsdt_diagnostic_series,
+)
 from .production_execution import (
     CapabilityImplementation,
     ExecutionAdapter,
@@ -156,4 +174,10 @@ __all__ = [
     'ScalarRelativityStateSpec', 'ScalarRelativityBasisSpec',
     'ScalarRelativitySubcalculation', 'ScalarRelativityCardinalEvidence',
     'AdaptiveScalarRelativityResult', 'run_adaptive_scalar_relativity_series',
+    'CCSDTDiagnosticMethod', 'CCSDTMethodExecutionStatus',
+    'AdaptiveCCSDTDiagnosticStatus', 'CCSDTDiagnosticAuthorization',
+    'CCSDTDiagnosticStateSpec', 'CCSDTDiagnosticBasisSpec',
+    'CCSDTDiagnosticExecutionSettings', 'CCSDTMethodRequest',
+    'CCSDTMethodResult', 'CCSDTSubcalculation', 'CCSDTCardinalEvidence',
+    'AdaptiveCCSDTDiagnosticResult', 'run_adaptive_ccsdt_diagnostic_series',
 ]
