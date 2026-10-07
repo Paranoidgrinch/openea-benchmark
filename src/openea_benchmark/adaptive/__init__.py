@@ -35,6 +35,7 @@ from .adapters import stability_diagnostic_from_root
 from .reference_character import assess_reference_character
 from .scientific_gates import (
     basis_diffuse_convergence_review,
+    cbs_resolution_review,
     build_energy_reliability_gates,
     correlation_reliability_review,
     physical_corrections_review,
@@ -49,6 +50,31 @@ from .multireference import (
     resolve_multireference_branch,
 )
 from .planner import ProductionRoutePlan, ProductionRouteStatus, plan_production_route
+from .production_evidence import (
+    CBS_DIFFUSE_RESIDUAL,
+    CBS_GEOMETRY_TRANSFER,
+    CORE_VALENCE,
+    NUCLEAR_MOTION,
+    POST_CC,
+    REFERENCE_CHARACTER,
+    SCALAR_RELATIVITY,
+    SCALAR_RELATIVITY_REMAINDER,
+    SOC,
+    ClosurePriority,
+    CorrectionEvidence,
+    ProductionClosureAction,
+    ProductionEvidenceBundle,
+    ProductionEvidencePlan,
+    ProductionEvidencePlanningStatus,
+    bounded_external_correction,
+    build_single_reference_production_evidence_bundle,
+    core_valence_evidence,
+    not_applicable_correction,
+    pending_correction,
+    plan_production_evidence,
+    post_cc_evidence,
+    scalar_relativity_evidence,
+)
 from .precision_controller import (
     PrecisionActionCandidate,
     PrecisionPlan,
@@ -68,7 +94,7 @@ __all__ = [
     'evaluate_decision', 'evaluate_estimate', 'DIAGNOSTIC_CATALOG',
     'PlannedDiagnostic', 'next_diagnostics', 'stability_diagnostic_from_root',
     'assess_reference_character', 'reference_method_validity_review',
-    'basis_diffuse_convergence_review', 'correlation_reliability_review',
+    'basis_diffuse_convergence_review', 'cbs_resolution_review', 'correlation_reliability_review',
     'physical_corrections_review', 'uncertainty_closure_review',
     'build_energy_reliability_gates', 'MRCapabilityStatus',
     'MRProductionCapability', 'MRBranchStatus', 'MRBranchResolution',
@@ -76,5 +102,13 @@ __all__ = [
     'ProductionRoutePlan', 'plan_production_route',
     'PrecisionActionCandidate', 'PrecisionPlan', 'PrecisionPlanningStatus',
     'PrecisionTargetAssessment', 'assess_precision_target',
-    'plan_precision_refinement',
+    'plan_precision_refinement', 'CorrectionEvidence', 'ClosurePriority',
+    'ProductionClosureAction', 'ProductionEvidenceBundle',
+    'ProductionEvidencePlan', 'ProductionEvidencePlanningStatus',
+    'build_single_reference_production_evidence_bundle', 'plan_production_evidence',
+    'core_valence_evidence', 'scalar_relativity_evidence', 'post_cc_evidence',
+    'bounded_external_correction', 'not_applicable_correction', 'pending_correction',
+    'CORE_VALENCE', 'SCALAR_RELATIVITY', 'SCALAR_RELATIVITY_REMAINDER',
+    'SOC', 'NUCLEAR_MOTION', 'POST_CC', 'CBS_DIFFUSE_RESIDUAL',
+    'CBS_GEOMETRY_TRANSFER', 'REFERENCE_CHARACTER',
 ]

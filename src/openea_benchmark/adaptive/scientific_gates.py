@@ -13,6 +13,7 @@ from openea_benchmark.attachment.basis_convergence import (
     CardinalConvergenceAssessment,
     DiffuseConvergenceAssessment,
 )
+from openea_benchmark.attachment.component_resolved_cbs import CBSResolvedResult, CBSStatus
 
 from .multireference import (
     MRBranchStatus,
@@ -46,13 +47,32 @@ def reference_method_validity_review(
     *,
     expanded_diagnostics: Review | None = None,
     mr_capability: MRProductionCapability | None = None,
+    reassessment_triggers: Mapping[str, Review] | None = None,
 ) -> Review:
     """Build G3a from the mandatory Reference Character Gate.
 
     SAFE_SINGLE_REFERENCE closes G3a directly. BORDERLINE remains open until
     an explicit expanded-diagnostics review is closed. MULTIREFERENCE_RISK
-    never clears the single-reference method-validity gate.
+    never clears the single-reference method-validity gate.  A later confirmed
+    method-validity warning (for example unstable DeltaT3) reopens G3a.
     """
+
+    triggers = {} if reassessment_triggers is None else dict(reassessment_triggers)
+    open_triggers = {
+        name: review for name, review in triggers.items()
+        if not _closed(review)
+    }
+    if open_triggers:
+        evidence = tuple(dict.fromkeys(
+            assessment.evidence_ids
+            + tuple(eid for review in open_triggers.values() for eid in review.evidence_ids)
+        ))
+        return Review(
+            ReviewStatus.UNRESOLVED,
+            evidence,
+            'G3a reopened by method-validity reassessment trigger(s): '
+            + ', '.join(sorted(open_triggers)),
+        )
 
     if assessment.status is ReferenceCharacterStatus.SAFE_SINGLE_REFERENCE:
         return Review(
@@ -108,15 +128,41 @@ def reference_method_validity_review(
     )
 
 
+def cbs_resolution_review(cbs: CBSResolvedResult | None) -> Review:
+    """Review component-resolved CBS model closure without promoting it to EA0."""
+
+    if cbs is None:
+        return Review(
+            ReviewStatus.PENDING,
+            (),
+            'Component-resolved CBS assessment has not been supplied.',
+        )
+    evidence = tuple(cbs.evidence)
+    if cbs.status is CBSStatus.CLEARED:
+        return Review(
+            ReviewStatus.CLEARED,
+            evidence,
+            'Component-resolved CBS model sensitivity is cleared.',
+        )
+    return Review(
+        ReviewStatus.UNRESOLVED,
+        evidence,
+        'Component-resolved CBS model sensitivity is not cleared.',
+    )
+
+
 def basis_diffuse_convergence_review(
     cardinal: CardinalConvergenceAssessment | None,
     diffuse: DiffuseConvergenceAssessment | None,
+    cbs: CBSResolvedResult | None = None,
 ) -> Review:
-    """Build G3b from independent cardinal and diffuse convergence evidence."""
+    """Build G3b from cardinal, diffuse, and (when supplied) CBS evidence."""
 
+    cbs_review = None if cbs is None else cbs_resolution_review(cbs)
     evidence = tuple(dict.fromkeys(
         tuple(() if cardinal is None else cardinal.evidence)
         + tuple(() if diffuse is None else diffuse.evidence)
+        + tuple(() if cbs_review is None else cbs_review.evidence_ids)
     ))
     if cardinal is None or diffuse is None:
         return Review(
@@ -127,16 +173,18 @@ def basis_diffuse_convergence_review(
     if (
         cardinal.status is BasisConvergenceStatus.CLEARED
         and diffuse.status is BasisConvergenceStatus.CLEARED
+        and (cbs_review is None or _closed(cbs_review))
     ):
         return Review(
             ReviewStatus.CLEARED,
             evidence,
-            'G3b cleared: cardinal and diffuse convergence are both resolved.',
+            'G3b cleared: cardinal and diffuse convergence are resolved'
+            + (' and component-resolved CBS sensitivity is cleared.' if cbs_review is not None else '.'),
         )
     return Review(
         ReviewStatus.UNRESOLVED,
         evidence,
-        'G3b remains open: cardinal and/or diffuse convergence is not cleared.',
+        'G3b remains open: cardinal, diffuse, and/or supplied CBS convergence is not cleared.',
     )
 
 
@@ -252,10 +300,12 @@ def build_energy_reliability_gates(
     cardinal: CardinalConvergenceAssessment | None,
     diffuse: DiffuseConvergenceAssessment | None,
     correlation_reliability: Review | None,
+    cbs: CBSResolvedResult | None = None,
     physical_corrections: Mapping[str, Review],
     error_budget: ErrorBudget,
     mr_capability: MRProductionCapability | None = None,
     borderline_uncertainty_review: Review | None = None,
+    reference_reassessment_triggers: Mapping[str, Review] | None = None,
 ) -> EnergyReliabilityGateSet:
     """Construct the authoritative G3a--G3e gate bundle."""
 
@@ -276,8 +326,9 @@ def build_energy_reliability_gates(
             reference_character,
             expanded_diagnostics=expanded_reference_diagnostics,
             mr_capability=mr_capability,
+            reassessment_triggers=reference_reassessment_triggers,
         ),
-        basis_diffuse_convergence=basis_diffuse_convergence_review(cardinal, diffuse),
+        basis_diffuse_convergence=basis_diffuse_convergence_review(cardinal, diffuse, cbs),
         correlation_reliability=correlation_reliability_review(correlation_reliability),
         physical_corrections=physical_corrections_review(physical_corrections),
         uncertainty_closure=uncertainty_closure_review(

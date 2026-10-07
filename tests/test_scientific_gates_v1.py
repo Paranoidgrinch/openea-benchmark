@@ -179,3 +179,25 @@ def test_borderline_g3e_requires_explicit_uncertainty_enlargement_review():
         borderline_uncertainty_review=cleared('borderline-budget'),
     )
     assert closed.uncertainty_closure.status is ReviewStatus.CLEARED
+
+
+def test_supplied_unresolved_cbs_result_keeps_g3b_open():
+    from openea_benchmark.attachment.component_resolved_cbs import CBSResolvedResult, CBSStatus, EACBSModel
+    primary = EACBSModel('p', 0.0, 0.0, 0.0, 1.0)
+    cbs_result = CBSResolvedResult(
+        CBSStatus.NEED_MORE_EVIDENCE, primary, primary, 1.0, 0.02, 0.0,
+        0.001, 0.001, 1.0, 0.022, 0.978, 1.022,
+        ('cbs-open',), ('REFINE_CBS',),
+    )
+    review = basis_diffuse_convergence_review(cardinal(), diffuse(), cbs_result)
+    assert review.status is ReviewStatus.UNRESOLVED
+
+
+def test_confirmed_reassessment_trigger_reopens_g3a():
+    warning = Review(ReviewStatus.CONFIRMED, ('post-warning',), 'unstable triples')
+    review = reference_method_validity_review(
+        ref(ReferenceCharacterStatus.SAFE_SINGLE_REFERENCE),
+        reassessment_triggers={'POST_CC_WARNING': warning},
+    )
+    assert review.status is ReviewStatus.UNRESOLVED
+    assert 'POST_CC_WARNING' in review.rationale
