@@ -54,6 +54,7 @@ from .multireference import (
 )
 from .planner import ProductionRoutePlan, ProductionRouteStatus, plan_production_route
 from .production_evidence import (
+    ADIABATIC_NUCLEAR_REMAINDER,
     CBS_DIFFUSE_RESIDUAL,
     CBS_GEOMETRY_TRANSFER,
     CORE_VALENCE,
@@ -73,6 +74,7 @@ from .production_evidence import (
     build_single_reference_production_evidence_bundle,
     core_valence_evidence,
     not_applicable_correction,
+    nuclear_motion_evidence,
     pending_correction,
     plan_production_evidence,
     post_cc_evidence,
@@ -113,6 +115,26 @@ from .ccsdt_diagnostic_runner import (
     CCSDTSubcalculation,
     run_adaptive_ccsdt_diagnostic_series,
 )
+from .nuclear_motion import (
+    ANGSTROM_TO_BOHR,
+    HARTREE_TO_EV,
+    U_TO_ELECTRON_MASS,
+    DiatomicMassSpecification,
+    NuclearMotionAssessment,
+    NuclearMotionModelEvidence,
+    NuclearMotionPEC,
+    NuclearMotionSettings,
+    NuclearMotionStatus,
+    VibrationalBindingAssessment,
+    VibrationalBindingStatus,
+    VibrationalGroundStateResult,
+    VibrationalSolveStatus,
+    assess_vibrational_binding,
+    derive_nuclear_motion_model_evidence,
+    nuclear_motion_pec_from_high_level,
+    run_diatomic_nuclear_motion,
+    solve_vibrational_ground_state,
+)
 from .production_execution import (
     CapabilityImplementation,
     ExecutionAdapter,
@@ -132,6 +154,7 @@ from .scientific_resolution import (
     ScientificResolutionPath,
     ScientificResolutionResult,
     physical_validity_from_binding,
+    physical_validity_with_nuclear_motion,
     resolve_scientific_outcome,
 )
 from .precision_controller import (
@@ -166,9 +189,9 @@ __all__ = [
     'ProductionEvidencePlan', 'ProductionEvidencePlanningStatus',
     'build_single_reference_production_evidence_bundle', 'plan_production_evidence',
     'core_valence_evidence', 'scalar_relativity_evidence', 'post_cc_evidence',
-    'bounded_external_correction', 'not_applicable_correction', 'pending_correction',
+    'bounded_external_correction', 'not_applicable_correction', 'nuclear_motion_evidence', 'pending_correction',
     'CORE_VALENCE', 'SCALAR_RELATIVITY', 'SCALAR_RELATIVITY_REMAINDER',
-    'SOC', 'NUCLEAR_MOTION', 'POST_CC', 'CBS_DIFFUSE_RESIDUAL',
+    'SOC', 'NUCLEAR_MOTION', 'ADIABATIC_NUCLEAR_REMAINDER', 'POST_CC', 'CBS_DIFFUSE_RESIDUAL',
     'CBS_GEOMETRY_TRANSFER', 'REFERENCE_CHARACTER',
     'ExecutionCapability', 'CapabilityImplementation', 'ExecutionDisposition',
     'ProductionExecutionRequest', 'ProductionExecutionPlan', 'ExecutionAdapter',
@@ -188,7 +211,14 @@ __all__ = [
     'CCSDTDiagnosticExecutionSettings', 'CCSDTMethodRequest',
     'CCSDTMethodResult', 'CCSDTSubcalculation', 'CCSDTCardinalEvidence',
     'AdaptiveCCSDTDiagnosticResult', 'run_adaptive_ccsdt_diagnostic_series',
+    'ANGSTROM_TO_BOHR', 'HARTREE_TO_EV', 'U_TO_ELECTRON_MASS',
+    'DiatomicMassSpecification', 'NuclearMotionModelEvidence', 'NuclearMotionPEC', 'NuclearMotionSettings',
+    'VibrationalSolveStatus', 'VibrationalGroundStateResult',
+    'VibrationalBindingStatus', 'VibrationalBindingAssessment',
+    'NuclearMotionStatus', 'NuclearMotionAssessment',
+    'nuclear_motion_pec_from_high_level', 'solve_vibrational_ground_state',
+    'assess_vibrational_binding', 'derive_nuclear_motion_model_evidence', 'run_diatomic_nuclear_motion',
     'PhysicalValidityStatus', 'PhysicalValidityAssessment',
     'ScientificResolutionPath', 'ScientificResolutionResult',
-    'physical_validity_from_binding', 'resolve_scientific_outcome',
+    'physical_validity_from_binding', 'physical_validity_with_nuclear_motion', 'resolve_scientific_outcome',
 ]

@@ -1,5 +1,6 @@
 from openea_benchmark.adaptive.model import MethodRole
 from openea_benchmark.adaptive.production_evidence import (
+    ADIABATIC_NUCLEAR_REMAINDER,
     CBS_DIFFUSE_RESIDUAL,
     CORE_VALENCE,
     NUCLEAR_MOTION,
@@ -84,13 +85,18 @@ def test_postcc_warning_returns_to_reference_review():
     assert req.disposition is ExecutionDisposition.MANUAL_OR_DIAGNOSTIC_REVIEW
 
 
-def test_soc_nuclear_motion_are_explicit_capability_gaps():
+def test_soc_remains_gap_but_nuclear_motion_has_generic_solver():
     soc = classify_closure_action(action('ASSESS_SOC', SOC, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.PRODUCTION))
     nuc = classify_closure_action(action('SOLVE_NUCLEAR_MOTION', NUCLEAR_MOTION, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.PRODUCTION))
     assert soc.capability is ExecutionCapability.SOC
     assert nuc.capability is ExecutionCapability.NUCLEAR_MOTION
     assert soc.disposition is ExecutionDisposition.CAPABILITY_GAP
-    assert nuc.disposition is ExecutionDisposition.CAPABILITY_GAP
+    assert nuc.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert nuc.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+    assert nuc.runner_id.endswith('run_diatomic_nuclear_motion')
+
+    refine_pec = classify_closure_action(action('REFINE_NUCLEAR_PEC', NUCLEAR_MOTION, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.REFINEMENT))
+    assert refine_pec.disposition is ExecutionDisposition.CAPABILITY_GAP
 
 
 def test_forbidden_high_order_escalation_is_policy_blocked():
@@ -154,3 +160,19 @@ def test_plan_preserves_scientific_closure_order():
 def test_no_action_required_is_explicit():
     attempt = execute_next_closure_action(ProductionExecutionPlan(()))
     assert attempt.status is ExecutionAttemptStatus.NO_ACTION_REQUIRED
+
+
+def test_beyond_bo_nuclear_remainder_is_explicit_capability_gap():
+    action = ProductionClosureAction(
+        'BOUND_ADIABATIC_NUCLEAR_REMAINDER',
+        ClosurePriority.PHYSICAL_CORRECTION,
+        'G3D_PHYSICAL_CORRECTIONS',
+        ADIABATIC_NUCLEAR_REMAINDER,
+        MethodRole.PRODUCTION,
+        ('need-beyond-bo-bound',),
+        'DBOC/non-adiabatic residual must be bounded',
+    )
+    request = classify_closure_action(action)
+    assert request.capability is ExecutionCapability.ADIABATIC_NUCLEAR_REMAINDER
+    assert request.disposition is ExecutionDisposition.CAPABILITY_GAP
+    assert request.implementation is CapabilityImplementation.NOT_IMPLEMENTED

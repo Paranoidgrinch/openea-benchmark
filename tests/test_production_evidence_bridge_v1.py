@@ -12,7 +12,13 @@ from openea_benchmark.adaptive.model import (
 )
 from openea_benchmark.adaptive.multireference import MRCapabilityStatus, MRProductionCapability
 from openea_benchmark.adaptive.precision_controller import PrecisionActionCandidate
+from openea_benchmark.adaptive.nuclear_motion import (
+    NuclearMotionAssessment, NuclearMotionStatus,
+    VibrationalBindingAssessment, VibrationalBindingStatus,
+    VibrationalGroundStateResult, VibrationalSolveStatus,
+)
 from openea_benchmark.adaptive.production_evidence import (
+    ADIABATIC_NUCLEAR_REMAINDER,
     CORE_VALENCE,
     NUCLEAR_MOTION,
     POST_CC,
@@ -126,6 +132,29 @@ def sr():
     )
 
 
+
+def nuclear():
+    def vib(role):
+        return VibrationalGroundStateResult(
+            role=role, status=VibrationalSolveStatus.CLEARED,
+            absolute_v0_energy_hartree=-10.0, potential_minimum_hartree=-10.01,
+            zpe_hartree=0.01, zpe_ev=0.272, numerical_bound_ev=0.0002,
+            grid_difference_ev=0.00005, interpolation_difference_ev=0.00005,
+            domain_difference_ev=0.0001, left_boundary_clearance_ev=1.0,
+            right_boundary_clearance_ev=1.0, requires_lower_r_extension=False,
+            requires_upper_r_extension=False, evidence_ids=(f'{role}-nuc',),
+            rationale='synthetic cleared vibrational state',
+        )
+    binding = VibrationalBindingAssessment(
+        VibrationalBindingStatus.BOUND, ('nuc-binding',), Interval(0.01, 0.02),
+        'synthetic bound v0',
+    )
+    return NuclearMotionAssessment(
+        NuclearMotionStatus.CLEARED, vib('neutral'), vib('anion'),
+        -0.002, 0.0005, binding, None, ('nuclear-direct',),
+        'synthetic direct nuclear-motion evidence',
+    )
+
 def post(status='CLEARED'):
     point = PostCCPoint(3, 'cc-pVTZ', 1.8, 1.8005, 0.0005)
     if status == 'CLEARED':
@@ -162,6 +191,11 @@ def external_physics():
             central_ev=-0.002, half_width_ev=0.0005,
             evidence_ids=('nuclear',), rationale='nuclear motion evaluated',
         ),
+        ADIABATIC_NUCLEAR_REMAINDER: bounded_external_correction(
+            ADIABATIC_NUCLEAR_REMAINDER,
+            central_ev=0.0, half_width_ev=0.0002,
+            evidence_ids=('beyond-bo-nuclear',), rationale='DBOC/non-adiabatic residual bounded',
+        ),
     }
 
 
@@ -184,8 +218,44 @@ def test_missing_future_physics_fails_closed_and_requests_explicit_actions():
     assert SOC in bundle.error_budget.missing_components
     assert NUCLEAR_MOTION in bundle.error_budget.missing_components
     assert SCALAR_RELATIVITY_REMAINDER in bundle.error_budget.missing_components
+    assert ADIABATIC_NUCLEAR_REMAINDER in bundle.error_budget.missing_components
     actions = {a.action_id for a in bundle.closure_actions}
-    assert {'ASSESS_SOC', 'SOLVE_NUCLEAR_MOTION', 'BOUND_SCALAR_RELATIVITY_REMAINDER'} <= actions
+    assert {
+        'ASSESS_SOC', 'SOLVE_NUCLEAR_MOTION', 'BOUND_SCALAR_RELATIVITY_REMAINDER',
+        'BOUND_ADIABATIC_NUCLEAR_REMAINDER',
+    } <= actions
+
+
+
+def test_direct_nuclear_motion_assessment_populates_d12_component():
+    overrides = external_physics()
+    overrides.pop(NUCLEAR_MOTION)
+    bundle = build_single_reference_production_evidence_bundle(
+        reference_character=ref(), cardinal=cardinal(), diffuse=diffuse(), cbs=cbs(),
+        core_valence=cv(), scalar_relativity=sr(), nuclear_motion=nuclear(), post_cc=post(),
+        physical_correction_overrides=overrides,
+    )
+    item = bundle.physical_corrections[NUCLEAR_MOTION]
+    assert item.review.status is ReviewStatus.CLEARED
+    assert item.component is not None
+    assert abs(item.component.correction_ev.midpoint + 0.002) < 1e-12
+    assert NUCLEAR_MOTION not in bundle.error_budget.missing_components
+    assert ADIABATIC_NUCLEAR_REMAINDER not in bundle.error_budget.missing_components
+
+
+def test_direct_nuclear_motion_alone_does_not_silently_zero_beyond_bo_remainder():
+    overrides = external_physics()
+    overrides.pop(NUCLEAR_MOTION)
+    overrides.pop(ADIABATIC_NUCLEAR_REMAINDER)
+    bundle = build_single_reference_production_evidence_bundle(
+        reference_character=ref(), cardinal=cardinal(), diffuse=diffuse(), cbs=cbs(),
+        core_valence=cv(), scalar_relativity=sr(), nuclear_motion=nuclear(), post_cc=post(),
+        physical_correction_overrides=overrides,
+    )
+    assert NUCLEAR_MOTION not in bundle.error_budget.missing_components
+    assert ADIABATIC_NUCLEAR_REMAINDER in bundle.error_budget.missing_components
+    assert 'BOUND_ADIABATIC_NUCLEAR_REMAINDER' in {a.action_id for a in bundle.closure_actions}
+    assert bundle.energy_gates.physical_corrections.status is ReviewStatus.UNRESOLVED
 
 
 def test_complete_existing_and_external_evidence_closes_g3():

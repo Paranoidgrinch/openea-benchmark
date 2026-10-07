@@ -19,6 +19,13 @@ from openea_benchmark.adaptive import (
     ScientificResolutionStatus,
     UncertaintyComponent,
     physical_validity_from_binding,
+    physical_validity_with_nuclear_motion,
+    NuclearMotionAssessment,
+    NuclearMotionStatus,
+    VibrationalBindingAssessment,
+    VibrationalBindingStatus,
+    VibrationalGroundStateResult,
+    VibrationalSolveStatus,
     resolve_scientific_outcome,
 )
 from openea_benchmark.attachment.asymptote import BindingAssessment, BindingStatus
@@ -37,6 +44,7 @@ def physical_bound() -> PhysicalValidityAssessment:
         PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
         ('g2-bound',),
         ('attachment and molecular binding cleared',),
+        True,
     )
 
 
@@ -174,8 +182,79 @@ def test_bound_g2_requires_cleared_attachment_review():
 
     ready = physical_validity_from_binding(binding, electron_attachment_review=cleared('d08'))
     assert ready.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION
+    assert not ready.nuclear_binding_resolved
     assert set(ready.evidence_ids) == {'frag-bound', 'd08'}
 
+
+
+def _vib_result(role: str) -> VibrationalGroundStateResult:
+    return VibrationalGroundStateResult(
+        role=role,
+        status=VibrationalSolveStatus.CLEARED,
+        absolute_v0_energy_hartree=-10.0,
+        potential_minimum_hartree=-10.01,
+        zpe_hartree=0.01,
+        zpe_ev=0.272,
+        numerical_bound_ev=0.001,
+        grid_difference_ev=0.0002,
+        interpolation_difference_ev=0.0003,
+        domain_difference_ev=0.0005,
+        left_boundary_clearance_ev=1.0,
+        right_boundary_clearance_ev=1.0,
+        requires_lower_r_extension=False,
+        requires_upper_r_extension=False,
+        evidence_ids=(f'{role}-v0',),
+        rationale='cleared test v0',
+    )
+
+
+def _nuclear(binding_status: VibrationalBindingStatus) -> NuclearMotionAssessment:
+    binding = VibrationalBindingAssessment(
+        binding_status,
+        ('vib-binding',),
+        Interval(0.01, 0.02) if binding_status is VibrationalBindingStatus.BOUND else Interval(-0.02, -0.01),
+        'test vibrational binding',
+    )
+    return NuclearMotionAssessment(
+        NuclearMotionStatus.CLEARED,
+        _vib_result('neutral'),
+        _vib_result('anion'),
+        0.0,
+        0.002,
+        binding,
+        None,
+        ('vib',),
+        'test nuclear motion',
+    )
+
+
+def test_bound_g2_requires_nuclear_binding_before_final_resolution():
+    intermediate = physical_validity_from_binding(
+        BindingAssessment(BindingStatus.BOUND, ('frag-bound',), 0.02),
+        electron_attachment_review=cleared('d08'),
+    )
+    result = resolve_scientific_outcome(
+        molecule='OH',
+        state_completeness=cleared('g1'),
+        physical_validity=intermediate,
+        production_evidence=bundle(),
+    )
+    assert result.status is ScientificResolutionStatus.UNRESOLVED
+    assert result.reasons == ('G2_NUCLEAR_BINDING_NOT_RESOLVED',)
+
+
+def test_nuclear_binding_can_close_or_reverse_g2():
+    intermediate = physical_validity_from_binding(
+        BindingAssessment(BindingStatus.BOUND, ('frag-bound',), 0.02),
+        electron_attachment_review=cleared('d08'),
+    )
+    bound = physical_validity_with_nuclear_motion(intermediate, _nuclear(VibrationalBindingStatus.BOUND))
+    assert bound.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION
+    assert bound.nuclear_binding_resolved
+
+    unbound = physical_validity_with_nuclear_motion(intermediate, _nuclear(VibrationalBindingStatus.UNBOUND))
+    assert unbound.status is PhysicalValidityStatus.NO_PHYSICALLY_BOUND_ANION
+    assert unbound.nuclear_binding_resolved
 
 def test_physically_bound_path_without_g3_bundle_is_unresolved():
     result = resolve_scientific_outcome(

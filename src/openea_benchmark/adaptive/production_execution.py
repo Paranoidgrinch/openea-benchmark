@@ -6,10 +6,10 @@ molecule-specific validation scripts as universal production runners.
 
 The current repository contains generic adaptive runners for cardinal,
 diffuse, matched all-electron/frozen-core core-valence convergence, matched
-NR/SFX2C1E scalar-relativity convergence, and explicitly authorized CCSDT
-triples-reliability diagnostics. Other production components (SOC and nuclear
-motion) may have assessment logic or molecule-specific validation scripts, but
-they are not therefore universal executable capabilities.
+NR/SFX2C1E scalar-relativity convergence, explicitly authorized CCSDT
+triples-reliability diagnostics, and J=0 diatomic nuclear-motion solves. SOC
+remains a production capability gap; high-level electronic PEC refinement
+requested by the nuclear solver is also not yet wired as a closure adapter.
 
 Scientific invariants
 ---------------------
@@ -34,8 +34,10 @@ from .adaptive_diffuse_runner import run_adaptive_diffuse_series
 from .core_valence_runner import run_adaptive_core_valence_series
 from .scalar_relativity_runner import run_adaptive_scalar_relativity_series
 from .ccsdt_diagnostic_runner import run_adaptive_ccsdt_diagnostic_series
+from .nuclear_motion import run_diatomic_nuclear_motion
 
 from .production_evidence import (
+    ADIABATIC_NUCLEAR_REMAINDER,
     CBS_DIFFUSE_RESIDUAL,
     CBS_GEOMETRY_TRANSFER,
     CORE_VALENCE,
@@ -63,6 +65,7 @@ class ExecutionCapability(str, Enum):
     SCALAR_RELATIVITY_REMAINDER = "SCALAR_RELATIVITY_REMAINDER"
     SOC = "SOC"
     NUCLEAR_MOTION = "NUCLEAR_MOTION"
+    ADIABATIC_NUCLEAR_REMAINDER = "ADIABATIC_NUCLEAR_REMAINDER"
     UNKNOWN = "UNKNOWN"
 
 
@@ -161,6 +164,7 @@ _DIFFUSE_RUNNER_ID = f"{run_adaptive_diffuse_series.__module__}.{run_adaptive_di
 _CORE_VALENCE_RUNNER_ID = f"{run_adaptive_core_valence_series.__module__}.{run_adaptive_core_valence_series.__qualname__}"
 _SCALAR_RELATIVITY_RUNNER_ID = f"{run_adaptive_scalar_relativity_series.__module__}.{run_adaptive_scalar_relativity_series.__qualname__}"
 _CCSDT_DIAGNOSTIC_RUNNER_ID = f"{run_adaptive_ccsdt_diagnostic_series.__module__}.{run_adaptive_ccsdt_diagnostic_series.__qualname__}"
+_NUCLEAR_MOTION_RUNNER_ID = f"{run_diatomic_nuclear_motion.__module__}.{run_diatomic_nuclear_motion.__qualname__}"
 
 
 def _is_forbidden_high_order_action(action_id: str) -> bool:
@@ -329,11 +333,42 @@ def classify_closure_action(action: ProductionClosureAction) -> ProductionExecut
             "SOC is an explicit production-layer capability gap in the current repository.",
         )
 
-    if component == NUCLEAR_MOTION:
+    if component == ADIABATIC_NUCLEAR_REMAINDER:
         return _gap_request(
             action,
+            ExecutionCapability.ADIABATIC_NUCLEAR_REMAINDER,
+            "DBOC/non-adiabatic corrections beyond the J=0 Born-Oppenheimer vibrational solver are not yet a universal OpenEA-v1 runner; the residual must be bounded or explicitly reviewed as negligible.",
+        )
+
+    if component == NUCLEAR_MOTION:
+        if action_id in {"SOLVE_NUCLEAR_MOTION", "REFINE_NUCLEAR_MOTION_GRID"}:
+            return ProductionExecutionRequest(
+                action,
+                ExecutionCapability.NUCLEAR_MOTION,
+                CapabilityImplementation.GENERIC_RUNNER_AVAILABLE,
+                ExecutionDisposition.NEEDS_BOUND_CONTEXT,
+                _NUCLEAR_MOTION_RUNNER_ID,
+                "A generic J=0 diatomic radial nuclear-motion solver exists; identity-cleared neutral/anion PECs, explicit isotopologue masses and numerical convergence settings must be bound before execution.",
+            )
+        if action_id == "REFINE_NUCLEAR_PEC":
+            return _gap_request(
+                action,
+                ExecutionCapability.NUCLEAR_MOTION,
+                "The nuclear solver identified insufficient PEC range/density; generic high-level electronic PEC-extension orchestration is not yet connected to this closure action.",
+            )
+        if action_id == "ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE":
+            return _gap_request(
+                action,
+                ExecutionCapability.NUCLEAR_MOTION,
+                "The radial solve is available, but automated generation/comparison of a second electronic PEC level for DeltaZPE model sensitivity is not yet connected.",
+            )
+        return ProductionExecutionRequest(
+            action,
             ExecutionCapability.NUCLEAR_MOTION,
-            "Final nuclear-motion/ZPE production execution is not yet implemented in the generic workflow.",
+            CapabilityImplementation.ASSESSMENT_ONLY,
+            ExecutionDisposition.CAPABILITY_GAP,
+            None,
+            "Nuclear-motion assessment exists, but this action is not a recognized executable radial-solver request.",
         )
 
     # Repair/review actions should never be guessed into calculations.

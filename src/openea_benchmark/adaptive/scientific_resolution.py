@@ -35,6 +35,11 @@ from .model import (
     ScientificResolutionStatus,
 )
 from .production_evidence import NUCLEAR_MOTION, ProductionEvidenceBundle
+from .nuclear_motion import (
+    NuclearMotionAssessment,
+    NuclearMotionStatus,
+    VibrationalBindingStatus,
+)
 
 
 class PhysicalValidityStatus(str, Enum):
@@ -56,13 +61,15 @@ class PhysicalValidityAssessment:
     """Explicit G2 outcome with provenance.
 
     This contract is deliberately stronger than a fragmentation-only binding
-    test. ``PHYSICALLY_BOUND_ANION`` means attachment/continuum validity and
-    relevant molecular binding have been reviewed sufficiently for G2.
+    test. ``PHYSICALLY_BOUND_ANION`` can represent the electronic/attachment-
+    cleared intermediate state, but final G2 is closed only when
+    ``nuclear_binding_resolved`` is true after the anion J=0 v=0 binding check.
     """
 
     status: PhysicalValidityStatus
     evidence_ids: tuple[str, ...]
     reasons: tuple[str, ...]
+    nuclear_binding_resolved: bool = False
 
     def __post_init__(self) -> None:
         if not self.reasons or any(not x.strip() for x in self.reasons):
@@ -72,7 +79,13 @@ class PhysicalValidityAssessment:
                 raise ValueError("Resolved physical-validity assessment requires evidence IDs")
 
     def as_g2_review(self) -> Review:
-        if self.status is PhysicalValidityStatus.UNRESOLVED:
+        if (
+            self.status is PhysicalValidityStatus.UNRESOLVED
+            or (
+                self.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION
+                and not self.nuclear_binding_resolved
+            )
+        ):
             return Review(
                 ReviewStatus.UNRESOLVED,
                 self.evidence_ids,
@@ -122,6 +135,7 @@ def physical_validity_from_binding(
             PhysicalValidityStatus.NO_PHYSICALLY_BOUND_ANION,
             binding_evidence,
             ("Anion is not bound below the reviewed molecular dissociation limit.",),
+            True,
         )
 
     if binding.status is BindingStatus.UNRESOLVED:
@@ -146,7 +160,8 @@ def physical_validity_from_binding(
         return PhysicalValidityAssessment(
             PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
             evidence,
-            ("Molecular binding and electron attachment/continuum validity are both cleared.",),
+            ("Molecular binding and electron attachment/continuum validity are cleared; final G2 still requires the anion J=0 v=0 binding check.",),
+            False,
         )
 
     return PhysicalValidityAssessment(
@@ -155,6 +170,59 @@ def physical_validity_from_binding(
         ("Molecular binding is resolved, but attachment/continuum validity is not cleared.",),
     )
 
+
+
+def physical_validity_with_nuclear_motion(
+    physical_validity: PhysicalValidityAssessment,
+    nuclear_motion: NuclearMotionAssessment,
+) -> PhysicalValidityAssessment:
+    """Fold the anion v=0 binding test into the final G2 assessment.
+
+    Electronic dissociation unboundness is already terminal and does not need
+    a vibrational solve.  An electronically/attachment-cleared bound anion,
+    however, is not final G2 evidence until the J=0 v=0 level is shown to lie
+    below the reviewed dissociation limit.
+    """
+    if physical_validity.status is PhysicalValidityStatus.NO_PHYSICALLY_BOUND_ANION:
+        return physical_validity
+    evidence = tuple(dict.fromkeys(
+        physical_validity.evidence_ids + nuclear_motion.anion_vibrational_binding.evidence_ids
+    ))
+    if physical_validity.status is PhysicalValidityStatus.UNRESOLVED:
+        return PhysicalValidityAssessment(
+            PhysicalValidityStatus.UNRESOLVED,
+            evidence,
+            physical_validity.reasons + ("PRE_NUCLEAR_G2_REMAINS_UNRESOLVED",),
+            False,
+        )
+    if nuclear_motion.status is not NuclearMotionStatus.CLEARED:
+        return PhysicalValidityAssessment(
+            PhysicalValidityStatus.UNRESOLVED,
+            evidence,
+            ("Nuclear-motion v=0 solution is not cleared for final G2.",),
+            False,
+        )
+    binding = nuclear_motion.anion_vibrational_binding
+    if binding.status is VibrationalBindingStatus.BOUND:
+        return PhysicalValidityAssessment(
+            PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
+            evidence,
+            physical_validity.reasons + ("Anion J=0 v=0 level is bound below the reviewed dissociation limit.",),
+            True,
+        )
+    if binding.status is VibrationalBindingStatus.UNBOUND:
+        return PhysicalValidityAssessment(
+            PhysicalValidityStatus.NO_PHYSICALLY_BOUND_ANION,
+            evidence,
+            ("Electronic minimum exists, but the anion J=0 v=0 level is not bound below dissociation.",),
+            True,
+        )
+    return PhysicalValidityAssessment(
+        PhysicalValidityStatus.UNRESOLVED,
+        evidence,
+        ("Anion J=0 vibrational binding relative to dissociation is unresolved.",),
+        False,
+    )
 
 def _empty_or_bundle_gates(
     state_completeness: Review,
@@ -276,6 +344,19 @@ def resolve_scientific_outcome(
             gates,
             physical_validity,
             ("NO_PHYSICALLY_BOUND_ANION_WITH_G1_CLEARED",),
+            evidence,
+        )
+
+    if not physical_validity.nuclear_binding_resolved:
+        return ScientificResolutionResult(
+            molecule,
+            ScientificResolutionStatus.UNRESOLVED,
+            PrecisionStatus.UNDETERMINED,
+            ScientificResolutionPath.UNRESOLVED,
+            None if production_evidence is None else production_evidence.interval,
+            gates,
+            physical_validity,
+            ("G2_NUCLEAR_BINDING_NOT_RESOLVED",),
             evidence,
         )
 

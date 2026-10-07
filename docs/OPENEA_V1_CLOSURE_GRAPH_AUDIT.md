@@ -19,6 +19,7 @@ It is an architecture/status document, not a new chemistry model.
 | CCSDT | generic diagnostic runner | explicitly authorized DeltaT3 evidence only; no automatic CCSDTQ |
 | G3a--G3e | implemented | fail-closed evidence aggregation |
 | Error budget / precision controller | implemented | unknown terms remain unknown |
+| Nuclear motion / D12 | generic radial solver | J=0 anharmonic v=0, explicit isotope masses, numerical/domain/interpolation checks; PEC-model bound required |
 
 ## Remaining capability gaps
 
@@ -45,7 +46,9 @@ Still open:
 
 - scalar-relativity two-electron / picture-change remainder;
 - spin-orbit coupling;
-- nuclear motion / vibrational v=0 correction.
+- DBOC/non-adiabatic remainder beyond the J=0 Born-Oppenheimer vibrational solve.
+
+Nuclear motion now has a generic J=0 radial solver and a production-evidence bridge. Remaining D12 orchestration work is explicit high-level electronic PEC extension/model-convergence generation when the solver requests more PEC evidence. A cleared DeltaZPE does not erase omitted beyond-BO nuclear physics: `ADIABATIC_NUCLEAR_REMAINDER` remains explicit until bounded or reviewed.
 
 SOC is not yet suitable for promotion from the FeH pilot into the universal production graph. The current pilot is system-specific and should remain validation/research evidence until a method/capability policy is validated across representative states.
 
@@ -110,17 +113,13 @@ If G2 claims a physically bound anion while the independently closed adiabatic E
 
 ## Recommended next implementation priority
 
-The highest-value next generic physics layer is **nuclear motion**:
+The generic nuclear-motion solver is now implemented. The immediate next orchestration target should be the remaining D12 closure loop: connect `REFINE_NUCLEAR_PEC` and `ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE` to the existing Stage-3 high-level PEC machinery without inventing extrapolated points or automatic method escalation.
 
-1. it is mandatory for every final molecular `BOUND` EA0;
-2. the repository already contains high-level diatomic PEC and equilibrium machinery;
-3. a one-dimensional radial nuclear solve can be kept methodologically separate from electronic structure;
-4. unlike SOC, it does not require a system-specific state-interaction formalism to be guessed prematurely.
-
-After nuclear motion, the next priorities should be re-audited between:
+After that closure loop is wired, the remaining priorities should be re-audited between:
 
 - G2 attachment/continuum execution;
 - SOC relevance gate + validated SOC production path;
 - scalar-relativity remainder policy;
+- beyond-BO DBOC/non-adiabatic remainder policy;
 - CBS geometry-transfer closure;
 - MR production implementation.

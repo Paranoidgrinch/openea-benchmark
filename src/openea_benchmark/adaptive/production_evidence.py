@@ -55,6 +55,7 @@ from .model import (
     UncertaintyComponent,
 )
 from .multireference import MRProductionCapability
+from .nuclear_motion import NuclearMotionAssessment, NuclearMotionStatus
 from .planner import ProductionRoutePlan, ProductionRouteStatus, plan_production_route
 from .precision_controller import (
     PrecisionActionCandidate,
@@ -70,6 +71,7 @@ SCALAR_RELATIVITY = 'SCALAR_RELATIVITY'
 SCALAR_RELATIVITY_REMAINDER = 'SCALAR_RELATIVITY_REMAINDER'
 SOC = 'SOC'
 NUCLEAR_MOTION = 'NUCLEAR_MOTION'
+ADIABATIC_NUCLEAR_REMAINDER = 'ADIABATIC_NUCLEAR_REMAINDER'
 POST_CC = 'POST_CC'
 CBS_DIFFUSE_RESIDUAL = 'CBS_DIFFUSE_RESIDUAL'
 CBS_GEOMETRY_TRANSFER = 'CBS_GEOMETRY_TRANSFER'
@@ -309,6 +311,51 @@ def post_cc_evidence(assessment: PostCCAssessment | None) -> CorrectionEvidence 
     )
 
 
+
+def nuclear_motion_evidence(assessment: NuclearMotionAssessment | None) -> CorrectionEvidence:
+    """Translate a reviewed diatomic v=0 solve into the additive EA correction.
+
+    The correction itself is ``ZPE(neutral)-ZPE(anion)``.  Whether the anion
+    v=0 level remains below dissociation is a G2 physical-validity question and
+    is intentionally retained separately on ``assessment.anion_vibrational_binding``.
+    """
+    if assessment is None:
+        return pending_correction(
+            NUCLEAR_MOTION,
+            'SOLVE_NUCLEAR_MOTION',
+            'Final adiabatic EA requires reviewed J=0 nuclear-motion evidence.',
+        )
+    evidence = tuple(assessment.evidence_ids)
+    if assessment.status is NuclearMotionStatus.CLEARED:
+        if assessment.correction_ev is None or assessment.correction_half_width_ev is None:
+            return CorrectionEvidence(
+                NUCLEAR_MOTION,
+                Review(ReviewStatus.UNRESOLVED, evidence, 'Nuclear-motion result is marked CLEARED but lacks a bounded DeltaZPE correction.'),
+                None,
+                'REPAIR_NUCLEAR_MOTION_EVIDENCE',
+                MethodRole.PRODUCTION,
+            )
+        return CorrectionEvidence(
+            NUCLEAR_MOTION,
+            Review(ReviewStatus.CLEARED, evidence, 'Anharmonic J=0 v=0 levels are converged and DeltaZPE is bounded.'),
+            _bounded_component(
+                NUCLEAR_MOTION,
+                assessment.correction_ev,
+                assessment.correction_half_width_ev,
+                evidence,
+                quality=EvidenceQuality.CONVERGENCE_ESTIMATED,
+            ),
+            None,
+            MethodRole.PRODUCTION,
+        )
+    return CorrectionEvidence(
+        NUCLEAR_MOTION,
+        Review(ReviewStatus.UNRESOLVED, evidence, assessment.rationale),
+        None,
+        assessment.action or 'REVIEW_NUCLEAR_MOTION',
+        MethodRole.REFINEMENT,
+    )
+
 def not_applicable_correction(name: str, rationale: str) -> CorrectionEvidence:
     return CorrectionEvidence(
         name,
@@ -410,6 +457,7 @@ def _combine_correlation_reviews(
 def _default_physical_corrections(
     cv: CoreValenceAssessment | None,
     sr: ScalarRelativityAssessment | None,
+    nuclear: NuclearMotionAssessment | None,
     overrides: Mapping[str, CorrectionEvidence],
 ) -> dict[str, CorrectionEvidence]:
     sr_evidence = scalar_relativity_evidence(sr)
@@ -437,10 +485,11 @@ def _default_physical_corrections(
             'ASSESS_SOC',
             'SOC relevance/correction has not been reviewed.',
         ),
-        NUCLEAR_MOTION: pending_correction(
-            NUCLEAR_MOTION,
-            'SOLVE_NUCLEAR_MOTION',
-            'Final adiabatic EA requires reviewed nuclear-motion evidence.',
+        NUCLEAR_MOTION: nuclear_motion_evidence(nuclear),
+        ADIABATIC_NUCLEAR_REMAINDER: pending_correction(
+            ADIABATIC_NUCLEAR_REMAINDER,
+            'BOUND_ADIABATIC_NUCLEAR_REMAINDER',
+            'The J=0 Born-Oppenheimer vibrational correction excludes DBOC and non-adiabatic nuclear-motion effects; their relevance/residual must be bounded explicitly.',
         ),
     }
     for name, value in overrides.items():
@@ -583,6 +632,7 @@ def build_single_reference_production_evidence_bundle(
     cbs: CBSResolvedResult,
     core_valence: CoreValenceAssessment | None = None,
     scalar_relativity: ScalarRelativityAssessment | None = None,
+    nuclear_motion: NuclearMotionAssessment | None = None,
     post_cc: PostCCAssessment | None = None,
     correlation_reliability: Review | None = None,
     expanded_reference_diagnostics: Review | None = None,
@@ -592,9 +642,11 @@ def build_single_reference_production_evidence_bundle(
 ) -> ProductionEvidenceBundle:
     """Build the production-side evidence bundle from real OpenEA assessments.
 
-    Missing SOC/nuclear-motion/scalar-remainder evidence is intentionally
-    represented as open/unknown by default.  Callers may close those items only
-    by providing explicit ``physical_correction_overrides`` (bounded or N/A).
+    Missing SOC/nuclear-motion/scalar-remainder/beyond-BO nuclear evidence is
+    intentionally represented as open/unknown by default. A reviewed ``nuclear_motion``
+    assessment is translated directly into D12 correction evidence; callers
+    may still use explicit ``physical_correction_overrides`` for externally
+    reviewed physical terms.
     """
 
     overrides = {} if physical_correction_overrides is None else dict(physical_correction_overrides)
@@ -613,7 +665,7 @@ def build_single_reference_production_evidence_bundle(
     baseline_ev, baseline_offset, baseline_extra = _cbs_baseline(cbs)
     post = post_cc_evidence(post_cc)
     corr_review = _combine_correlation_reviews(correlation_reliability, post)
-    physical = _default_physical_corrections(core_valence, scalar_relativity, overrides)
+    physical = _default_physical_corrections(core_valence, scalar_relativity, nuclear_motion, overrides)
 
     corrections: list[UncertaintyComponent] = list(baseline_extra)
     for item in physical.values():

@@ -22,7 +22,8 @@ context.
 | Fixed-geometry transfer | not implemented as universal adapter | Stage-3 machinery exists but no production closure adapter yet |
 | Scalar-relativistic remainder | not implemented | must remain open/bounded externally until implemented |
 | SOC | not implemented | explicit capability gap |
-| Nuclear motion | not implemented | explicit capability gap |
+| Nuclear motion | radial solver available | `nuclear_motion.run_diatomic_nuclear_motion`; explicit masses + identity-cleared PECs + numerical settings required; electronic PEC-refinement orchestration remains a gap |
+| Beyond-BO nuclear remainder | not implemented | DBOC/non-adiabatic residual must be bounded or explicitly reviewed; the J=0 BO solver does not set it to zero |
 
 ## Priority rule
 
@@ -53,4 +54,4 @@ charge, spin, or checkpoint provenance.
 * OH validation scripts are not promoted to universal runners; generic CV/SR/CCSDT-diagnostic execution is implemented in separate molecule-independent modules.
 * CCSDTQ/T4/higher-rank automatic actions are policy-blocked.
 * Review/repair actions remain diagnostic/review work, not blind calculations.
-* Missing SOC/nuclear-motion support remains a visible capability gap.
+* SOC remains a visible capability gap. Nuclear radial solving is generic, while high-level electronic PEC extension requested by the nuclear layer remains an explicit orchestration gap. DBOC/non-adiabatic effects remain a separate explicit `ADIABATIC_NUCLEAR_REMAINDER` obligation.
