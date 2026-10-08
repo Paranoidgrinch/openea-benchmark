@@ -13,12 +13,12 @@ EA-EOM-CCSD and stabilization calculations.
 Policy summary
 --------------
 * direct Delta-CC diffuse convergence is necessary but not sufficient;
-* a state-resolved EA-EOM-CCSD series provides an independent attachment
-  channel and must itself remain bound under diffuse enlargement;
-* clearly VALENCE_BOUND states may close D08 from reviewed attachment
-  character + direct diffuse convergence + converged EA-EOM evidence;
-* DIFFUSE_BOUND and NEAR_THRESHOLD states additionally require an explicit
-  stabilization/continuum review;
+* clearly VALENCE_BOUND states may close via positive, bounded vertical
+  detachment evidence plus independently reviewed orbital localization,
+  reference stability, and state continuity, without mandatory EA-EOM;
+* EOM, stabilization, CAP and scattering are optional escalation tools;
+* DIFFUSE_BOUND / NEAR_THRESHOLD / CONTINUUM_LIKE states remain unresolved
+  until suitable additional evidence is available (no prescribed tool chain);
 * conflicting bound/unbound evidence is UNRESOLVED;
 * no uncomputed diagnostic is represented as zero evidence.
 
@@ -42,7 +42,7 @@ from .attachment_continuum_independent import (
     IndependentContinuumDossier, ContinuumFinding, ContinuumScope,
 )
 from .method_basis_advisor import AttachmentCharacter
-from .model import Review, ReviewStatus
+from .model import Interval, Review, ReviewStatus
 
 
 HARTREE_TO_EV = 27.211386245988
@@ -108,6 +108,55 @@ class AttachmentContinuumSettings:
         ratio = float(self.eom_contraction_ratio_max)
         if not isfinite(ratio) or not (0.0 < ratio < 1.0):
             raise ValueError("eom_contraction_ratio_max must lie strictly between 0 and 1")
+
+
+@dataclass(frozen=True)
+class ValenceAttachmentEvidence:
+    """Reviewed evidence for an ordinary, localized valence attachment.
+
+    A positive *finite-basis* energy is not enough. The vertical detachment
+    interval must already include numerical/basis uncertainty and refer to
+    the same identified neutral/anion pair at one geometry. Orbital
+    localization, reference stability and state continuity are separate,
+    explicitly reviewed observations. No arbitrary universal EA cutoff.
+
+    This is an evidence contract, not an automated orbital-density analyzer.
+    """
+
+    system: str
+    neutral_state_id: str
+    anion_state_id: str
+    r_angstrom: float
+    vertical_detachment_ev: Interval
+    detachment_threshold_id: str
+    orbital_localization: Review
+    reference_stability: Review
+    state_continuity: Review
+    source_evidence_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if any(not str(s).strip() for s in (self.system, self.neutral_state_id, self.anion_state_id)):
+            raise ValueError("Valence evidence requires molecule and matched neutral/anion state identifiers")
+        if not isfinite(self.r_angstrom) or self.r_angstrom <= 0.0:
+            raise ValueError("Valence evidence requires an explicit positive geometry in angstrom")
+        if not self.detachment_threshold_id.strip():
+            raise ValueError("Valence evidence requires identified detachment threshold")
+        if not self.source_evidence_ids or any(not e.strip() for e in self.source_evidence_ids):
+            raise ValueError("Valence evidence requires direct source references")
+
+    @property
+    def review_ready(self) -> bool:
+        reviews = (self.orbital_localization, self.reference_stability, self.state_continuity)
+        return (self.vertical_detachment_ev.lower > 0.0
+                and all(r.status is ReviewStatus.CLEARED and r.evidence_ids for r in reviews))
+
+    @property
+    def evidence_ids(self) -> tuple[str, ...]:
+        return _evidence(self.source_evidence_ids,
+                         self.orbital_localization.evidence_ids,
+                         self.reference_stability.evidence_ids,
+                         self.state_continuity.evidence_ids,
+                         (self.detachment_threshold_id,))
 
 
 @dataclass(frozen=True)
@@ -221,7 +270,8 @@ class AttachmentContinuumAssessment:
 
 
 def _closed(review: Review | None) -> bool:
-    return review is not None and review.status in (ReviewStatus.CLEARED, ReviewStatus.NOT_APPLICABLE)
+    # Attachment character and diffuse convergence cannot be N/A.
+    return review is not None and review.status is ReviewStatus.CLEARED and bool(review.evidence_ids)
 
 
 def _evidence(*groups: Iterable[str]) -> tuple[str, ...]:
@@ -477,15 +527,22 @@ def assess_attachment_continuum(
     attachment_character: AttachmentCharacter,
     attachment_character_review: Review,
     direct_diffuse_review: Review,
-    eom_ea: EOMEAAttachmentAssessment | None,
+    eom_ea: EOMEAAttachmentAssessment | None = None,
     stabilization: StabilizationAssessment | None = None,
+    valence_evidence: ValenceAttachmentEvidence | None = None,
 ) -> AttachmentContinuumAssessment:
-    """Build the authoritative typed D08 attachment/continuum assessment."""
+    """Assess G2 without making EOM/CAP a universal prerequisite.
+
+    Ordinary valence attachment has its own multi-observable route. More
+    delicate states can use pre-existing EOM/continuum evidence when warranted;
+    absent evidence cannot be replaced by a positive finite-basis EA.
+    """
     evidence = _evidence(
         attachment_character_review.evidence_ids,
         direct_diffuse_review.evidence_ids,
         () if eom_ea is None else eom_ea.review.evidence_ids,
         () if stabilization is None else stabilization.review.evidence_ids,
+        () if valence_evidence is None else valence_evidence.evidence_ids,
     )
 
     if attachment_character is AttachmentCharacter.UNRESOLVED or not _closed(attachment_character_review):
@@ -510,7 +567,69 @@ def assess_attachment_continuum(
             evidence,
             ("DIRECT_DIFFUSE_CONVERGENCE_NOT_CLEARED",),
         )
-    if eom_ea is None or eom_ea.status in (EOMEAAssessmentStatus.NEED_MORE_EVIDENCE, EOMEAAssessmentStatus.UNRESOLVED):
+    # The common valence path must not launch EOM or CAP by default.
+    # Retain any already-calculated diagnostic as a potential *veto*: one
+    # conflicting, demonstrably non-binding result demands reconciliation.
+    if attachment_character is AttachmentCharacter.VALENCE_BOUND:
+        contradiction = (
+            (eom_ea is not None and eom_ea.status is EOMEAAssessmentStatus.UNBOUND_CONVERGED)
+            or (stabilization is not None and stabilization.status is StabilizationStatus.STABLE_UNBOUND)
+        )
+        if contradiction:
+            return AttachmentContinuumAssessment(
+                AttachmentContinuumStatus.UNRESOLVED, attachment_character,
+                Review(ReviewStatus.UNRESOLVED, evidence,
+                       "Independent diagnostic contradicts valence-bound evidence."),
+                direct_diffuse_review, eom_ea, stabilization, evidence,
+                ("VALENCE_ATTACHMENT_DIAGNOSTIC_CONFLICT",),
+            )
+        # An explicitly attempted but inconclusive scientific diagnostic is
+        # not quietly discarded merely because another route looked easier.
+        inconclusive = (
+            (eom_ea is not None and eom_ea.status is EOMEAAssessmentStatus.UNRESOLVED)
+            or (stabilization is not None and stabilization.status is StabilizationStatus.UNRESOLVED)
+        )
+        if inconclusive:
+            return AttachmentContinuumAssessment(
+                AttachmentContinuumStatus.UNRESOLVED, attachment_character,
+                Review(ReviewStatus.UNRESOLVED, evidence,
+                       "An already available attachment diagnostic conflicts with or has unresolved scientific identity."),
+                direct_diffuse_review, eom_ea, stabilization, evidence,
+                ("OPTIONAL_DIAGNOSTIC_NEEDS_RECONCILIATION",),
+            )
+        if valence_evidence is not None and valence_evidence.review_ready:
+            return AttachmentContinuumAssessment(
+                AttachmentContinuumStatus.BOUND_ATTACHMENT_CLEARED, attachment_character,
+                Review(ReviewStatus.CLEARED, evidence,
+                       "Reviewed localized valence attachment, strictly positive bounded vertical detachment, "
+                       "stable reference/state and direct diffuse convergence; EOM is not mandatory."),
+                direct_diffuse_review, eom_ea, stabilization, evidence,
+                ("VALENCE_ATTACHMENT_CLEARED_WITHOUT_MANDATORY_EOM",),
+            )
+        return AttachmentContinuumAssessment(
+            AttachmentContinuumStatus.NEED_MORE_EVIDENCE, attachment_character,
+            Review(ReviewStatus.UNRESOLVED, evidence,
+                   "Valence attachment requires a bounded positive detachment interval and "
+                   "reviewed localization/reference/state evidence; a positive isolated EA is insufficient."),
+            direct_diffuse_review, eom_ea, stabilization, evidence,
+            ("VALENCE_ATTACHMENT_MULTIOBSERVABLE_EVIDENCE_MISSING",),
+        )
+
+    # No single special method is prescribed for complex attachment regimes.
+    # Existing EOM+independent-continuum assessments may still close a fully
+    # reviewed advanced path. Missing them means request suitable evidence,
+    # not automatically schedule EOM, a stabilization scan or CAP.
+    if eom_ea is None:
+        return AttachmentContinuumAssessment(
+            AttachmentContinuumStatus.NEED_MORE_EVIDENCE, attachment_character,
+            Review(ReviewStatus.UNRESOLVED, evidence,
+                   "Diffuse/near-threshold/continuum attachment needs a method-appropriate "
+                   "escalation; no EOM/CAP calculation is automatically mandated."),
+            direct_diffuse_review, eom_ea, stabilization, evidence,
+            ("SELECT_ATTACHMENT_ESCALATION_BY_PHYSICAL_REGIME",),
+        )
+
+    if eom_ea.status in (EOMEAAssessmentStatus.NEED_MORE_EVIDENCE, EOMEAAssessmentStatus.UNRESOLVED):
         return AttachmentContinuumAssessment(
             AttachmentContinuumStatus.NEED_MORE_EVIDENCE,
             attachment_character,
@@ -602,7 +721,7 @@ def assess_attachment_continuum(
             ("CONTINUUM_CHARACTER_CONFLICTS_WITH_EOM_ATTACHMENT",),
         )
 
-    if eom_bound and (not require_stabilization or stab_bound):
+    if eom_bound and stab_bound:
         return AttachmentContinuumAssessment(
             AttachmentContinuumStatus.BOUND_ATTACHMENT_CLEARED,
             attachment_character,

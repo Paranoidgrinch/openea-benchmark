@@ -39,6 +39,26 @@ def unresolved(tag: str) -> Review:
     return Review(ReviewStatus.UNRESOLVED, (tag,), f'{tag} unresolved')
 
 
+def typed_valence_attachment():
+    from openea_benchmark.adaptive import (
+        ValenceAttachmentEvidence, assess_attachment_continuum,
+    )
+    from openea_benchmark.adaptive.method_basis_advisor import AttachmentCharacter
+    return assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared('valence-character'),
+        direct_diffuse_review=cleared('diffuse-cc'),
+        valence_evidence=ValenceAttachmentEvidence(
+            system='OH', neutral_state_id='neutral-state', anion_state_id='anion-state',
+            r_angstrom=0.96, vertical_detachment_ev=Interval(0.2, 0.3),
+            detachment_threshold_id='threshold-N-plus-electron',
+            orbital_localization=cleared('localization'),
+            reference_stability=cleared('reference-stable'),
+            state_continuity=cleared('state-continuity'),
+            source_evidence_ids=('vertical-detachment-interval',)),
+    )
+
+
 def physical_bound() -> PhysicalValidityAssessment:
     return PhysicalValidityAssessment(
         PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
@@ -180,10 +200,13 @@ def test_bound_g2_requires_cleared_attachment_review():
     pending = physical_validity_from_binding(binding, electron_attachment_review=unresolved('d08'))
     assert pending.status is PhysicalValidityStatus.UNRESOLVED
 
-    ready = physical_validity_from_binding(binding, electron_attachment_review=cleared('d08'))
+    raw = physical_validity_from_binding(binding, electron_attachment_review=cleared('d08'))
+    assert raw.status is PhysicalValidityStatus.UNRESOLVED
+    ready = physical_validity_from_binding(binding, electron_attachment_review=typed_valence_attachment())
     assert ready.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION
     assert not ready.nuclear_binding_resolved
-    assert set(ready.evidence_ids) == {'frag-bound', 'd08'}
+    assert 'frag-bound' in ready.evidence_ids
+    assert 'localization' in ready.evidence_ids
 
 
 
@@ -231,7 +254,7 @@ def _nuclear(binding_status: VibrationalBindingStatus) -> NuclearMotionAssessmen
 def test_bound_g2_requires_nuclear_binding_before_final_resolution():
     intermediate = physical_validity_from_binding(
         BindingAssessment(BindingStatus.BOUND, ('frag-bound',), 0.02),
-        electron_attachment_review=cleared('d08'),
+        electron_attachment_review=typed_valence_attachment(),
     )
     result = resolve_scientific_outcome(
         molecule='OH',
@@ -246,7 +269,7 @@ def test_bound_g2_requires_nuclear_binding_before_final_resolution():
 def test_nuclear_binding_can_close_or_reverse_g2():
     intermediate = physical_validity_from_binding(
         BindingAssessment(BindingStatus.BOUND, ('frag-bound',), 0.02),
-        electron_attachment_review=cleared('d08'),
+        electron_attachment_review=typed_valence_attachment(),
     )
     bound = physical_validity_with_nuclear_motion(intermediate, _nuclear(VibrationalBindingStatus.BOUND))
     assert bound.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION

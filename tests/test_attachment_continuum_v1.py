@@ -1,6 +1,7 @@
 from openea_benchmark.adaptive.attachment_continuum import (
     AttachmentContinuumSettings,
     AttachmentContinuumStatus,
+    ValenceAttachmentEvidence,
     EOMEAAssessmentStatus,
     EOMEAAttachmentPoint,
     StabilizationPoint,
@@ -14,7 +15,7 @@ from openea_benchmark.adaptive.attachment_continuum_independent import (
     ContinuumMethod, ContinuumScope, ContinuumFinding, IndependentContinuumDossier,
 )
 from openea_benchmark.adaptive.method_basis_advisor import AttachmentCharacter
-from openea_benchmark.adaptive.model import Review, ReviewStatus
+from openea_benchmark.adaptive.model import Interval, Review, ReviewStatus
 from openea_benchmark.adaptive.scientific_resolution import (
     PhysicalValidityStatus,
     physical_validity_from_binding,
@@ -50,6 +51,19 @@ def dossier(finding: ContinuumFinding):
         scientific_review=cleared("SCATTERING:independent-assessment"),
         reviewed_sector_id="all-electronic-roots-of-reviewed-symmetry",
         state_inventory_evidence_ids=("SCATTERING:complete-state-inventory",),
+    )
+
+
+def valence_evidence(lower=0.5, upper=0.7, *, localized=True, stable=True, identity=True):
+    return ValenceAttachmentEvidence(
+        system="LiH", neutral_state_id="neutral-root", anion_state_id="anion-root",
+        r_angstrom=1.6,
+        vertical_detachment_ev=Interval(lower, upper),
+        detachment_threshold_id="N0+free-electron:reviewed",
+        orbital_localization=cleared("real-orbital-density-review") if localized else Review(ReviewStatus.UNRESOLVED, (), "diffuse orbital"),
+        reference_stability=cleared("scf-cc-stability") if stable else Review(ReviewStatus.PENDING, (), "unstable reference"),
+        state_continuity=cleared("neutral-anion-state-match") if identity else Review(ReviewStatus.UNRESOLVED, (), "root switch"),
+        source_evidence_ids=("CCSD(T):vertical-detachment-interval-with-residual",),
     )
 
 
@@ -130,6 +144,7 @@ def test_valence_bound_can_close_without_stabilization_when_independent_channels
         attachment_character_review=cleared("valence-character"),
         direct_diffuse_review=cleared("delta-cc-diffuse"),
         eom_ea=eom,
+        valence_evidence=valence_evidence(),
     )
     assert r.status is AttachmentContinuumStatus.BOUND_ATTACHMENT_CLEARED
     assert r.review.status is ReviewStatus.CLEARED
@@ -329,3 +344,115 @@ def test_resonance_of_single_root_never_force_global_unbound():
                                   finding=ContinuumFinding.RESONANT_IDENTIFIED_STATE),
     )
     assert r.status is StabilizationStatus.UNRESOLVED
+
+
+# G2 simplification: EA-EOM/continuum is a conditional diagnostic, not a
+# universal obligatory method for an ordinary compact valence anion.
+def test_valence_g2_can_close_without_eom_or_cap():
+    outcome = assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared("localized-valence-character"),
+        direct_diffuse_review=cleared("CCSD(T)-diffuse-converged"),
+        valence_evidence=valence_evidence(),
+    )
+    assert outcome.status is AttachmentContinuumStatus.BOUND_ATTACHMENT_CLEARED
+    assert outcome.eom_ea is None and outcome.stabilization is None
+    assert "VALENCE_ATTACHMENT_CLEARED_WITHOUT_MANDATORY_EOM" in outcome.reasons
+    assert "real-orbital-density-review" in outcome.evidence_ids
+
+
+def test_valence_is_not_cleared_by_positive_ea_and_diffuse_only():
+    outcome = assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared("character"),
+        direct_diffuse_review=cleared("diffuse"),
+        eom_ea=assess_eom_ea_diffuse_series(
+            (eom_point(0, 1.0), eom_point(1, 1.01), eom_point(2, 1.014)),
+            settings=SETTINGS),
+    )
+    assert outcome.status is AttachmentContinuumStatus.NEED_MORE_EVIDENCE
+
+
+def test_valence_evidence_with_missing_reviews_is_not_enough():
+    for ev in (valence_evidence(localized=False), valence_evidence(stable=False),
+               valence_evidence(identity=False), valence_evidence(lower=-0.01)):
+        outcome = assess_attachment_continuum(
+            attachment_character=AttachmentCharacter.VALENCE_BOUND,
+            attachment_character_review=cleared("character"),
+            direct_diffuse_review=cleared("diffuse"),
+            valence_evidence=ev,
+        )
+        assert outcome.status is AttachmentContinuumStatus.NEED_MORE_EVIDENCE
+
+
+def test_clear_valence_requires_direct_diffuse_convergence():
+    outcome = assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared("character"),
+        direct_diffuse_review=Review(ReviewStatus.PENDING, (), "still computing"),
+        valence_evidence=valence_evidence(),
+    )
+    assert outcome.status is AttachmentContinuumStatus.NEED_MORE_EVIDENCE
+
+
+def test_already_known_nonbinding_eom_vetoes_valence_route():
+    eom = assess_eom_ea_diffuse_series(
+        (eom_point(0, -0.30), eom_point(1, -0.31), eom_point(2, -0.314)),
+        settings=SETTINGS,
+    )
+    outcome = assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared("character"),
+        direct_diffuse_review=cleared("diffuse"),
+        valence_evidence=valence_evidence(),
+        eom_ea=eom,
+    )
+    assert outcome.status is AttachmentContinuumStatus.UNRESOLVED
+    assert "VALENCE_ATTACHMENT_DIAGNOSTIC_CONFLICT" in outcome.reasons
+
+
+def test_advanced_regime_has_no_automatic_eom_or_cap_requirement():
+    for character in (AttachmentCharacter.DIFFUSE_BOUND, AttachmentCharacter.NEAR_THRESHOLD,
+                      AttachmentCharacter.CONTINUUM_LIKE):
+        outcome = assess_attachment_continuum(
+            attachment_character=character,
+            attachment_character_review=cleared("character"),
+            direct_diffuse_review=cleared("diffuse"),
+        )
+        assert outcome.status is AttachmentContinuumStatus.NEED_MORE_EVIDENCE
+        assert outcome.reasons == ("SELECT_ATTACHMENT_ESCALATION_BY_PHYSICAL_REGIME",)
+
+
+def test_typed_valence_g2_bridge_needs_nuclear_binding():
+    r = assess_attachment_continuum(
+        attachment_character=AttachmentCharacter.VALENCE_BOUND,
+        attachment_character_review=cleared("character"),
+        direct_diffuse_review=cleared("diffuse"),
+        valence_evidence=valence_evidence(),
+    )
+    g2 = physical_validity_from_binding(
+        BindingAssessment(BindingStatus.BOUND, ("molecular-well",), 0.2),
+        electron_attachment_review=r,
+    )
+    assert g2.status is PhysicalValidityStatus.PHYSICALLY_BOUND_ANION
+    assert not g2.nuclear_binding_resolved
+
+
+def test_not_applicable_cannot_replace_essential_valence_reviews():
+    for missing in ("attachment_character_review", "direct_diffuse_review"):
+        kw = dict(attachment_character=AttachmentCharacter.VALENCE_BOUND,
+                  attachment_character_review=cleared("character"),
+                  direct_diffuse_review=cleared("diffuse"),
+                  valence_evidence=valence_evidence())
+        kw[missing] = Review(ReviewStatus.NOT_APPLICABLE, (), "not applicable by declaration")
+        result = assess_attachment_continuum(**kw)
+        assert result.status is AttachmentContinuumStatus.NEED_MORE_EVIDENCE
+
+
+def test_valence_evidence_requires_state_and_geometry_provenance():
+    from dataclasses import replace
+    import pytest
+    for kw in ({"r_angstrom": 0.0}, {"system": ""}, {"neutral_state_id": ""},
+               {"anion_state_id": ""}, {"detachment_threshold_id": ""}):
+        with pytest.raises(ValueError):
+            replace(valence_evidence(), **kw)

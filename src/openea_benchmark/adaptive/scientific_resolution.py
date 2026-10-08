@@ -183,18 +183,13 @@ def physical_validity_from_binding(
         )
 
     evidence = tuple(dict.fromkeys(binding_evidence + electron_attachment_review.evidence_ids))
-    if electron_attachment_review.status is ReviewStatus.CLEARED:
-        return PhysicalValidityAssessment(
-            PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
-            evidence,
-            ("Molecular binding and electron attachment/continuum validity are cleared; final G2 still requires the anion J=0 v=0 binding check.",),
-            False,
-        )
-
+    # Compatibility: old generic Reviews may still be read for provenance,
+    # but cannot certify attachment physical validity without the typed D08
+    # assessment. This also prevents bypassing the new valence evidence checks.
     return PhysicalValidityAssessment(
         PhysicalValidityStatus.UNRESOLVED,
         evidence,
-        ("Molecular binding is resolved, but attachment/continuum validity is not cleared.",),
+        ("Molecular binding is resolved, but a legacy attachment Review cannot close typed G2.",),
     )
 
 
