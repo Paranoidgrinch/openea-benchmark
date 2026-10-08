@@ -113,3 +113,15 @@ NOT model-bound/CBS convergence, automatic high-level grid scheduling,
 or final G3 uncertainty certification. Remaining two-electron scalar
 relativistic/picture-change and beyond-BO DBOC/nonadiabatic remainders
 are still explicitly open; no missing correction is set to zero.
+
+
+### Phase C Patch 24 — HF-only numerical DBOC pilot
+
+`adaptive/dboc_finite_difference.py` performs an **actual finite-difference
+Hartree–Fock Slater-determinant DBOC** on two distinct nuclear step sizes,
+using displaced PySCF RHF/ROHF/UHF SCFs, cross-AO overlaps, explicitly sourced
+isotopic nuclear masses, and all six Cartesian nuclear coordinates.
+This is a method-development diagnostic, not a validated high-level DBOC.
+Correlated DBOC, translational/center-of-mass convention benchmarking,
+nonadiabatic couplings and the nuclear remainder **remain open**.
+The HF diagnostic may not automatically clear any G3 gate.

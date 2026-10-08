@@ -358,3 +358,17 @@ __all__.extend([
     'PECTransferAssessment', 'matched_stage3_point',
     'evaluate_pec_correction_transfer',
 ])
+
+# Isotope-resolved HF diagonal Born-Oppenheimer correction: software pilot only.
+from .dboc_finite_difference import (
+    DBOCStatus, HFDBOCRequest, HFDBOCSettings, DBOCAxis,
+    HFDBOCResult, HFDBOCPair, determinant_fidelity,
+    quantum_metric_from_fidelity, nuclear_cartesian_displacement,
+    run_hf_dboc_point, assess_hf_dboc_pair,
+)
+__all__.extend([
+    'DBOCStatus', 'HFDBOCRequest', 'HFDBOCSettings', 'DBOCAxis',
+    'HFDBOCResult', 'HFDBOCPair', 'determinant_fidelity',
+    'quantum_metric_from_fidelity', 'nuclear_cartesian_displacement',
+    'run_hf_dboc_point', 'assess_hf_dboc_pair',
+])
