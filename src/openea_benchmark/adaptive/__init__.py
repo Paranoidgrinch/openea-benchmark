@@ -321,3 +321,17 @@ from .mr_active_space_comparison import (
     MRActiveSpaceComparison, assess_mr_active_space_pair,
     pyscf_mr_same_geometry_ao_metric,
 )
+
+# Conditional MR state-interaction SOC diagnostic (FCI-SISO external pinned code).
+from .soc_fci_siso_runner import (
+    FCI_SISO_PIN, SOCPointStatus, SOCSpinManifold, SOCPointRequest,
+    SOCPointAuthorization, SOCPointSettings, SOCSpinFreeRoot, SOCPointResult,
+    SOCEACandidate, run_soc_fci_siso_point, assess_soc_ea_pair,
+)
+
+__all__.extend([
+    'FCI_SISO_PIN', 'SOCPointStatus', 'SOCSpinManifold', 'SOCPointRequest',
+    'SOCPointAuthorization', 'SOCPointSettings', 'SOCSpinFreeRoot',
+    'SOCPointResult', 'SOCEACandidate', 'run_soc_fci_siso_point',
+    'assess_soc_ea_pair',
+])

@@ -87,3 +87,13 @@ scientific universal end-to-end validation.
 - CCSDTQ/CCSDTQP/FCI as automatic rescue after CCSDT instability.
 - Pretending that omitted SOC, DBOC, 2-electron SR, MR or basis model
   uncertainties equal zero.
+
+### Phase C Patch 21 — Conditional generic SOC pilot
+
+A backend-executing *development* runner (`adaptive/soc_fci_siso_runner.py`)
+now generalizes the FeH CASSCF/CASCI/AMFI FCI-SISO state-interaction procedure.
+Its numerical SOC shifts are **CASCI-based diagnostic candidates** and do not
+close item 1 (SOC production method + uncertainty). Scientific spin manifold,
+active-space, basis, relativistic Hamiltonian, energy-model and geometry
+convergence remain explicitly outstanding. The method is invoked only with
+manual authorization, not part of every diatomic default workflow.
