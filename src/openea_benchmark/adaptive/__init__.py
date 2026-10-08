@@ -372,3 +372,19 @@ __all__.extend([
     'quantum_metric_from_fidelity', 'nuclear_cartesian_displacement',
     'run_hf_dboc_point', 'assess_hf_dboc_pair',
 ])
+from .four_component_two_electron_probe import (
+    FourComponentHamiltonian,
+    FourComponentPairResult,
+    FourComponentPointRequest,
+    FourComponentPointResult,
+    FourComponentSettings,
+    FourComponentStatus,
+    assess_four_component_pair,
+    run_four_component_point,
+)
+__all__.extend([
+    'FourComponentHamiltonian', 'FourComponentPairResult',
+    'FourComponentPointRequest', 'FourComponentPointResult',
+    'FourComponentSettings', 'FourComponentStatus',
+    'assess_four_component_pair', 'run_four_component_point',
+])

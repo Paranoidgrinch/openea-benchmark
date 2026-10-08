@@ -125,3 +125,13 @@ This is a method-development diagnostic, not a validated high-level DBOC.
 Correlated DBOC, translational/center-of-mass convention benchmarking,
 nonadiabatic couplings and the nuclear remainder **remain open**.
 The HF diagnostic may not automatically clear any G3 gate.
+
+### Phase C Patch 26 — explicit 4c-DHF Gaunt/Breit sensitivity (diagnostic only)
+
+`adaptive/four_component_two_electron_probe.py` computes the matched
+Dirac–Coulomb/Gaunt/Breit *mean-field* operator sensitivity on fixed neutral
+and anion geometries with explicit authorization and real PySCF DHF backends.
+This **does not implement** the missing *spin-free* two-electron X2C
+picture-change remainder, is not CCSD(T) correlated, and cannot be summed
+with FCI-SISO SOC without double counting. The physical G3 remainder stays
+OPEN; high-accuracy relativistic benchmarking remains necessary.
