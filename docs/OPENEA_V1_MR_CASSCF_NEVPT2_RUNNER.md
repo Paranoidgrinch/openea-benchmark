@@ -44,3 +44,12 @@ adapter must pass `list(active_orbital_indices)`, explicit reconverged
 `mf.mo_coeff`, and `base=0`. This addresses the neutral LiH smoke failure
 observed on Artemis; it does not certify the downstream CASCI/NEVPT2 stages,
 which must still pass a real PySCF smoke run.
+
+### Phase C / Patch 20 addition
+
+Completed MR points additionally retain `inactive_mo_coeff_ao` (the AO
+coefficients of doubly occupied *inactive* CASSCF orbitals, including the
+zero-column case). Together with the active CASCI 1RDM and optimized active
+MO coefficients this reconstructs the total spin-summed 1RDM across distinct
+CAS partitions.  See `OPENEA_V1_MR_ACTIVE_SPACE_COMPARISON.md`.  The runner's
+scientific validation status does not change.

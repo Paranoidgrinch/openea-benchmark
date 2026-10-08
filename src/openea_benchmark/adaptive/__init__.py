@@ -287,6 +287,9 @@ __all__ = [
     'StabilizationProfileStatus', 'StabilizationProfileSettings',
     'StabilizationProfilePoint', 'StabilizationProfileReport',
     'analyze_g2_stabilization_profile',
+    'MRActiveSpaceStatus', 'MRActiveSpaceThresholds', 'MRActiveSpaceRootShift',
+    'MRActiveSpaceComparison', 'assess_mr_active_space_pair',
+    'pyscf_mr_same_geometry_ao_metric',
 ]
 
 from .attachment_continuum_independent import (
@@ -310,4 +313,11 @@ from .mr_casscf_nevpt2_runner import (
 from .mr_pec_continuity import (
     MRPECContinuityStatus, MRPECContinuityThresholds, MRPECContinuityResult,
     assess_mr_pec_continuity, pyscf_mr_ao_overlap_matrices,
+)
+
+# Same-geometry MR active-space model-sensitivity diagnostics (never G3 closure).
+from .mr_active_space_comparison import (
+    MRActiveSpaceStatus, MRActiveSpaceThresholds, MRActiveSpaceRootShift,
+    MRActiveSpaceComparison, assess_mr_active_space_pair,
+    pyscf_mr_same_geometry_ao_metric,
 )

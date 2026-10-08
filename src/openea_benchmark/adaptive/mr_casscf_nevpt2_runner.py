@@ -177,6 +177,10 @@ class MRPointResult:
     # Columns of the optimized CASSCF/CASCI MOs corresponding to the active
     # orbitals, in the AO ordering of the declared geometry/basis.
     active_mo_coeff_ao: tuple[tuple[float, ...], ...] | None = None
+    # AO coefficients of all doubly occupied *inactive* CASSCF/CASCI orbitals.
+    # These are needed to compare the entire 1RDM when two CAS partitions
+    # have different ncore; active-space 1RDMs alone are not comparable.
+    inactive_mo_coeff_ao: tuple[tuple[float, ...], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.is_production_ea or self.mr_production_validated:
@@ -193,6 +197,17 @@ class MRPointResult:
                 raise ValueError("Invalid AO active-orbital coefficients")
             if self.status is not MRPointStatus.COMPLETE_REVIEW_REQUIRED:
                 raise ValueError("Incomplete MR result cannot advertise orbital fingerprints")
+
+        if self.inactive_mo_coeff_ao is not None:
+            if np.iscomplexobj(self.inactive_mo_coeff_ao):
+                raise ValueError("Complex inactive orbitals require a separately validated MR method")
+            ccore = np.asarray(self.inactive_mo_coeff_ao, dtype=float)
+            if ccore.ndim != 2 or not np.isfinite(ccore).all():
+                raise ValueError("Invalid inactive AO orbital coefficients")
+            if self.status is not MRPointStatus.COMPLETE_REVIEW_REQUIRED:
+                raise ValueError("Incomplete MR result cannot advertise inactive orbitals")
+            if self.active_mo_coeff_ao is not None and ccore.shape[0] != len(self.active_mo_coeff_ao):
+                raise ValueError("Inactive/active AO coefficient dimensions must agree")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -298,6 +313,11 @@ def _run_pyscf(request: MRPointRequest, settings: MRPointSettings) -> MRPointRes
     active_coeff = np.asarray(coeff_raw, dtype=float)
     if active_coeff.shape != (mol.nao_nr(), request.ncas):
         raise RuntimeError("CASCI optimized active orbitals have unexpected AO dimensions")
+    core_raw = np.asarray(casci.mo_coeff[:, :ncore])
+    if np.iscomplexobj(core_raw):
+        raise RuntimeError("Spin-free MR pilot received complex inactive orbitals")
+    if core_raw.shape != (mol.nao_nr(), ncore):
+        raise RuntimeError("CASCI inactive orbitals have unexpected AO dimensions")
     return MRPointResult(
         request_id=request.request_id,
         status=MRPointStatus.COMPLETE_REVIEW_REQUIRED,
@@ -309,6 +329,10 @@ def _run_pyscf(request: MRPointRequest, settings: MRPointSettings) -> MRPointRes
         active_space_review_ids=request.active_space_review_ids,
         state_manifold_review_ids=request.state_manifold_review_ids,
         active_mo_coeff_ao=tuple(tuple(float(x) for x in row) for row in active_coeff),
+        inactive_mo_coeff_ao=tuple(
+            tuple(float(x) for x in row)
+            for row in np.asarray(core_raw, dtype=float)
+        ),
     )
 
 
@@ -356,6 +380,11 @@ def run_mr_casscf_nevpt2_point(
             c = np.asarray(result.active_mo_coeff_ao)
             if c.ndim != 2 or c.shape[1] != request.ncas:
                 raise ValueError("MR active-orbital fingerprint has incorrect active dimension")
+        if result.inactive_mo_coeff_ao is not None:
+            ccore = np.asarray(result.inactive_mo_coeff_ao, dtype=float)
+            if ccore.ndim != 2 or (result.active_mo_coeff_ao is not None
+                                      and ccore.shape[0] != len(result.active_mo_coeff_ao)):
+                raise ValueError("MR inactive-orbital fingerprint has incorrect AO dimension")
         for root in result.roots:
             if root.active_rdm1 is not None:
                 g = np.asarray(root.active_rdm1)
