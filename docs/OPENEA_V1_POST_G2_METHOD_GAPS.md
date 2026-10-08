@@ -97,3 +97,19 @@ close item 1 (SOC production method + uncertainty). Scientific spin manifold,
 active-space, basis, relativistic Hamiltonian, energy-model and geometry
 convergence remain explicitly outstanding. The method is invoked only with
 manual authorization, not part of every diatomic default workflow.
+
+### Phase C Patch 23 — matched-geometry numerical CBS/PEC transfer
+
+`adaptive/cbs_pec_transfer.py` now evaluates **already computed and
+state-reviewed** high-minus-low electronic model differences over finite bond
+length grids, then interpolates at the *separate* neutral/anion target
+geometries. It accepts actual completed Stage-3 CCSD(T) point energies and
+refuses unmatched states, model swaps, provenance reuse, missing data and
+any target outside the computed interval. A PySCF HF-only smoke verifies
+multi-geometry numerical wiring, not the scientific CBS result.
+
+This closes a piece of the missing *numerical* transfer functionality but
+NOT model-bound/CBS convergence, automatic high-level grid scheduling,
+or final G3 uncertainty certification. Remaining two-electron scalar
+relativistic/picture-change and beyond-BO DBOC/nonadiabatic remainders
+are still explicitly open; no missing correction is set to zero.

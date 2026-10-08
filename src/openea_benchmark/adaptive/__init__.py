@@ -347,3 +347,14 @@ __all__.extend([
     'SOCManifoldSensitivity', 'compare_soc_manifold_expansion',
     'run_soc_manifold_expansion',
 ])
+
+# Finite-grid numerical correction transfer across a PEC: review-only diagnostic.
+from .cbs_pec_transfer import (
+    TransferStatus, MatchedCorrectionPoint, SpeciesTransfer,
+    PECTransferAssessment, matched_stage3_point, evaluate_pec_correction_transfer,
+)
+__all__.extend([
+    'TransferStatus', 'MatchedCorrectionPoint', 'SpeciesTransfer',
+    'PECTransferAssessment', 'matched_stage3_point',
+    'evaluate_pec_correction_transfer',
+])
