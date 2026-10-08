@@ -14,6 +14,8 @@ from math import comb, isfinite
 from pathlib import Path
 from typing import Callable, Mapping, Any
 
+import numpy as np
+
 
 class MRPointStatus(str, Enum):
     COMPLETE_REVIEW_REQUIRED = "COMPLETE_REVIEW_REQUIRED"
@@ -132,6 +134,9 @@ class MRRootEnergy:
     sc_nevpt2_total_hartree: float
     spin_square: float
     root_identity_review_required: bool = True
+    # Spin-summed active-space one-particle RDM from *this* CASCI root.
+    # A fingerprint, not a many-electron wavefunction overlap or a Dyson orbital.
+    active_rdm1: tuple[tuple[float, ...], ...] | None = None
 
     def __post_init__(self) -> None:
         if any(not isfinite(x) for x in (
@@ -143,6 +148,14 @@ class MRRootEnergy:
             raise ValueError("Inconsistent NEVPT2 total")
         if not self.root_identity_review_required:
             raise ValueError("Automatic MR root identity validation is forbidden")
+        if self.active_rdm1 is not None:
+            if np.iscomplexobj(self.active_rdm1):
+                raise ValueError("Complex 1RDM requires a separately validated MR method")
+            g = np.asarray(self.active_rdm1, dtype=float)
+            if g.ndim != 2 or g.shape[0] != g.shape[1] or not np.isfinite(g).all():
+                raise ValueError("Invalid active-space 1RDM")
+            if not np.allclose(g, g.T, atol=1e-7):
+                raise ValueError("Active-space 1RDM must be Hermitian/real")
 
 
 @dataclass(frozen=True)
@@ -161,6 +174,9 @@ class MRPointResult:
     result_signature: str | None = None
     is_production_ea: bool = False
     mr_production_validated: bool = False
+    # Columns of the optimized CASSCF/CASCI MOs corresponding to the active
+    # orbitals, in the AO ordering of the declared geometry/basis.
+    active_mo_coeff_ao: tuple[tuple[float, ...], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.is_production_ea or self.mr_production_validated:
@@ -169,6 +185,14 @@ class MRPointResult:
             raise ValueError("Completed MR point requires roots")
         if self.status is not MRPointStatus.COMPLETE_REVIEW_REQUIRED and self.roots:
             raise ValueError("Incomplete MR result cannot advertise usable roots")
+        if self.active_mo_coeff_ao is not None:
+            if np.iscomplexobj(self.active_mo_coeff_ao):
+                raise ValueError("Complex active orbitals require a separately validated MR method")
+            c = np.asarray(self.active_mo_coeff_ao, dtype=float)
+            if c.ndim != 2 or not c.size or not np.isfinite(c).all():
+                raise ValueError("Invalid AO active-orbital coefficients")
+            if self.status is not MRPointStatus.COMPLETE_REVIEW_REQUIRED:
+                raise ValueError("Incomplete MR result cannot advertise orbital fingerprints")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -258,7 +282,22 @@ def _run_pyscf(request: MRPointRequest, settings: MRPointSettings) -> MRPointRes
         if abs(ss - target_ss) > 0.1:
             raise RuntimeError(f"CASCI root {k} spin contamination: S2={ss}, target={target_ss}")
         corr = float(mrpt.NEVPT(casci, root=k).kernel())
-        roots.append(MRRootEnergy(k, energy, corr, energy + corr, ss))
+        gamma_raw = np.asarray(casci.fcisolver.make_rdm1(ci, request.ncas, request.nelecas))
+        if np.iscomplexobj(gamma_raw):
+            raise RuntimeError("Spin-free MR pilot received complex active-root density")
+        gamma = np.asarray(gamma_raw, dtype=float)
+        if gamma.shape != (request.ncas, request.ncas):
+            raise RuntimeError(f"CASCI root {k} returned unexpected active 1RDM dimensions")
+        roots.append(MRRootEnergy(
+            k, energy, corr, energy + corr, ss,
+            active_rdm1=tuple(tuple(float(x) for x in row) for row in gamma),
+        ))
+    coeff_raw = np.asarray(casci.mo_coeff[:, ncore:ncore + request.ncas])
+    if np.iscomplexobj(coeff_raw):
+        raise RuntimeError("Spin-free MR pilot received complex optimized orbitals")
+    active_coeff = np.asarray(coeff_raw, dtype=float)
+    if active_coeff.shape != (mol.nao_nr(), request.ncas):
+        raise RuntimeError("CASCI optimized active orbitals have unexpected AO dimensions")
     return MRPointResult(
         request_id=request.request_id,
         status=MRPointStatus.COMPLETE_REVIEW_REQUIRED,
@@ -269,6 +308,7 @@ def _run_pyscf(request: MRPointRequest, settings: MRPointSettings) -> MRPointRes
         roots=tuple(roots),
         active_space_review_ids=request.active_space_review_ids,
         state_manifold_review_ids=request.state_manifold_review_ids,
+        active_mo_coeff_ao=tuple(tuple(float(x) for x in row) for row in active_coeff),
     )
 
 
@@ -312,4 +352,17 @@ def run_mr_casscf_nevpt2_point(
         target_ss = request.spin_2s * (request.spin_2s + 2) / 4.0
         if any(abs(x.spin_square - target_ss) > 0.1 for x in result.roots):
             raise ValueError("Backend returned MR root with incorrect spin")
+        if result.active_mo_coeff_ao is not None:
+            c = np.asarray(result.active_mo_coeff_ao)
+            if c.ndim != 2 or c.shape[1] != request.ncas:
+                raise ValueError("MR active-orbital fingerprint has incorrect active dimension")
+        for root in result.roots:
+            if root.active_rdm1 is not None:
+                g = np.asarray(root.active_rdm1)
+                if g.shape != (request.ncas, request.ncas):
+                    raise ValueError("MR root 1RDM has incorrect active dimension")
+                if abs(float(np.trace(g)) - sum(request.nelecas)) > 1e-4:
+                    raise ValueError("MR root 1RDM has incorrect electron count")
+                if np.linalg.eigvalsh(g).min() < -1e-5 or np.linalg.eigvalsh(g).max() > 2 + 1e-5:
+                    raise ValueError("MR root 1RDM occupations out of physical bounds")
     return replace(result, source_checkpoint_sha256=digest, result_signature=signature)

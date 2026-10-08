@@ -305,3 +305,9 @@ from .mr_casscf_nevpt2_runner import (
     MRRootEnergy,
     run_mr_casscf_nevpt2_point,
 )
+
+# MR PEC fingerprint comparison. Candidate only: never clears state identity.
+from .mr_pec_continuity import (
+    MRPECContinuityStatus, MRPECContinuityThresholds, MRPECContinuityResult,
+    assess_mr_pec_continuity, pyscf_mr_ao_overlap_matrices,
+)
