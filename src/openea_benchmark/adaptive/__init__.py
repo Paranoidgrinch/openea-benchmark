@@ -335,3 +335,15 @@ __all__.extend([
     'SOCPointResult', 'SOCEACandidate', 'run_soc_fci_siso_point',
     'assess_soc_ea_pair',
 ])
+
+# Nested SOC spin-manifold sensitivity: observed numerical differences only.
+from .soc_manifold_sensitivity import (
+    SOCManifoldSensitivityStatus, SOCManifoldSensitivitySettings,
+    SOCManifoldSensitivity, compare_soc_manifold_expansion,
+    run_soc_manifold_expansion,
+)
+__all__.extend([
+    'SOCManifoldSensitivityStatus', 'SOCManifoldSensitivitySettings',
+    'SOCManifoldSensitivity', 'compare_soc_manifold_expansion',
+    'run_soc_manifold_expansion',
+])
