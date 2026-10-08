@@ -288,7 +288,7 @@ def assess_eom_ea_diffuse_series(
         )
 
     all_evidence = _evidence(*(p.evidence_ids + p.state_identity.evidence_ids for p in ordered))
-    if any(not _closed(p.state_identity) for p in ordered):
+    if any(p.state_identity.status is not ReviewStatus.CLEARED for p in ordered):
         return EOMEAAttachmentAssessment(
             EOMEAAssessmentStatus.UNRESOLVED,
             Review(ReviewStatus.UNRESOLVED, all_evidence, "EA-EOM root/state identity is not cleared across the diffuse series."),
@@ -360,13 +360,14 @@ def assess_stabilization_series(
     points: tuple[StabilizationPoint, ...],
     *,
     settings: AttachmentContinuumSettings,
+    continuum_discrimination_review: Review | None = None,
 ) -> StabilizationAssessment:
     """Assess a precomputed diffuse-exponent stabilization series.
 
-    This function does not generate scaled basis sets.  It validates that the
-    same reviewed attachment root remains energetically stationary under an
-    explicitly supplied scaling scan.  A future execution layer will populate
-    these points.
+    This function cannot promote stationary finite-basis energies to continuum
+    exclusion without a *separate* scientifically cleared continuum review.
+    A smooth pseudocontinuum eigenvalue can be stationary in a finite scan.
+    Root continuity and stable energies are necessary diagnostics, not proof.
     """
     if len(points) < 3:
         return StabilizationAssessment(
@@ -381,7 +382,7 @@ def assess_stabilization_series(
     if len(scales) != len(set(scales)):
         raise ValueError("duplicate stabilization scale factors")
     evidence = _evidence(*(p.evidence_ids + p.state_identity.evidence_ids for p in ordered))
-    if any(not _closed(p.state_identity) for p in ordered):
+    if any(p.state_identity.status is not ReviewStatus.CLEARED for p in ordered):
         return StabilizationAssessment(
             StabilizationStatus.UNRESOLVED,
             Review(ReviewStatus.UNRESOLVED, evidence, "Attachment root identity is not cleared across the stabilization scan."),
@@ -390,6 +391,13 @@ def assess_stabilization_series(
             None,
         )
 
+    if not (min(scales) < 1.0 < max(scales)) or 1.0 not in scales:
+        return StabilizationAssessment(
+            StabilizationStatus.NEED_MORE_EVIDENCE,
+            Review(ReviewStatus.UNRESOLVED, evidence,
+                   "Stabilization review requires the unscaled baseline and factors on both sides of unity."),
+            None, None, None,
+        )
     energies = tuple(p.attachment_ea_ev for p in ordered)
     span = max(energies) - min(energies)
     lower = min(energies) - span
@@ -403,6 +411,23 @@ def assess_stabilization_series(
             upper,
         )
 
+    # A flat finite-Gaussian basis EOM spectrum can be a pseudostate plateau.
+    # Separately reviewed continuum discrimination is mandatory for a G2-
+    # effective STABLE_BOUND or STABLE_UNBOUND classification.
+    extra = continuum_discrimination_review
+    external_ids = () if extra is None else extra.evidence_ids
+    forbidden_prefixes = ("G2_EOM:", "G2_ROOT_PROPOSAL:", "G2_STABILIZATION_PROFILE:")
+    independent = (extra is not None and extra.status is ReviewStatus.CLEARED and
+                   bool(external_ids) and not set(external_ids).intersection(evidence) and
+                   all(not x.startswith(forbidden_prefixes) for x in external_ids))
+    if not independent:
+        return StabilizationAssessment(
+            StabilizationStatus.UNRESOLVED,
+            Review(ReviewStatus.UNRESOLVED, _evidence(evidence, external_ids),
+                   "Stationary finite-basis EOM energies do not exclude continuum pseudostates; an independent CLEARED continuum-discrimination review is required."),
+            span, lower, upper,
+        )
+    evidence = _evidence(evidence, external_ids)
     margin = settings.minimum_bound_margin_ev
     if lower > margin:
         status = StabilizationStatus.STABLE_BOUND

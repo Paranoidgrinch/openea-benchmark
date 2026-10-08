@@ -42,3 +42,11 @@ The new projection handles RHF/RCCSD and UHF/UCCSD separately and respects PySCF
 2. Introduce independent root character diagnostics, left/right CCSD Dyson transition densities or comparable validated state-observable fingerprints, and external spin-sector/multiplicity reviews.
 3. Develop a continuum-exclusion route for near-threshold systems, with explicit stabilization-vs-pseudostate discrimination. **Do not** convert a smooth EOM pseudo-continuum eigenvalue into boundness.
 4. Wire reviewed results into the D08 `AttachmentContinuumAssessment` without weakening G1/G2/G3 fail-closed contracts.
+
+## Downstream stabilization diagnostic (Patch 14)
+
+`analyze_g2_stabilization_profile()` uses this proposal to select the raw
+scaled-root energies and quantify exponent-scaling trends. It cannot approve
+root identity, electron-boundness or continuum exclusion. A separate
+independent continuum-discrimination review is needed before the D08
+stabilization contract can resolve to STABLE_BOUND/STABLE_UNBOUND.

@@ -64,6 +64,7 @@ class RootContinuityReport:
     notes: tuple[str, ...]
     method_role: str = "DIAGNOSTIC"
     boundness_decision: str = "UNRESOLVED"
+    source_evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.review.status is not ReviewStatus.UNRESOLVED:
@@ -291,4 +292,5 @@ def propose_g2_root_continuity(
             "Root identity, spin/multiplicity, and continuum exclusion remain subject to independent review.")
     review = Review(ReviewStatus.UNRESOLVED, (evidence_id,), note)
     return RootContinuityReport(status, tuple(sorted(path.items())), tuple(links),
-                                review, evidence_id, (note,))
+                                review, evidence_id, (note,),
+                                source_evidence_ids=tuple(sorted(p.evidence_id for p in subpoints)))

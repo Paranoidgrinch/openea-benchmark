@@ -614,4 +614,21 @@ def evidence_points_from_review(
                 attachment_ea_ev=root.attachment_ea_ev,
                 state_identity=review, evidence_ids=ids,
             ))
+    # The unscaled parent is the exact factor=1 reference for the exponent
+    # scan. Include it explicitly so a downstream stabilized-series review
+    # cannot accidentally interpret a one-sided collection as bidirectional.
+    # This is not new evidence: it reuses the already reviewed EOM baseline.
+    if out_stab:
+        scaled_levels = {s.request.basis.augmentation_level for s in series.subpoints
+                         if s.request.scale_factor is not None}
+        if len(scaled_levels) != 1:
+            raise ValueError("Stabilization adaptation requires one fixed augmentation baseline")
+        parent_level = next(iter(scaled_levels))
+        matching = [p for p in out_eom if p.augmentation_level == parent_level]
+        if len(matching) != 1:
+            raise ValueError("Stabilization parent EOM point missing or duplicated")
+        parent = matching[0]
+        out_stab.append(StabilizationPoint(1.0, parent.attachment_ea_ev,
+                                           parent.state_identity, parent.evidence_ids))
+        out_stab.sort(key=lambda p: p.scale_factor)
     return tuple(out_eom), tuple(out_stab)

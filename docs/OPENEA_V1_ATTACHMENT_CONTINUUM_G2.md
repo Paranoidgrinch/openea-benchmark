@@ -160,3 +160,14 @@ points, reviewed uncontracted-exponent stabilization points, checkpoint/resume,
 and *raw* EOM roots. These results **do not** automatically close D08.
 Cross-basis/spin-sector root identity and stronger continuum review remain
 separate scientific prerequisites. See `OPENEA_V1_GENERIC_G2_EOM_DIAGNOSTICS.md`.
+
+## Patch 14 safeguard — stabilization is not continuum proof
+
+The earlier contract's small-span stabilization heuristic is **necessary but
+not sufficient** for clearing D08. It is retained for numerical diagnostics,
+but `assess_stabilization_series` now additionally requires an independently
+`CLEARED` `continuum_discrimination_review` before returning `STABLE_BOUND`
+or `STABLE_UNBOUND`. Missing or raw-EOM/overlap-only evidence remains
+`UNRESOLVED`, even with an apparently flat EA scan. A bidirectional scan
+must contain the unscaled factor-1 parent. See
+`OPENEA_V1_G2_STABILIZATION_PROFILE.md`.

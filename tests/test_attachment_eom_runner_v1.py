@@ -263,3 +263,23 @@ def test_fake_backend_without_version_tag_is_rejected(tmp_path):
         run_g2_eom_diagnostics(authorization=auth(), neutral=state,
                                basis_specs=bases(), backend=fake_backend([]),
                                basis_loader=loader)
+
+
+def test_stabilization_evidence_adapter_includes_parent_factor_one(tmp_path):
+    specs = (G2EOMStabilization(2, 0.8, (DiffuseShellSelector("X", 0),)),
+             G2EOMStabilization(2, 1.2, (DiffuseShellSelector("X", 0),)))
+    keys = ("aug:0", "aug:1", "aug:2", "scale:2:0.8", "scale:2:1.2")
+    series, _ = run(tmp_path, stabilization_specs=specs, authorization=auth(keys))
+    selections = {p.request.key: (0, Review(ReviewStatus.CLEARED,
+                  (f"external-root:{p.request.key}",), "independent state review"))
+                  for p in series.subpoints}
+    eom, stab = evidence_points_from_review(series, selections=selections)
+    assert len(eom) == 3
+    assert [p.scale_factor for p in stab] == [0.8, 1.0, 1.2]
+    parent = next(p for p in eom if p.augmentation_level == 2)
+    assert stab[1].attachment_ea_ev == parent.attachment_ea_ev
+    assert stab[1].evidence_ids == parent.evidence_ids
+    # A parent is still just EOM evidence: continuum review remains separate.
+    from openea_benchmark.adaptive.attachment_continuum import assess_stabilization_series, StabilizationStatus
+    report = assess_stabilization_series(stab,settings=AttachmentContinuumSettings(stabilization_span_target_ev=.02))
+    assert report.status is StabilizationStatus.UNRESOLVED

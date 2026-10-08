@@ -187,6 +187,11 @@ from .attachment_root_continuity import (
     RootContinuityReport, normalized_ao_one_particle_overlap,
     pyscf_cross_ao_overlap, propose_g2_root_continuity,
 )
+from .attachment_stabilization_profile import (
+    StabilizationProfileStatus, StabilizationProfileSettings,
+    StabilizationProfilePoint, StabilizationProfileReport,
+    analyze_g2_stabilization_profile,
+)
 from .scientific_resolution import (
     PhysicalValidityAssessment,
     PhysicalValidityStatus,
@@ -274,7 +279,11 @@ __all__ = [
     'run_g2_eom_diagnostics', 'scaled_diffuse_basis', 'evidence_points_from_review',
     'PhysicalValidityStatus', 'PhysicalValidityAssessment',
     'ScientificResolutionPath', 'ScientificResolutionResult',
-    'physical_validity_from_binding', 'physical_validity_with_nuclear_motion', 'resolve_scientific_outcome',    'RootContinuityStatus', 'RootContinuitySettings', 'RootContinuityLink',
+    'physical_validity_from_binding', 'physical_validity_with_nuclear_motion', 'resolve_scientific_outcome',
+    'RootContinuityStatus', 'RootContinuitySettings', 'RootContinuityLink',
     'RootContinuityReport', 'normalized_ao_one_particle_overlap',
     'pyscf_cross_ao_overlap', 'propose_g2_root_continuity',
+    'StabilizationProfileStatus', 'StabilizationProfileSettings',
+    'StabilizationProfilePoint', 'StabilizationProfileReport',
+    'analyze_g2_stabilization_profile',
 ]
