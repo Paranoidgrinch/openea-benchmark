@@ -175,12 +175,30 @@ class G2EOMRoot:
     root_index: int
     omega_hartree: float
     attachment_ea_ev: float
-    # Raw EOM roots have no cross-basis state approval and no calibrated 1p weight.
+    # AO-projected RIGHT-EOM 1p directions are *not* Dyson orbitals or
+    # spectroscopic weights.  Optional for imported v1 checkpoints/backends.
+    one_particle_ao_alpha: tuple[float, ...] | None = None
+    one_particle_ao_beta: tuple[float, ...] | None = None
+    one_particle_amplitude_fraction: float | None = None
+
     def __post_init__(self) -> None:
         if self.root_index < 0 or not isfinite(self.omega_hartree) or not isfinite(self.attachment_ea_ev):
             raise ValueError("Invalid EOM root")
         if abs(self.attachment_ea_ev - pyscf_eom_eigenvalue_to_attachment_ea_ev(self.omega_hartree)) > 1e-8:
             raise ValueError("EOM root sign/energy mismatch")
+        if self.one_particle_amplitude_fraction is not None and not (
+            isfinite(self.one_particle_amplitude_fraction)
+            and 0.0 <= self.one_particle_amplitude_fraction <= 1.0 + 1e-10
+        ):
+            raise ValueError("Invalid algebraic EOM 1p amplitude fraction")
+        for field_name in ("one_particle_ao_alpha", "one_particle_ao_beta"):
+            coeffs = getattr(self, field_name)
+            if coeffs is not None:
+                if len(coeffs) == 0 or any(not isfinite(float(c)) for c in coeffs):
+                    raise ValueError("Invalid AO-projected EOM 1p direction")
+                # JSON checkpoint round trips turn tuples into lists; restore
+                # the canonical immutable scientific record representation.
+                object.__setattr__(self, field_name, tuple(float(c) for c in coeffs))
 
 
 @dataclass(frozen=True)
@@ -282,6 +300,60 @@ def scaled_diffuse_basis(
     return expanded
 
 
+def _project_eom_one_particle_to_ao(eom: Any, ccobj: Any, mf: Any,
+                                    vector: Any, reference_kind: str
+                                    ) -> tuple[tuple[float, ...] | None,
+                                               tuple[float, ...] | None, float]:
+    """Project the *right EOM r1 component* into the AO basis.
+
+    This is NOT a physical Dyson orbital and its algebraic r1 fraction is NOT
+    a spectroscopic pole strength.  Both require left/right biorthogonal
+    CC-density treatment.  No orbital labels/indices are compared across bases.
+    """
+    import numpy as np
+
+    v = np.asarray(vector)
+    if v.ndim != 1 or not np.all(np.isfinite(v)) or float(np.vdot(v, v).real) <= 0:
+        raise ValueError("Invalid PySCF EA-EOM right eigenvector")
+    r1, _ = eom.vector_to_amplitudes(v)
+    masks = ccobj.get_frozen_mask()
+
+    def project(c: Any, occ: Any, mask: Any, amplitude: Any) -> tuple[float, ...]:
+        coeff = np.asarray(c)
+        occupied = np.asarray(occ)
+        kept = np.asarray(mask, dtype=bool)
+        amplitude = np.asarray(amplitude)
+        if coeff.ndim != 2 or kept.shape != occupied.shape or coeff.shape[1] != kept.size:
+            raise ValueError("Unexpected CCSD orbital mask/occupation dimensions")
+        virtuals = kept & (occupied == 0)
+        if amplitude.ndim != 1 or amplitude.size != int(virtuals.sum()):
+            raise ValueError("PySCF EOM r1 is inconsistent with active virtual orbitals")
+        ao = coeff[:, virtuals] @ amplitude
+        if np.max(np.abs(np.imag(ao))) > 1e-9:
+            raise ValueError("Complex EOM attachment direction requires dedicated storage")
+        if not np.all(np.isfinite(ao)):
+            raise ValueError("Non-finite EOM attachment direction")
+        return tuple(float(x) for x in np.real(ao))
+
+    if reference_kind == "RHF":
+        ao_alpha = project(mf.mo_coeff, mf.mo_occ, masks, r1)
+        ao_beta = None
+        part = np.asarray(r1)
+        fraction = float(np.vdot(part, part).real / np.vdot(v, v).real)
+    elif reference_kind == "UHF":
+        if len(r1) != 2 or len(masks) != 2:
+            raise ValueError("Unexpected UCCSD EA-EOM spin structure")
+        ao_alpha = project(mf.mo_coeff[0], mf.mo_occ[0], masks[0], r1[0])
+        ao_beta = project(mf.mo_coeff[1], mf.mo_occ[1], masks[1], r1[1])
+        fraction = float((np.vdot(r1[0], r1[0]).real + np.vdot(r1[1], r1[1]).real)
+                         / np.vdot(v, v).real)
+    else:
+        raise ValueError("Unsupported G2 EOM spin reference")
+    if not isfinite(fraction) or fraction < 0 or fraction > 1.0 + 1e-8:
+        raise ValueError("Invalid normalized algebraic EOM r1 fraction")
+    return ao_alpha, ao_beta, min(1.0, fraction)
+
+
 def _backend_pyscf(request: G2EOMRequest, settings: G2EOMSettings, basis: Mapping[str, Any]) -> G2EOMRawResult:
     """Actual PySCF RHF/RCCSD or UHF/UCCSD EA-EOM backend (lazy import)."""
     import numpy as np
@@ -339,7 +411,10 @@ def _backend_pyscf(request: G2EOMRequest, settings: G2EOMSettings, basis: Mappin
     if len(values) != settings.nroots:
         raise RuntimeError("EA-EOM returned fewer roots than requested")
     roots = tuple(
-        G2EOMRoot(int(i), float(omega), pyscf_eom_eigenvalue_to_attachment_ea_ev(float(omega)))
+        G2EOMRoot(
+            int(i), float(omega), pyscf_eom_eigenvalue_to_attachment_ea_ev(float(omega)),
+            *_project_eom_one_particle_to_ao(eom, mycc, mf, vectors[i], st.scf_reference),
+        )
         for i, omega in enumerate(values)
     )
     return G2EOMRawResult(request.key, roots, st.scf_reference,
@@ -430,7 +505,7 @@ def run_g2_eom_diagnostics(
             version = importlib.metadata.version("pyscf")
         except importlib.metadata.PackageNotFoundError:
             raise RuntimeError("Cannot fingerprint the installed PySCF backend")
-        backend_id = f"PySCF-{version}-G2-EOM-RCCSD-UCCSD-v1"
+        backend_id = f"PySCF-{version}-G2-EOM-RCCSD-UCCSD-v2-AO1P"
     if not backend_id.strip():
         raise ValueError("G2 checkpoint backend_id must be nonempty")
 
@@ -518,9 +593,12 @@ def evidence_points_from_review(
         if review.status is ReviewStatus.NOT_APPLICABLE:
             raise ValueError("Root identity may not be marked NOT_APPLICABLE")
         if review.status is ReviewStatus.CLEARED and (
-            not review.evidence_ids or set(review.evidence_ids).issubset({sub.evidence_id})
+            not review.evidence_ids or all(
+                x == sub.evidence_id or x.startswith("G2_ROOT_PROPOSAL:")
+                for x in review.evidence_ids
+            )
         ):
-            raise ValueError("Cleared root identity requires separate reviewed evidence")
+            raise ValueError("Cleared root identity requires separate reviewed evidence, not raw or proposed overlap evidence")
         root = roots[root_index]
         ids = (sub.evidence_id,)
         if sub.request.scale_factor is None:

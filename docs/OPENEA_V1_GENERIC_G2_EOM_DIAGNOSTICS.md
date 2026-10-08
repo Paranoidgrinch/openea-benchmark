@@ -35,3 +35,7 @@ One JSON record is stored per raw G2 EOM subpoint. Its SHA-256 signature include
 This patch implements a real EOM backend and controlled basis stabilization **execution** (to be smoke-tested on Artemis); it does **not** implement automatic cross-basis Dyson orbital overlap/root tracking, classify resonances from avoided crossings, or automate independent continuum reviews. Those remain the next G2 scientific tasks. There is no legal path for a raw EOM result to produce a terminal `BOUND`/`UNBOUND` alone.
 
 The standalone `scripts/openea_g2_eom_runner_smoke.py` runs a cheap **LiH/STO-3G software integration smoke**, not a valid LiH electron affinity. It should report `COMPLETE_ROOT_REVIEW_REQUIRED` and verify the checkpoint resume.
+
+## Patch 13 — AO one-particle root candidate continuity
+
+`attachment_root_continuity.py` can compare explicitly authorized EOM roots across the actually resolved AO bases, via the **right-EOM 1p attachment directions** and PySCF's cross-basis AO overlaps. This is explicitly *not* a Dyson orbital, a one-particle weight, or an automated physical attachment classification. All candidate paths and stabilization comparisons return an UNRESOLVED identity review. See `OPENEA_V1_G2_ROOT_CONTINUITY.md`.

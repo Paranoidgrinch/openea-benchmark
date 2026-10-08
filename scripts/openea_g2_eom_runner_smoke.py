@@ -63,12 +63,33 @@ def main() -> None:
         )
         if not repeat.subpoints[0].checkpoint_reused:
             raise RuntimeError("G2 smoke checkpoint resume did not work")
+        roots = result.subpoints[0].result.roots
+        if not all(r.one_particle_ao_alpha is not None and
+                   len(r.one_particle_ao_alpha) == mol.nao_nr() and
+                   r.one_particle_amplitude_fraction is not None
+                   for r in roots):
+            raise RuntimeError("Real PySCF EA-EOM AO 1p fingerprint extraction failed")
+        if any(r.one_particle_ao_alpha != r2.one_particle_ao_alpha
+               for r, r2 in zip(roots, repeat.subpoints[0].result.roots)):
+            raise RuntimeError("G2 AO 1p directions were not checkpointed exactly")
+        from openea_benchmark.adaptive.attachment_root_continuity import (
+            pyscf_cross_ao_overlap, normalized_ao_one_particle_overlap,
+        )
+        overlap = pyscf_cross_ao_overlap(result.subpoints[0], result.subpoints[0])
+        for root in roots:
+            if not 0.999999 < normalized_ao_one_particle_overlap(
+                root, root, saa=overlap, sab=overlap, sbb=overlap,
+            ) <= 1.000001:
+                raise RuntimeError("AO-metric self-overlap was not normalized")
         print(json.dumps({
             "status": "PASS",
             "scope": "SOFTWARE_INTEGRATION_ONLY_NOT_SCIENTIFIC_EA",
             "runner_status": result.status.value,
             "backend_version": result.subpoints[0].result.pyscf_version,
             "root_omegas_hartree": [r.omega_hartree for r in result.subpoints[0].result.roots],
+            "ao_one_particle_directions": "PASS",
+            "ao_metric_self_overlap": "PASS",
+            "one_particle_is_dyson_orbital": False,
             "roots_automatically_state_validated": False,
             "checkpoint_resume": "PASS",
             "attachment_continuum_status": "UNRESOLVED_ROOT_AND_CONTINUUM_IDENTITY",
