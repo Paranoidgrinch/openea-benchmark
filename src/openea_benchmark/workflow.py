@@ -2006,6 +2006,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "plan",
             "dft-scout",
+            "benchmark-auto",
         ),
         default="plan",
     )
@@ -2048,6 +2049,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         action="store_true",
+    )
+    parser.add_argument(
+        "--max-stage3-points", type=int, default=100,
+        help="Bounded per-invocation CCSD(T) point budget for benchmark-auto",
+    )
+    parser.add_argument(
+        "--stage3-memory-mb", type=int, default=12000,
+    )
+    parser.add_argument(
+        "--no-provisional-stage3", action="store_true",
+        help="Execute Stage-3 only when adaptive release gates are cleared",
+    )
+    parser.add_argument(
+        "--auto-dry-run", action="store_true",
+        help="Plan/select automatically without executing Stage-3 points",
     )
 
     return parser
@@ -2107,6 +2123,43 @@ def main(
             manifest
         )
     )
+
+    if args.mode == "benchmark-auto":
+        from .benchmark_auto import AcquisitionSettings, run_benchmark_acquisition
+        records = {}
+        for name in selected_system_names(manifest, args.systems):
+            summary_path = output_root / name / "summary.json"
+            if summary_path.exists():
+                with summary_path.open(encoding="utf-8") as f:
+                    summary = json.load(f)
+                print(f"[BENCHMARK AUTO] Reusing completed scout for {name}", flush=True)
+            else:
+                print(f"[BENCHMARK AUTO] Running DFT scout for {name}", flush=True)
+                summary = run_system_dft_scout(
+                    manifest=manifest, system_name=name, output_root=output_root,
+                    guesses=guesses, settings=settings, resume=args.resume,
+                )
+            records[name] = run_benchmark_acquisition(
+                summary=summary, manifest=manifest,
+                output_dir=output_root / name / "benchmark_auto",
+                settings=AcquisitionSettings(
+                    max_points=args.max_stage3_points,
+                    threads=args.threads,
+                    memory_mb=args.stage3_memory_mb,
+                    enable_provisional_points=not args.no_provisional_stage3,
+                    compute_points=not args.auto_dry_run,
+                ),
+            )
+            print(f"[BENCHMARK AUTO] {name}: " + json.dumps({
+                "outcome": records[name]["outcome"],
+                "stage3_release": records[name]["stage3_release"],
+                "completed": records[name]["completed_point_count"],
+                "failed": records[name]["failed_point_count"],
+                "pending": records[name]["pending_point_count"],
+                "blocked_jobs": len(records[name]["blocked_jobs"]),
+            }), flush=True)
+        print("BENCHMARK AUTO RUN COMPLETE: results are evidence, not a certified EA")
+        return 0
 
     result = run_dft_scout(
         manifest=manifest,
