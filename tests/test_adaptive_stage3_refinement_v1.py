@@ -265,3 +265,33 @@ def test_missing_high_level_checkpoint_fails_closed():
         assert "checkpoint" in str(exc).lower()
     else:
         raise AssertionError("expected missing checkpoint to fail closed")
+
+
+def test_refinement_requests_preserve_basis_by_element_policy():
+    base = req(0.9, idx=0)
+    base = replace(base, basis='MIXED_TEST', basis_by_element={'O': 'aug-cc-pVTZ', 'H': 'aug-cc-pVQZ'})
+    mid = replace(req(1.0, idx=1), basis='MIXED_TEST', basis_by_element={'O': 'aug-cc-pVTZ', 'H': 'aug-cc-pVQZ'})
+    upper = replace(req(1.1, idx=2), basis='MIXED_TEST', basis_by_element={'O': 'aug-cc-pVTZ', 'H': 'aug-cc-pVQZ'})
+    requests = [base, mid, upper]
+    results = [
+        result(base, -75.0, checkpoint='/tmp/mixed0.chk'),
+        result(mid, -75.1, checkpoint='/tmp/mixed1.chk'),
+        result(upper, -75.0, checkpoint='/tmp/mixed2.chk'),
+    ]
+    review = cleared([item.request_id for item in requests])
+    pec = assemble_high_level_pec(
+        requests=requests,
+        results=results,
+        geometry_continuity_review=review,
+    )
+    plan = plan_stage3_pec_refinement(pec, settings=SETTINGS)
+    new = build_stage3_refinement_requests(
+        plan=plan,
+        pec=pec,
+        prior_requests=requests,
+        prior_results=results,
+        refinement_round=1,
+    )
+    assert new
+    assert all(item.basis == 'MIXED_TEST' for item in new)
+    assert all(item.basis_by_element == {'O': 'aug-cc-pVTZ', 'H': 'aug-cc-pVQZ'} for item in new)

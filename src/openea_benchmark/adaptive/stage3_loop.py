@@ -290,6 +290,31 @@ def _execute_batch_with_retries(
     return tuple(final_results), tuple(attempts)
 
 
+def execute_stage3_batch_with_retries(
+    requests: Sequence[Stage3ExecutionRequest],
+    *,
+    settings: Stage3ExecutionSettings,
+    retry_settings: Stage3LoopRetrySettings | None = None,
+    runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None = None,
+) -> tuple[tuple[Stage3PointResult, ...], tuple[Stage3ExecutionAttempt, ...]]:
+    """Execute one explicit Stage-3 batch using the canonical bounded retry policy.
+
+    This public wrapper exists so higher-level orchestration layers (for
+    example D12 nuclear-PEC closure) can reuse the exact Stage-3 numerical
+    retry semantics without duplicating or weakening them.  It does not
+    perform state-identity or PEC-continuity review; callers must re-run the
+    canonical Stage-3 resolver after the batch completes.
+    """
+    if not requests:
+        return (), ()
+    return _execute_batch_with_retries(
+        requests,
+        settings=settings,
+        retry_settings=retry_settings or Stage3LoopRetrySettings(),
+        runner=runner,
+    )
+
+
 def run_stage3_refinement_loop(
     *,
     initial_requests: Sequence[Stage3ExecutionRequest],

@@ -19,7 +19,7 @@ It is an architecture/status document, not a new chemistry model.
 | CCSDT | generic diagnostic runner | explicitly authorized DeltaT3 evidence only; no automatic CCSDTQ |
 | G3a--G3e | implemented | fail-closed evidence aggregation |
 | Error budget / precision controller | implemented | unknown terms remain unknown |
-| Nuclear motion / D12 | generic radial solver | J=0 anharmonic v=0, explicit isotope masses, numerical/domain/interpolation checks; PEC-model bound required |
+| Nuclear motion / D12 | generic radial solver + Stage-3 closure orchestration | J=0 anharmonic v=0, explicit isotope masses, solver-directed electronic PEC refinement, explicitly authorized second-level PEC comparison; PEC-model bound required |
 
 ## Remaining capability gaps
 
@@ -48,7 +48,7 @@ Still open:
 - spin-orbit coupling;
 - DBOC/non-adiabatic remainder beyond the J=0 Born-Oppenheimer vibrational solve.
 
-Nuclear motion now has a generic J=0 radial solver and a production-evidence bridge. Remaining D12 orchestration work is explicit high-level electronic PEC extension/model-convergence generation when the solver requests more PEC evidence. A cleared DeltaZPE does not erase omitted beyond-BO nuclear physics: `ADIABATIC_NUCLEAR_REMAINDER` remains explicit until bounded or reviewed.
+Nuclear motion now has a generic J=0 radial solver, production-evidence bridge, solver-directed Stage-3 PEC range/density refinement, and explicit second-level PEC model comparison/reuse. A cross-model state-identity record is still mandatory before the DeltaZPE difference is interpreted as model sensitivity. A cleared DeltaZPE does not erase omitted beyond-BO nuclear physics: `ADIABATIC_NUCLEAR_REMAINDER` remains explicit until bounded or reviewed.
 
 SOC is not yet suitable for promotion from the FeH pilot into the universal production graph. The current pilot is system-specific and should remain validation/research evidence until a method/capability policy is validated across representative states.
 
@@ -113,13 +113,13 @@ If G2 claims a physically bound anion while the independently closed adiabatic E
 
 ## Recommended next implementation priority
 
-The generic nuclear-motion solver is now implemented. The immediate next orchestration target should be the remaining D12 closure loop: connect `REFINE_NUCLEAR_PEC` and `ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE` to the existing Stage-3 high-level PEC machinery without inventing extrapolated points or automatic method escalation.
+The D12 closure loop is now connected to Stage-3 without extrapolated electronic points or automatic method escalation. The next architecture audit should prioritize the remaining *scientific* blockers rather than add another execution wrapper by default. In particular:
 
-After that closure loop is wired, the remaining priorities should be re-audited between:
-
-- G2 attachment/continuum execution;
-- SOC relevance gate + validated SOC production path;
-- scalar-relativity remainder policy;
+- G2 attachment/continuum execution and evidence closure;
+- SOC relevance gate followed by a validated SOC production path where required;
+- scalar-relativity two-electron/picture-change remainder policy;
 - beyond-BO DBOC/non-adiabatic remainder policy;
 - CBS geometry-transfer closure;
 - MR production implementation.
+
+Cross-model state identity for D12 remains an explicit evidence requirement. The current orchestration can generate/reuse the comparison PEC, but it will not convert that comparison into a model uncertainty until such identity evidence is supplied.

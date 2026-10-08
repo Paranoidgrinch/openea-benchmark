@@ -85,7 +85,7 @@ def test_postcc_warning_returns_to_reference_review():
     assert req.disposition is ExecutionDisposition.MANUAL_OR_DIAGNOSTIC_REVIEW
 
 
-def test_soc_remains_gap_but_nuclear_motion_has_generic_solver():
+def test_soc_remains_gap_but_nuclear_motion_and_d12_pec_closure_are_generic():
     soc = classify_closure_action(action('ASSESS_SOC', SOC, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.PRODUCTION))
     nuc = classify_closure_action(action('SOLVE_NUCLEAR_MOTION', NUCLEAR_MOTION, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.PRODUCTION))
     assert soc.capability is ExecutionCapability.SOC
@@ -96,7 +96,14 @@ def test_soc_remains_gap_but_nuclear_motion_has_generic_solver():
     assert nuc.runner_id.endswith('run_diatomic_nuclear_motion')
 
     refine_pec = classify_closure_action(action('REFINE_NUCLEAR_PEC', NUCLEAR_MOTION, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.REFINEMENT))
-    assert refine_pec.disposition is ExecutionDisposition.CAPABILITY_GAP
+    assert refine_pec.capability is ExecutionCapability.NUCLEAR_PEC_REFINEMENT
+    assert refine_pec.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert refine_pec.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+
+    model_pec = classify_closure_action(action('ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE', NUCLEAR_MOTION, priority=ClosurePriority.PHYSICAL_CORRECTION, role=MethodRole.REFINEMENT))
+    assert model_pec.capability is ExecutionCapability.NUCLEAR_PEC_MODEL_CONVERGENCE
+    assert model_pec.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert model_pec.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
 
 
 def test_forbidden_high_order_escalation_is_policy_blocked():

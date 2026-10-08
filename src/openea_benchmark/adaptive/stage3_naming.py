@@ -73,6 +73,50 @@ def refinement_request_id(
     return value
 
 
+
+def nuclear_model_comparison_job_id(*, source_job_id: str, model_id: str) -> str:
+    """Return a bounded deterministic job ID for a D12 comparison PEC level."""
+    if not str(model_id).strip():
+        raise ValueError("model_id must be non-empty")
+    prefix = _safe_prefix(source_job_id, 34)
+    model = _safe_prefix(model_id, 20)
+    digest = _digest(source_job_id, model_id, "NUCLEAR_MODEL_COMPARISON")
+    value = f"{prefix}__nucmodel__{model}__{digest}"
+    if len(value) > REQUEST_ID_MAX_CHARS:
+        raise AssertionError("bounded nuclear model-comparison job ID exceeded its contract")
+    return value
+
+
+def nuclear_model_comparison_request_id(
+    *,
+    source_job_id: str,
+    model_id: str,
+    geometry_index: int,
+    seed_index: int,
+    seed_request_id: str,
+    target_r_angstrom: float,
+) -> str:
+    """Return a bounded request ID for an explicitly authorized D12 model level."""
+    if geometry_index < 0 or seed_index < 0:
+        raise ValueError("geometry_index and seed_index must be >= 0")
+    if not str(seed_request_id).strip():
+        raise ValueError("seed_request_id must be non-empty")
+    r = float(target_r_angstrom)
+    if not isfinite(r) or r <= 0.0:
+        raise ValueError("target_r_angstrom must be finite and positive")
+    job_id = nuclear_model_comparison_job_id(
+        source_job_id=source_job_id,
+        model_id=model_id,
+    )
+    prefix = _safe_prefix(job_id, 42)
+    digest = _digest(
+        source_job_id, model_id, geometry_index, seed_index, seed_request_id, f"{r:.12f}"
+    )
+    value = f"{prefix}__g{geometry_index:03d}__seed{seed_index:02d}__{digest}"
+    if len(value) > REQUEST_ID_MAX_CHARS:
+        raise AssertionError("bounded nuclear model-comparison request ID exceeded its contract")
+    return value
+
 def checkpoint_artifact_basename(request_id: str) -> str:
     """Return a bounded deterministic HF checkpoint basename."""
     prefix = _safe_prefix(request_id, 48)

@@ -22,7 +22,9 @@ context.
 | Fixed-geometry transfer | not implemented as universal adapter | Stage-3 machinery exists but no production closure adapter yet |
 | Scalar-relativistic remainder | not implemented | must remain open/bounded externally until implemented |
 | SOC | not implemented | explicit capability gap |
-| Nuclear motion | radial solver available | `nuclear_motion.run_diatomic_nuclear_motion`; explicit masses + identity-cleared PECs + numerical settings required; electronic PEC-refinement orchestration remains a gap |
+| Nuclear motion | radial solver available | `nuclear_motion.run_diatomic_nuclear_motion`; explicit masses + identity-cleared PECs + numerical settings required |
+| Nuclear PEC refinement | runner available | `nuclear_motion_orchestration.run_nuclear_pec_refinement`; solver-directed Stage-3 range/density refinement with identity/continuity re-review |
+| Nuclear PEC model convergence | runner available | `nuclear_motion_orchestration.run_nuclear_pec_model_convergence`; explicitly authorized second PEC level or reuse; cross-model state identity required before forming a model bound |
 | Beyond-BO nuclear remainder | not implemented | DBOC/non-adiabatic residual must be bounded or explicitly reviewed; the J=0 BO solver does not set it to zero |
 
 ## Priority rule
@@ -54,4 +56,4 @@ charge, spin, or checkpoint provenance.
 * OH validation scripts are not promoted to universal runners; generic CV/SR/CCSDT-diagnostic execution is implemented in separate molecule-independent modules.
 * CCSDTQ/T4/higher-rank automatic actions are policy-blocked.
 * Review/repair actions remain diagnostic/review work, not blind calculations.
-* SOC remains a visible capability gap. Nuclear radial solving is generic, while high-level electronic PEC extension requested by the nuclear layer remains an explicit orchestration gap. DBOC/non-adiabatic effects remain a separate explicit `ADIABATIC_NUCLEAR_REMAINDER` obligation.
+* SOC remains a visible capability gap. Nuclear radial solving, solver-directed Stage-3 PEC refinement, and explicitly authorized PEC-model comparison are generic. DBOC/non-adiabatic effects remain a separate explicit `ADIABATIC_NUCLEAR_REMAINDER` obligation.

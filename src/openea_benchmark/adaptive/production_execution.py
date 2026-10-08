@@ -7,9 +7,9 @@ molecule-specific validation scripts as universal production runners.
 The current repository contains generic adaptive runners for cardinal,
 diffuse, matched all-electron/frozen-core core-valence convergence, matched
 NR/SFX2C1E scalar-relativity convergence, explicitly authorized CCSDT
-triples-reliability diagnostics, and J=0 diatomic nuclear-motion solves. SOC
-remains a production capability gap; high-level electronic PEC refinement
-requested by the nuclear solver is also not yet wired as a closure adapter.
+triples-reliability diagnostics, and J=0 diatomic nuclear-motion solves. D12 PEC range/density refinement and
+explicitly authorized second-level PEC model comparisons are also connected to
+the canonical Stage-3 machinery. SOC remains a production capability gap.
 
 Scientific invariants
 ---------------------
@@ -35,6 +35,10 @@ from .core_valence_runner import run_adaptive_core_valence_series
 from .scalar_relativity_runner import run_adaptive_scalar_relativity_series
 from .ccsdt_diagnostic_runner import run_adaptive_ccsdt_diagnostic_series
 from .nuclear_motion import run_diatomic_nuclear_motion
+from .nuclear_motion_orchestration import (
+    run_nuclear_pec_model_convergence,
+    run_nuclear_pec_refinement,
+)
 
 from .production_evidence import (
     ADIABATIC_NUCLEAR_REMAINDER,
@@ -65,6 +69,8 @@ class ExecutionCapability(str, Enum):
     SCALAR_RELATIVITY_REMAINDER = "SCALAR_RELATIVITY_REMAINDER"
     SOC = "SOC"
     NUCLEAR_MOTION = "NUCLEAR_MOTION"
+    NUCLEAR_PEC_REFINEMENT = "NUCLEAR_PEC_REFINEMENT"
+    NUCLEAR_PEC_MODEL_CONVERGENCE = "NUCLEAR_PEC_MODEL_CONVERGENCE"
     ADIABATIC_NUCLEAR_REMAINDER = "ADIABATIC_NUCLEAR_REMAINDER"
     UNKNOWN = "UNKNOWN"
 
@@ -165,6 +171,8 @@ _CORE_VALENCE_RUNNER_ID = f"{run_adaptive_core_valence_series.__module__}.{run_a
 _SCALAR_RELATIVITY_RUNNER_ID = f"{run_adaptive_scalar_relativity_series.__module__}.{run_adaptive_scalar_relativity_series.__qualname__}"
 _CCSDT_DIAGNOSTIC_RUNNER_ID = f"{run_adaptive_ccsdt_diagnostic_series.__module__}.{run_adaptive_ccsdt_diagnostic_series.__qualname__}"
 _NUCLEAR_MOTION_RUNNER_ID = f"{run_diatomic_nuclear_motion.__module__}.{run_diatomic_nuclear_motion.__qualname__}"
+_NUCLEAR_PEC_REFINEMENT_RUNNER_ID = f"{run_nuclear_pec_refinement.__module__}.{run_nuclear_pec_refinement.__qualname__}"
+_NUCLEAR_PEC_MODEL_CONVERGENCE_RUNNER_ID = f"{run_nuclear_pec_model_convergence.__module__}.{run_nuclear_pec_model_convergence.__qualname__}"
 
 
 def _is_forbidden_high_order_action(action_id: str) -> bool:
@@ -351,16 +359,22 @@ def classify_closure_action(action: ProductionClosureAction) -> ProductionExecut
                 "A generic J=0 diatomic radial nuclear-motion solver exists; identity-cleared neutral/anion PECs, explicit isotopologue masses and numerical convergence settings must be bound before execution.",
             )
         if action_id == "REFINE_NUCLEAR_PEC":
-            return _gap_request(
+            return ProductionExecutionRequest(
                 action,
-                ExecutionCapability.NUCLEAR_MOTION,
-                "The nuclear solver identified insufficient PEC range/density; generic high-level electronic PEC-extension orchestration is not yet connected to this closure action.",
+                ExecutionCapability.NUCLEAR_PEC_REFINEMENT,
+                CapabilityImplementation.GENERIC_RUNNER_AVAILABLE,
+                ExecutionDisposition.NEEDS_BOUND_CONTEXT,
+                _NUCLEAR_PEC_REFINEMENT_RUNNER_ID,
+                "The D12 radial solver requested additional electronic PEC support; a generic Stage-3-backed range/density refinement runner exists and requires the current neutral/anion PEC contexts plus explicit Stage-3 thresholds/settings.",
             )
         if action_id == "ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE":
-            return _gap_request(
+            return ProductionExecutionRequest(
                 action,
-                ExecutionCapability.NUCLEAR_MOTION,
-                "The radial solve is available, but automated generation/comparison of a second electronic PEC level for DeltaZPE model sensitivity is not yet connected.",
+                ExecutionCapability.NUCLEAR_PEC_MODEL_CONVERGENCE,
+                CapabilityImplementation.GENERIC_RUNNER_AVAILABLE,
+                ExecutionDisposition.NEEDS_BOUND_CONTEXT,
+                _NUCLEAR_PEC_MODEL_CONVERGENCE_RUNNER_ID,
+                "The D12 radial solve is numerically converged; a generic runner can generate or reuse an explicitly authorized second Stage-3 PEC level and form a DeltaZPE model-sensitivity bound once cross-model state identity is evidenced.",
             )
         return ProductionExecutionRequest(
             action,

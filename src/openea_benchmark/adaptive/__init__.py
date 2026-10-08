@@ -135,6 +135,18 @@ from .nuclear_motion import (
     run_diatomic_nuclear_motion,
     solve_vibrational_ground_state,
 )
+from .nuclear_motion_orchestration import (
+    NuclearPECModelLevel,
+    NuclearPECModelRun,
+    NuclearPECModelRunStatus,
+    NuclearPECRefinementBatch,
+    NuclearPECRefinementRun,
+    NuclearPECRefinementRunStatus,
+    NuclearPECStage3Context,
+    plan_nuclear_pec_refinement,
+    run_nuclear_pec_model_convergence,
+    run_nuclear_pec_refinement,
+)
 from .production_execution import (
     CapabilityImplementation,
     ExecutionAdapter,
@@ -218,6 +230,11 @@ __all__ = [
     'NuclearMotionStatus', 'NuclearMotionAssessment',
     'nuclear_motion_pec_from_high_level', 'solve_vibrational_ground_state',
     'assess_vibrational_binding', 'derive_nuclear_motion_model_evidence', 'run_diatomic_nuclear_motion',
+    'NuclearPECStage3Context', 'NuclearPECRefinementBatch',
+    'NuclearPECRefinementRunStatus', 'NuclearPECRefinementRun',
+    'NuclearPECModelLevel', 'NuclearPECModelRunStatus', 'NuclearPECModelRun',
+    'plan_nuclear_pec_refinement', 'run_nuclear_pec_refinement',
+    'run_nuclear_pec_model_convergence',
     'PhysicalValidityStatus', 'PhysicalValidityAssessment',
     'ScientificResolutionPath', 'ScientificResolutionResult',
     'physical_validity_from_binding', 'physical_validity_with_nuclear_motion', 'resolve_scientific_outcome',

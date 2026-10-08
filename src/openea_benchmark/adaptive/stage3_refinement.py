@@ -483,6 +483,11 @@ def build_stage3_refinement_requests(
                 component_id=source_request.component_id,
                 r_angstrom=proposal.r_angstrom,
                 basis=source_request.basis,
+                basis_by_element=(
+                    None
+                    if source_request.basis_by_element is None
+                    else dict(source_request.basis_by_element)
+                ),
                 methods=source_request.methods,
                 requested_reference=source_request.requested_reference,
                 scf_reference=source_request.scf_reference,

@@ -133,19 +133,17 @@ A missing or unconverged nuclear-motion result never becomes `0 +/- 0`.
 
 Likewise, a cleared Born-Oppenheimer `NUCLEAR_MOTION` component does **not** silently zero DBOC/non-adiabatic effects. OpenEA carries a separate `ADIABATIC_NUCLEAR_REMAINDER` physical-correction obligation. It must be bounded explicitly or reviewed as physically negligible before G3d can close.
 
-## Remaining orchestration gap
+## Stage-3 orchestration
 
-The radial solver itself is now a generic execution capability for:
+The radial solver and its electronic-PEC closure actions are now connected to generic execution:
 
 ```text
 SOLVE_NUCLEAR_MOTION
 REFINE_NUCLEAR_MOTION_GRID
-```
-
-If it finds that the *electronic PEC* needs wider radial range or denser sampling, it returns
-
-```text
 REFINE_NUCLEAR_PEC
+ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE
 ```
 
-The generic high-level electronic PEC-extension adapter for that closure action is not yet wired. The capability remains visible rather than silently falling back to extrapolation.
+`REFINE_NUCLEAR_PEC` uses the existing Stage-3 refinement/request/execution/identity machinery. It extends only solver-indicated boundaries and bisects existing intervals when interpolation sensitivity demands denser electronic sampling; it does not extrapolate uncalculated potential points.
+
+`ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE` can generate or reuse an explicitly authorized second Stage-3 PEC level. The comparison basis/model is never selected implicitly by D12. A separate cross-model electronic-state-identity evidence record is required before the observed `DeltaZPE` shift can become a model-sensitivity bound. See `OPENEA_V1_NUCLEAR_MOTION_ORCHESTRATION.md`.

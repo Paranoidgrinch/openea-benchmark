@@ -354,7 +354,7 @@ def test_nuclear_motion_evidence_produces_bounded_delta_zpe_component():
     assert abs(evidence.component.correction_ev.midpoint - result.correction_ev) < 1.0e-12
 
 
-def test_nuclear_solver_is_execution_capability_but_pec_extension_is_not_yet_wired():
+def test_nuclear_solver_and_pec_closure_actions_are_generic_capabilities():
     solve = ProductionClosureAction(
         'SOLVE_NUCLEAR_MOTION',
         ClosurePriority.PHYSICAL_CORRECTION,
@@ -380,4 +380,22 @@ def test_nuclear_solver_is_execution_capability_but_pec_extension_is_not_yet_wir
         'PEC needs extension',
     )
     refine_req = classify_closure_action(refine)
-    assert refine_req.disposition is ExecutionDisposition.CAPABILITY_GAP
+    assert refine_req.capability is ExecutionCapability.NUCLEAR_PEC_REFINEMENT
+    assert refine_req.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert refine_req.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+    assert refine_req.runner_id.endswith('run_nuclear_pec_refinement')
+
+    model = ProductionClosureAction(
+        'ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE',
+        ClosurePriority.PHYSICAL_CORRECTION,
+        'G3D_PHYSICAL_CORRECTIONS',
+        NUCLEAR_MOTION,
+        MethodRole.REFINEMENT,
+        ('need-model-pec',),
+        'DeltaZPE model sensitivity needed',
+    )
+    model_req = classify_closure_action(model)
+    assert model_req.capability is ExecutionCapability.NUCLEAR_PEC_MODEL_CONVERGENCE
+    assert model_req.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
+    assert model_req.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
+    assert model_req.runner_id.endswith('run_nuclear_pec_model_convergence')
