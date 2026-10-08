@@ -613,6 +613,10 @@ def evidence_points_from_review(
                 scale_factor=sub.request.scale_factor,
                 attachment_ea_ev=root.attachment_ea_ev,
                 state_identity=review, evidence_ids=ids,
+                system=sub.request.state.system,
+                neutral_state_id=sub.request.state.state_id,
+                source_root_id=sub.request.state.source_root_id,
+                r_angstrom=sub.request.state.r_angstrom,
             ))
     # The unscaled parent is the exact factor=1 reference for the exponent
     # scan. Include it explicitly so a downstream stabilized-series review
@@ -628,7 +632,12 @@ def evidence_points_from_review(
         if len(matching) != 1:
             raise ValueError("Stabilization parent EOM point missing or duplicated")
         parent = matching[0]
-        out_stab.append(StabilizationPoint(1.0, parent.attachment_ea_ev,
-                                           parent.state_identity, parent.evidence_ids))
+        parent_sub = next(s for s in series.subpoints if s.request.key == f"aug:{parent_level}")
+        st = parent_sub.request.state
+        out_stab.append(StabilizationPoint(
+            1.0, parent.attachment_ea_ev, parent.state_identity, parent.evidence_ids,
+            system=st.system, neutral_state_id=st.state_id,
+            source_root_id=st.source_root_id, r_angstrom=st.r_angstrom,
+        ))
         out_stab.sort(key=lambda p: p.scale_factor)
     return tuple(out_eom), tuple(out_stab)

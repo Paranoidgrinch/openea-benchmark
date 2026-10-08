@@ -171,3 +171,13 @@ or `STABLE_UNBOUND`. Missing or raw-EOM/overlap-only evidence remains
 `UNRESOLVED`, even with an apparently flat EA scan. A bidirectional scan
 must contain the unscaled factor-1 parent. See
 `OPENEA_V1_G2_STABILIZATION_PROFILE.md`.
+
+## Patch 15: independent-continuum method provenance
+
+The Patch-14 plain `continuum_discrimination_review=Review(CLEARED, ...)` input
+**no longer authorizes** a G2 stabilization verdict. A new, physically matched
+`IndependentContinuumDossier` (`continuum_dossier=`) is mandatory. For a global
+nonbinding claim, an isolated resonance is insufficient: complete-sector/state
+inventory evidence is additionally required. See
+`docs/OPENEA_V1_G2_INDEPENDENT_CONTINUUM_AND_CAP.md`. A CAP trajectory analyzer is
+provided only for diagnostic candidates; it never issues CLEARED by itself.

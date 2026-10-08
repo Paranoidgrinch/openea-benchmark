@@ -38,6 +38,9 @@ from openea_benchmark.attachment.basis_convergence import (
     DiffuseConvergenceAssessment,
 )
 
+from .attachment_continuum_independent import (
+    IndependentContinuumDossier, ContinuumFinding, ContinuumScope,
+)
 from .method_basis_advisor import AttachmentCharacter
 from .model import Review, ReviewStatus
 
@@ -157,8 +160,17 @@ class StabilizationPoint:
     attachment_ea_ev: float
     state_identity: Review
     evidence_ids: tuple[str, ...]
+    system: str = ""
+    neutral_state_id: str = ""
+    source_root_id: str = ""
+    r_angstrom: float | None = None
 
     def __post_init__(self) -> None:
+        if any((self.system, self.neutral_state_id, self.source_root_id, self.r_angstrom is not None)):
+            if not all((self.system.strip(), self.neutral_state_id.strip(), self.source_root_id.strip())) or (
+                self.r_angstrom is None or not isfinite(self.r_angstrom) or self.r_angstrom <= 0
+            ):
+                raise ValueError("Stabilization physical provenance must be complete")
         if not isfinite(float(self.scale_factor)) or self.scale_factor <= 0.0:
             raise ValueError("scale_factor must be finite and positive")
         if not isfinite(float(self.attachment_ea_ev)):
@@ -361,11 +373,12 @@ def assess_stabilization_series(
     *,
     settings: AttachmentContinuumSettings,
     continuum_discrimination_review: Review | None = None,
+    continuum_dossier: IndependentContinuumDossier | None = None,
 ) -> StabilizationAssessment:
     """Assess a precomputed diffuse-exponent stabilization series.
 
     This function cannot promote stationary finite-basis energies to continuum
-    exclusion without a *separate* scientifically cleared continuum review.
+    exclusion without a *typed*, separately reviewed method dossier.
     A smooth pseudocontinuum eigenvalue can be stationary in a finite scan.
     Root continuity and stable energies are necessary diagnostics, not proof.
     """
@@ -414,30 +427,42 @@ def assess_stabilization_series(
     # A flat finite-Gaussian basis EOM spectrum can be a pseudostate plateau.
     # Separately reviewed continuum discrimination is mandatory for a G2-
     # effective STABLE_BOUND or STABLE_UNBOUND classification.
-    extra = continuum_discrimination_review
-    external_ids = () if extra is None else extra.evidence_ids
-    forbidden_prefixes = ("G2_EOM:", "G2_ROOT_PROPOSAL:", "G2_STABILIZATION_PROFILE:")
-    independent = (extra is not None and extra.status is ReviewStatus.CLEARED and
-                   bool(external_ids) and not set(external_ids).intersection(evidence) and
-                   all(not x.startswith(forbidden_prefixes) for x in external_ids))
+    # Backward-compatible raw Review input is kept solely for diagnostics.
+    # A CLEARED status plus an arbitrary source string is not physical proof.
+    extra = continuum_dossier
+    raw_external = () if continuum_discrimination_review is None else continuum_discrimination_review.evidence_ids
+    external_ids = () if extra is None else extra.raw_method_evidence_ids
+    same_physical_state = (extra is not None and all(
+        p.r_angstrom is not None and extra.matches(
+            p.system, p.neutral_state_id, p.source_root_id, p.r_angstrom)
+        for p in ordered))
+    independent = (same_physical_state and
+                   not set(external_ids).intersection(evidence) and
+                   all(not x.startswith(("G2_EOM:", "G2_ROOT_PROPOSAL:",
+                                         "G2_STABILIZATION_PROFILE:", "G2_CAP_TRAJECTORY:"))
+                       for x in external_ids))
     if not independent:
         return StabilizationAssessment(
             StabilizationStatus.UNRESOLVED,
-            Review(ReviewStatus.UNRESOLVED, _evidence(evidence, external_ids),
-                   "Stationary finite-basis EOM energies do not exclude continuum pseudostates; an independent CLEARED continuum-discrimination review is required."),
+            Review(ReviewStatus.UNRESOLVED, _evidence(evidence, external_ids, raw_external),
+                   "Finite-basis stationarity and free-form CLEARED text cannot exclude continuum. "
+                   "A matched, independently reviewed continuum-method dossier is required."),
             span, lower, upper,
         )
-    evidence = _evidence(evidence, external_ids)
+    evidence = _evidence(evidence, external_ids, extra.scientific_review.evidence_ids)
     margin = settings.minimum_bound_margin_ev
-    if lower > margin:
+    if (lower > margin and extra.finding is ContinuumFinding.BOUND_IDENTIFIED_STATE and
+            extra.scope is ContinuumScope.IDENTIFIED_ROOT):
         status = StabilizationStatus.STABLE_BOUND
         rationale = "The state-resolved attachment energy is stable and strictly bound across the explicit diffuse-exponent scan."
-    elif upper <= -margin:
+    elif (upper <= -margin and extra.finding is ContinuumFinding.NO_BOUND_STATES_IN_REVIEWED_SECTOR and
+          extra.scope is ContinuumScope.ALL_RELEVANT_STATES):
         status = StabilizationStatus.STABLE_UNBOUND
         rationale = "The state-resolved attachment energy is stable and non-binding across the explicit diffuse-exponent scan."
     else:
         status = StabilizationStatus.UNRESOLVED
-        rationale = "The stabilization envelope overlaps the electron-detachment threshold."
+        rationale = ("The stabilization sign, reviewed method finding, or candidate-state "
+                     "completeness does not support a consistent terminal attachment verdict.")
     return StabilizationAssessment(
         status,
         Review(ReviewStatus.CLEARED if status is not StabilizationStatus.UNRESOLVED else ReviewStatus.UNRESOLVED, evidence, rationale),

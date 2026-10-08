@@ -10,6 +10,9 @@ from openea_benchmark.adaptive.attachment_continuum import (
     assess_stabilization_series,
     pyscf_eom_eigenvalue_to_attachment_ea_ev,
 )
+from openea_benchmark.adaptive.attachment_continuum_independent import (
+    ContinuumMethod, ContinuumScope, ContinuumFinding, IndependentContinuumDossier,
+)
 from openea_benchmark.adaptive.method_basis_advisor import AttachmentCharacter
 from openea_benchmark.adaptive.model import Review, ReviewStatus
 from openea_benchmark.adaptive.scientific_resolution import (
@@ -30,6 +33,26 @@ def cleared(tag="x"):
     return Review(ReviewStatus.CLEARED, (tag,), f"{tag} cleared")
 
 
+def dossier(finding: ContinuumFinding):
+    return IndependentContinuumDossier(
+        method=ContinuumMethod.ELECTRON_SCATTERING,
+        scope=(ContinuumScope.ALL_RELEVANT_STATES
+               if finding is ContinuumFinding.NO_BOUND_STATES_IN_REVIEWED_SECTOR
+               else ContinuumScope.IDENTIFIED_ROOT),
+        finding=finding,
+        system="LiH", neutral_state_id="neutral-root", source_root_id="source-1",
+        r_angstrom=1.6, detachment_threshold_id="reviewed-neutral-plus-electron",
+        raw_method_evidence_ids=("SCATTERING:datafile:1",),
+        method_validity_review=cleared("SCATTERING:validated-method"),
+        threshold_review=cleared("SCATTERING:threshold"),
+        root_identity_review=cleared("SCATTERING:root-identity"),
+        completeness_review=cleared("SCATTERING:sector-completeness"),
+        scientific_review=cleared("SCATTERING:independent-assessment"),
+        reviewed_sector_id="all-electronic-roots-of-reviewed-symmetry",
+        state_inventory_evidence_ids=("SCATTERING:complete-state-inventory",),
+    )
+
+
 def eom_point(level, ea, *, state=True):
     return EOMEAAttachmentPoint(
         augmentation_level=level,
@@ -47,6 +70,8 @@ def stab(scale, ea, *, state=True):
         attachment_ea_ev=ea,
         state_identity=cleared(f"stab-state-{scale}") if state else Review(ReviewStatus.UNRESOLVED, (), "root unresolved"),
         evidence_ids=(f"stab-{scale}",),
+        system="LiH", neutral_state_id="neutral-root", source_root_id="source-1",
+        r_angstrom=1.6,
     )
 
 
@@ -89,7 +114,7 @@ def test_stabilization_series_clears_stationary_bound_state():
     r = assess_stabilization_series(
         (stab(0.8, 0.50), stab(1.0, 0.505), stab(1.2, 0.502)),
         settings=SETTINGS,
-        continuum_discrimination_review=cleared("independent-continuum-bound"),
+        continuum_dossier=dossier(ContinuumFinding.BOUND_IDENTIFIED_STATE),
     )
     assert r.status is StabilizationStatus.STABLE_BOUND
     assert r.energy_span_ev < SETTINGS.stabilization_span_target_ev
@@ -134,7 +159,7 @@ def test_diffuse_bound_closes_with_stable_continuum_scan():
     stabilization = assess_stabilization_series(
         (stab(0.8, 0.205), stab(1.0, 0.210), stab(1.2, 0.208)),
         settings=SETTINGS,
-        continuum_discrimination_review=cleared("independent-continuum-bound"),
+        continuum_dossier=dossier(ContinuumFinding.BOUND_IDENTIFIED_STATE),
     )
     r = assess_attachment_continuum(
         attachment_character=AttachmentCharacter.DIFFUSE_BOUND,
@@ -154,7 +179,7 @@ def test_conflicting_eom_and_stabilization_is_unresolved():
     stabilization = assess_stabilization_series(
         (stab(0.8, -0.205), stab(1.0, -0.210), stab(1.2, -0.208)),
         settings=SETTINGS,
-        continuum_discrimination_review=cleared("independent-continuum-unbound"),
+        continuum_dossier=dossier(ContinuumFinding.NO_BOUND_STATES_IN_REVIEWED_SECTOR),
     )
     r = assess_attachment_continuum(
         attachment_character=AttachmentCharacter.NEAR_THRESHOLD,
@@ -174,7 +199,7 @@ def test_typed_no_bound_attachment_can_make_g2_physically_unbound():
     stabilization = assess_stabilization_series(
         (stab(0.8, -0.305), stab(1.0, -0.310), stab(1.2, -0.308)),
         settings=SETTINGS,
-        continuum_discrimination_review=cleared("independent-continuum-unbound"),
+        continuum_dossier=dossier(ContinuumFinding.NO_BOUND_STATES_IN_REVIEWED_SECTOR),
     )
     d08 = assess_attachment_continuum(
         attachment_character=AttachmentCharacter.CONTINUUM_LIKE,
@@ -266,3 +291,41 @@ def test_not_applicable_is_not_valid_stabilization_root_identity():
         for p in (stab(.8,.5),stab(1.,.505),stab(1.2,.502)))
     assert assess_stabilization_series(points, settings=SETTINGS,
         continuum_discrimination_review=cleared("external-continuum")).status is StabilizationStatus.UNRESOLVED
+
+
+def test_plain_cleared_review_must_not_close_continuum_anymore():
+    r = assess_stabilization_series(
+        (stab(0.8, 0.50), stab(1.0, 0.505), stab(1.2, 0.502)),
+        settings=SETTINGS,
+        continuum_discrimination_review=cleared("this-string-is-not-a-continuum-method"),
+    )
+    assert r.status is StabilizationStatus.UNRESOLVED
+
+
+def test_single_resonance_cannot_claim_no_bound_state_sector():
+    from dataclasses import replace
+    with __import__('pytest').raises(ValueError, match="isolated resonance"):
+        replace(dossier(ContinuumFinding.BOUND_IDENTIFIED_STATE),
+                finding=ContinuumFinding.NO_BOUND_STATES_IN_REVIEWED_SECTOR)
+
+
+def test_mismatched_geometry_rejects_forged_continuum_match():
+    from dataclasses import replace
+    r = assess_stabilization_series(
+        (stab(0.8, 0.50), stab(1.0, 0.505), stab(1.2, 0.502)),
+        settings=SETTINGS,
+        continuum_dossier=replace(dossier(ContinuumFinding.BOUND_IDENTIFIED_STATE),
+                                  r_angstrom=1.61),
+    )
+    assert r.status is StabilizationStatus.UNRESOLVED
+
+
+def test_resonance_of_single_root_never_force_global_unbound():
+    from dataclasses import replace
+    r = assess_stabilization_series(
+        (stab(0.8, -0.50), stab(1.0, -0.505), stab(1.2, -0.502)),
+        settings=SETTINGS,
+        continuum_dossier=replace(dossier(ContinuumFinding.BOUND_IDENTIFIED_STATE),
+                                  finding=ContinuumFinding.RESONANT_IDENTIFIED_STATE),
+    )
+    assert r.status is StabilizationStatus.UNRESOLVED

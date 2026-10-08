@@ -279,6 +279,11 @@ def test_stabilization_evidence_adapter_includes_parent_factor_one(tmp_path):
     parent = next(p for p in eom if p.augmentation_level == 2)
     assert stab[1].attachment_ea_ev == parent.attachment_ea_ev
     assert stab[1].evidence_ids == parent.evidence_ids
+    # Physical-source fields must survive adapter and factor-one parent reuse.
+    assert all(p.system == series.subpoints[0].request.state.system for p in stab)
+    assert all(p.neutral_state_id == series.subpoints[0].request.state.state_id for p in stab)
+    assert all(p.source_root_id == series.subpoints[0].request.state.source_root_id for p in stab)
+    assert all(p.r_angstrom == series.subpoints[0].request.state.r_angstrom for p in stab)
     # A parent is still just EOM evidence: continuum review remains separate.
     from openea_benchmark.adaptive.attachment_continuum import assess_stabilization_series, StabilizationStatus
     report = assess_stabilization_series(stab,settings=AttachmentContinuumSettings(stabilization_span_target_ev=.02))

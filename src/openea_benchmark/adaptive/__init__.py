@@ -287,3 +287,9 @@ __all__ = [
     'StabilizationProfilePoint', 'StabilizationProfileReport',
     'analyze_g2_stabilization_profile',
 ]
+
+from .attachment_continuum_independent import (
+    CAPPoint, CAPTrajectorySettings, CAPTrajectoryStatus, CAPTrajectoryReport,
+    ContinuumMethod, ContinuumScope, ContinuumFinding,
+    IndependentContinuumDossier, assess_cap_trajectory,
+)

@@ -71,3 +71,12 @@ remain orthogonal to this G2 diagnostic.
   1202–1206 (2021), DOI: 10.1021/acs.jpclett.0c03738.
 - Jordan and co-workers, *The Quantum Chemistry of Loosely-Bound Electrons*,
   review of exponent scaling, plateaus and avoided crossings.
+
+## Patch 15 tightening
+
+Do not promote the unresolved profile by supplying a generic CLEARED review
+string. G2 stabilization clearance now requires a separately reviewed and
+candidate-matched typed `IndependentContinuumDossier`, with method, detachment
+threshold and root scope. CAP trajectory report IDs themselves cannot be used
+as independent method evidence. An individual resonance is not a proof that no
+bound anion ground state exists.
