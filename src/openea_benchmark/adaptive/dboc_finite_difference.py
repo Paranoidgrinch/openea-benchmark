@@ -118,6 +118,10 @@ class HFDBOCResult:
     axes: tuple[DBOCAxis, ...] = ()
     max_step_difference_ev: float | None = None
     source_signature: str | None = None
+    request_signature: str | None = None
+    settings_signature: str | None = None
+    zero_step_extrapolated_hartree: float | None = None
+    zero_step_observed_shift_ev: float | None = None
     scf_count: int = 0
     method_scope: str = 'NONRELATIVISTIC_HF_DETERMINANT_FINITE_DIFFERENCE'
     correlated_dboc_included: bool = False
@@ -139,6 +143,8 @@ class HFDBOCPair:
     delta_ea_hartree_candidate: float | None
     observed_step_sensitivity_ev: float | None
     is_production_correction: bool = False
+    zero_step_ea_candidate_hartree: float | None = None
+    zero_step_observed_shift_ev: float | None = None
     correlated_remainder_bounded: bool = False
     nonadiabatic_remainder_bounded: bool = False
 
@@ -190,6 +196,27 @@ def quantum_metric_from_fidelity(fidelity: float, h_bohr: float) -> float:
     return (1.-fidelity)/(4*h_bohr*h_bohr)
 
 
+def zero_step_richardson(steps_bohr: tuple[float, float], values: tuple[float, float]) -> float:
+    """O(h**2) Richardson intercept, for *numerical sensitivity only*.
+
+    The two-point 1-F finite-difference metric has an O(h**2) bias for a
+    smooth nondegenerate state.  Cancellation of that leading term is NOT a
+    demonstration that higher orders, basis errors or electronic correlation
+    are bounded.  This function does not output a certified uncertainty.
+    """
+    if len(steps_bohr) != 2 or len(values) != 2:
+        raise ValueError('Richardson requires precisely two step/value pairs')
+    h1, h2 = (float(x) for x in steps_bohr)
+    y1, y2 = (float(x) for x in values)
+    if not all(isfinite(x) for x in (h1, h2, y1, y2)) or not h1 > h2 > 0:
+        raise ValueError('Invalid Richardson grid or values')
+    x1, x2 = h1*h1, h2*h2
+    zero = (x1*y2-x2*y1)/(x1-x2)
+    if not isfinite(zero):
+        raise ValueError('Nonfinite zero-step Richardson intercept')
+    return zero
+
+
 def nuclear_cartesian_displacement(r_angstrom: float, atom_index: int, axis: int, signed_step_bohr: float) -> tuple[tuple[float, float, float], ...]:
     if not isfinite(r_angstrom) or r_angstrom <= 0 or atom_index not in (0, 1) or axis not in (0, 1, 2):
         raise ValueError('Invalid diatomic geometry or nuclear displacement')
@@ -231,6 +258,8 @@ def run_hf_dboc_point(request: HFDBOCRequest, settings: HFDBOCSettings = HFDBOCS
     backend if provided is a test-only injection with the same (request,xyz,
     settings)->(mol,mf) interface, *not* a production method capability.
     """
+    request_signature = sha256(json.dumps(asdict(request), sort_keys=True).encode()).hexdigest()
+    settings_signature = sha256(json.dumps(asdict(settings), sort_keys=True).encode()).hexdigest()
     signature = sha256(json.dumps({'request': asdict(request), 'settings': asdict(settings)}, sort_keys=True).encode()).hexdigest()
     scf_count = 0
     if backend is None:
@@ -281,14 +310,24 @@ def run_hf_dboc_point(request: HFDBOCRequest, settings: HFDBOCSettings = HFDBOCS
         if not all(isfinite(v) and v >= 0 for v in by_step):
             raise ValueError('Nonphysical HF DBOC values')
         diff_ev = abs(by_step[1] - by_step[0])*HARTREE_TO_EV
-        return HFDBOCResult(request.request_id, request.role, DBOCStatus.COMPLETE_REVIEW_REQUIRED,
-                            'HF-only diagonal nuclear quantum metric; step sensitivity is not a scientific bound',
-                            settings.steps_bohr, tuple(by_step), tuple(axes), diff_ev,
-                            signature, scf_count)
+        extrap = zero_step_richardson(settings.steps_bohr, tuple(by_step))
+        if extrap < 0:
+            raise ValueError('Unphysical negative zero-step HF nuclear metric: review finite differences')
+        return HFDBOCResult(
+            request.request_id, request.role, DBOCStatus.COMPLETE_REVIEW_REQUIRED,
+            'HF-only diagonal nuclear quantum metric; Richardson and step sensitivity are not scientific bounds',
+            settings.steps_bohr, tuple(by_step), tuple(axes), diff_ev,
+            source_signature=signature, request_signature=request_signature,
+            settings_signature=settings_signature,
+            zero_step_extrapolated_hartree=extrap,
+            zero_step_observed_shift_ev=abs(extrap-by_step[-1])*HARTREE_TO_EV,
+            scf_count=scf_count,
+        )
     except Exception as exc:
         return HFDBOCResult(request.request_id, request.role, DBOCStatus.UNRESOLVED,
                             f'{type(exc).__name__}: {exc}', settings.steps_bohr,
-                            source_signature=signature, scf_count=scf_count)
+                            source_signature=signature, request_signature=request_signature,
+                            settings_signature=settings_signature, scf_count=scf_count)
 
 
 def assess_hf_dboc_pair(neutral_request: HFDBOCRequest, anion_request: HFDBOCRequest,
@@ -303,7 +342,22 @@ def assess_hf_dboc_pair(neutral_request: HFDBOCRequest, anion_request: HFDBOCReq
         raise ValueError('Mismatched point result provenance')
     if neutral.status is not DBOCStatus.COMPLETE_REVIEW_REQUIRED or anion.status is not DBOCStatus.COMPLETE_REVIEW_REQUIRED:
         return HFDBOCPair(DBOCStatus.UNRESOLVED, neutral, anion, None, None)
+    for request, result in ((neutral_request, neutral), (anion_request, anion)):
+        digest = sha256(json.dumps(asdict(request), sort_keys=True).encode()).hexdigest()
+        if not result.request_signature or result.request_signature != digest:
+            raise ValueError('HF DBOC source request signature mismatch')
+    if not neutral.settings_signature or neutral.settings_signature != anion.settings_signature:
+        raise ValueError('HF DBOC neutral/anion SCF settings signature mismatch')
     if neutral.steps_bohr != anion.steps_bohr or len(neutral.dboc_by_step_hartree) != 2 or len(anion.dboc_by_step_hartree) != 2:
         raise ValueError('Unmatched HF DBOC finite-difference grid')
     corrections = [n-a for n,a in zip(neutral.dboc_by_step_hartree, anion.dboc_by_step_hartree)]
-    return HFDBOCPair(DBOCStatus.COMPLETE_REVIEW_REQUIRED, neutral, anion, corrections[-1], abs(corrections[-1]-corrections[0])*HARTREE_TO_EV)
+    extrap_n, extrap_a = neutral.zero_step_extrapolated_hartree, anion.zero_step_extrapolated_hartree
+    if extrap_n is None or extrap_a is None:
+        raise ValueError('HF DBOC zero-step intercept missing')
+    extrap_ea = extrap_n-extrap_a
+    return HFDBOCPair(
+        DBOCStatus.COMPLETE_REVIEW_REQUIRED, neutral, anion,
+        corrections[-1], abs(corrections[-1]-corrections[0])*HARTREE_TO_EV,
+        zero_step_ea_candidate_hartree=extrap_ea,
+        zero_step_observed_shift_ev=abs(extrap_ea-corrections[-1])*HARTREE_TO_EV,
+    )

@@ -39,6 +39,8 @@ def main() -> None:
         'neutral_dboc_hartree': neutral.dboc_by_step_hartree,
         'anion_dboc_hartree': anion.dboc_by_step_hartree,
         'dboc_ea_candidate_hartree': pair.delta_ea_hartree_candidate,
+        'zero_step_ea_candidate_hartree': pair.zero_step_ea_candidate_hartree,
+        'zero_step_observed_shift_ev': pair.zero_step_observed_shift_ev,
         'observed_step_sensitivity_ev': pair.observed_step_sensitivity_ev,
         'minimum_occupied_determinant_fidelity': min(a.fidelity for r in (neutral,anion) for a in r.axes),
         'number_of_real_scf_calculations': neutral.scf_count + anion.scf_count,
