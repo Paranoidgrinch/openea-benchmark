@@ -36,7 +36,7 @@ DIAGNOSTIC_CATALOG: dict[DiagnosticID, DiagnosticSpec] = {
     DiagnosticID.D07_DIFFUSE_BASIS: DiagnosticSpec(DiagnosticID.D07_DIFFUSE_BASIS, 'G2', 'Is extra-electron diffusity resolved?',
         'Augmentation convergence of energy and attachment density', 'd-aug/exponent variation + conditioning checks', 0),
     DiagnosticID.D08_ATTACHMENT: DiagnosticSpec(DiagnosticID.D08_ATTACHMENT, 'G2', 'Is attachment physically bound/resolved?',
-        'Vertical threshold, attachment character, continuum sensitivity', 'EOM-EA and/or stabilization/continuum treatment', 0),
+        'Reviewed attachment character + direct diffuse convergence + state-resolved EA-EOM; stabilization/continuum scan for diffuse or near-threshold cases', 'Generate missing EA-EOM/stabilization evidence or remain UNRESOLVED', 0),
     DiagnosticID.D09_PEC_ASYMPTOTES: DiagnosticSpec(DiagnosticID.D09_PEC_ASYMPTOTES, 'G1', 'Are PEC minima and channels covered?',
         'Branch continuity, nuclear minima, large-R limits and fragments', 'Adaptive PEC and fragment-channel discovery', 0),
     DiagnosticID.D10_SCALAR_RELATIVITY: DiagnosticSpec(DiagnosticID.D10_SCALAR_RELATIVITY, 'G3d', 'Is scalar relativity accounted for?',

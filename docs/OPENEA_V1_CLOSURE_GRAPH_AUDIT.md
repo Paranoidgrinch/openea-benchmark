@@ -25,9 +25,11 @@ It is an architecture/status document, not a new chemistry model.
 
 ### G1 / G2
 
-G1 state completeness has a repository bridge, but G2 physical validity still depends on explicitly reviewed attachment/continuum evidence in addition to molecular dissociation binding. A minimum below a molecular fragmentation asymptote is not sufficient by itself to exclude a finite-basis continuum artifact.
+G1 state completeness has a repository bridge.  G2 now also has a canonical typed attachment/continuum evidence contract in `adaptive/attachment_continuum.py`.  Molecular dissociation binding and electron binding remain separate questions: a minimum below a molecular fragmentation asymptote is not sufficient by itself to exclude a finite-basis continuum artifact.
 
-The new scientific-resolution layer therefore treats G2 as an explicit `PhysicalValidityAssessment` and refuses to manufacture a bound-anion conclusion from fragmentation binding alone.
+D08 now requires reviewed attachment character, direct Delta-CC diffuse convergence, and an independent state-resolved EA-EOM diffuse series.  Diffuse, near-threshold, and continuum-like cases additionally require stabilization/continuum evidence.  The execution runner that generates the EA-EOM and scaled-diffuse stabilization evidence is still a capability gap.
+
+The scientific-resolution layer accepts the typed D08 assessment and can now terminate `NO_PHYSICALLY_BOUND_ANION` when molecular binding exists but independent attachment/continuum evidence excludes a bound electron.
 
 ### G3b residual execution gaps
 
@@ -115,7 +117,7 @@ If G2 claims a physically bound anion while the independently closed adiabatic E
 
 The D12 closure loop is now connected to Stage-3 without extrapolated electronic points or automatic method escalation. The next architecture audit should prioritize the remaining *scientific* blockers rather than add another execution wrapper by default. In particular:
 
-- G2 attachment/continuum execution and evidence closure;
+- G2 EA-EOM/stabilization execution runner (the evidence contract is now implemented);
 - SOC relevance gate followed by a validated SOC production path where required;
 - scalar-relativity two-electron/picture-change remainder policy;
 - beyond-BO DBOC/non-adiabatic remainder policy;

@@ -26,6 +26,7 @@ class AttachmentCharacter(str, Enum):
     VALENCE_BOUND = 'VALENCE_BOUND'
     DIFFUSE_BOUND = 'DIFFUSE_BOUND'
     NEAR_THRESHOLD = 'NEAR_THRESHOLD'
+    CONTINUUM_LIKE = 'CONTINUUM_LIKE'
     UNRESOLVED = 'UNRESOLVED'
 
 
@@ -137,7 +138,7 @@ def _branch(ev: MethodBasisEvidence):
         # The advisor identifies the branch but does not pretend that a
         # production-quality MR method has already been validated.
         return HighAccuracyBranch.MULTIREFERENCE, ()
-    if ev.attachment_character is AttachmentCharacter.NEAR_THRESHOLD:
+    if ev.attachment_character in (AttachmentCharacter.NEAR_THRESHOLD, AttachmentCharacter.CONTINUUM_LIKE):
         return HighAccuracyBranch.ATTACHMENT_RESOLUTION, (
             'EOM-EA', 'STABILIZATION/CONTINUUM_DIAGNOSTICS',
         )
@@ -212,7 +213,7 @@ def advise_method_basis(
         initial_aug, force_double = 1, False
     elif ev.attachment_character is AttachmentCharacter.DIFFUSE_BOUND:
         initial_aug, force_double = 1, True
-    elif ev.attachment_character is AttachmentCharacter.NEAR_THRESHOLD:
+    elif ev.attachment_character in (AttachmentCharacter.NEAR_THRESHOLD, AttachmentCharacter.CONTINUUM_LIKE):
         initial_aug, force_double = 2, True
     else:
         initial_aug, force_double = None, False

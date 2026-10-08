@@ -27,6 +27,10 @@ from math import isfinite
 from openea_benchmark.attachment.asymptote import BindingAssessment, BindingStatus
 
 from .decision import PrecisionStatus, evaluate_estimate
+from .attachment_continuum import (
+    AttachmentContinuumAssessment,
+    AttachmentContinuumStatus,
+)
 from .model import (
     GateSet,
     Interval,
@@ -119,7 +123,7 @@ def _review_closed(review: Review) -> bool:
 def physical_validity_from_binding(
     binding: BindingAssessment,
     *,
-    electron_attachment_review: Review | None = None,
+    electron_attachment_review: Review | AttachmentContinuumAssessment | None = None,
 ) -> PhysicalValidityAssessment:
     """Conservatively bridge existing binding evidence into canonical G2.
 
@@ -147,12 +151,35 @@ def physical_validity_from_binding(
 
     # A molecular minimum below dissociation does not by itself exclude a
     # finite-basis electron-continuum artifact. D08/attachment evidence must
-    # therefore be explicitly reviewed.
+    # therefore be explicitly reviewed.  The typed assessment is authoritative
+    # when supplied; legacy Review input remains accepted for source compatibility.
     if electron_attachment_review is None:
         return PhysicalValidityAssessment(
             PhysicalValidityStatus.UNRESOLVED,
             binding_evidence,
             ("Molecular binding is resolved, but attachment/continuum validity has not been reviewed.",),
+        )
+
+    if isinstance(electron_attachment_review, AttachmentContinuumAssessment):
+        evidence = tuple(dict.fromkeys(binding_evidence + electron_attachment_review.evidence_ids))
+        if electron_attachment_review.status is AttachmentContinuumStatus.NO_BOUND_ATTACHMENT:
+            return PhysicalValidityAssessment(
+                PhysicalValidityStatus.NO_PHYSICALLY_BOUND_ANION,
+                evidence,
+                ("Molecular minimum exists, but typed D08 evidence excludes a physically bound electron-attached state.",),
+                True,
+            )
+        if electron_attachment_review.status is AttachmentContinuumStatus.BOUND_ATTACHMENT_CLEARED:
+            return PhysicalValidityAssessment(
+                PhysicalValidityStatus.PHYSICALLY_BOUND_ANION,
+                evidence,
+                ("Molecular binding and typed electron attachment/continuum validity are cleared; final G2 still requires the anion J=0 v=0 binding check.",),
+                False,
+            )
+        return PhysicalValidityAssessment(
+            PhysicalValidityStatus.UNRESOLVED,
+            evidence,
+            ("Molecular binding is resolved, but typed attachment/continuum evidence is not cleared.",),
         )
 
     evidence = tuple(dict.fromkeys(binding_evidence + electron_attachment_review.evidence_ids))

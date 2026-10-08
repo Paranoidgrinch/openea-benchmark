@@ -54,3 +54,10 @@ def test_borderline_reference_blocks_component_cbs_until_expanded_diagnostics_cl
     assert AdvisorAction.EXPAND_REFERENCE_DIAGNOSTICS not in cleared_plan.actions
     assert AdvisorAction.PROCEED_COMPONENT_RESOLVED_CBS in cleared_plan.actions
     assert 'BORDERLINE_REQUIRES_ENLARGED_UNCERTAINTY' in cleared_plan.evidence
+
+def test_continuum_like_routes_attachment_resolution_and_diffuse_policy():
+    p = advise_method_basis(profile(), ev(attachment_character=AttachmentCharacter.CONTINUUM_LIKE))
+    assert p.high_accuracy_branch is HighAccuracyBranch.ATTACHMENT_RESOLUTION
+    assert AdvisorAction.ENTER_ATTACHMENT_RESOLUTION_BRANCH in p.actions
+    assert p.force_double_augmentation
+    assert p.initial_augmentation_level == 2
