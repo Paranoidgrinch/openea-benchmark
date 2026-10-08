@@ -176,6 +176,12 @@ from .attachment_continuum import (
     direct_diffuse_review_from_assessment,
     pyscf_eom_eigenvalue_to_attachment_ea_ev,
 )
+from .attachment_eom_runner import (
+    G2EOMStatus, G2EOMNeutralState, G2EOMBasis, G2EOMStabilization,
+    G2EOMAuthorization, G2EOMSettings, DiffuseShellSelector,
+    G2EOMRequest, G2EOMRoot, G2EOMRawResult, G2EOMSubpoint, G2EOMSeries,
+    run_g2_eom_diagnostics, scaled_diffuse_basis, evidence_points_from_review,
+)
 from .scientific_resolution import (
     PhysicalValidityAssessment,
     PhysicalValidityStatus,
@@ -257,6 +263,10 @@ __all__ = [
     'AttachmentContinuumAssessment', 'direct_diffuse_review_from_assessment',
     'assess_eom_ea_diffuse_series', 'assess_stabilization_series', 'assess_attachment_continuum',
     'pyscf_eom_eigenvalue_to_attachment_ea_ev',
+    'G2EOMStatus', 'G2EOMNeutralState', 'G2EOMBasis', 'G2EOMStabilization',
+    'G2EOMAuthorization', 'G2EOMSettings', 'DiffuseShellSelector',
+    'G2EOMRequest', 'G2EOMRoot', 'G2EOMRawResult', 'G2EOMSubpoint', 'G2EOMSeries',
+    'run_g2_eom_diagnostics', 'scaled_diffuse_basis', 'evidence_points_from_review',
     'PhysicalValidityStatus', 'PhysicalValidityAssessment',
     'ScientificResolutionPath', 'ScientificResolutionResult',
     'physical_validity_from_binding', 'physical_validity_with_nuclear_motion', 'resolve_scientific_outcome',

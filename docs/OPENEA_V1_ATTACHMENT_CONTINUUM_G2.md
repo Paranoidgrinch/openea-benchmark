@@ -151,3 +151,12 @@ is a generic D08 runner that can:
 
 Until that runner is validated, D08 may be supplied by external/validation
 calculations but must remain unresolved when the required evidence is absent.
+
+## Patch 12 execution bridge
+
+`adaptive/attachment_eom_runner.py` now supplies a generic RCCSD/UCCSD
+neutral-reference EA-EOM executor with explicitly permitted diffuse augmentation
+points, reviewed uncontracted-exponent stabilization points, checkpoint/resume,
+and *raw* EOM roots. These results **do not** automatically close D08.
+Cross-basis/spin-sector root identity and stronger continuum review remain
+separate scientific prerequisites. See `OPENEA_V1_GENERIC_G2_EOM_DIAGNOSTICS.md`.
