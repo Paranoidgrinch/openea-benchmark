@@ -294,3 +294,14 @@ from .attachment_continuum_independent import (
     ContinuumMethod, ContinuumScope, ContinuumFinding,
     IndependentContinuumDossier, assess_cap_trajectory,
 )
+
+# Generic MR execution (method-development status; no validated production EA).
+from .mr_casscf_nevpt2_runner import (
+    MRPointAuthorization,
+    MRPointRequest,
+    MRPointSettings,
+    MRPointStatus,
+    MRPointResult,
+    MRRootEnergy,
+    run_mr_casscf_nevpt2_point,
+)
