@@ -2075,6 +2075,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="RHF->UHF instability: fail the point, or keep RHF and record UHF lowering/<S^2> for D03",
     )
     parser.add_argument(
+        "--no-electronic-ea", action="store_true",
+        help="Stop after Stage-3 acquisition (skip refinement, equilibrium, fragments and electronic EA)",
+    )
+    parser.add_argument(
         "--no-open-pec-extension", action="store_true",
         help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
     )
@@ -2183,6 +2187,7 @@ def main(
                     compute_points=not args.auto_dry_run,
                     stability_following_max_steps=args.stability_following_steps,
                     rhf_external_instability_policy=args.rhf_external_instability,
+                    assemble_electronic_ea=not args.no_electronic_ea,
                 ),
             )
             print(f"[BENCHMARK AUTO] {name}: " + json.dumps({

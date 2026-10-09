@@ -121,6 +121,8 @@ class AcquisitionSettings:
     stability_following_max_steps: int = 0
     # FAIL (legacy) or RECORD_AND_CONTINUE (quantified D03 warning, RHF kept).
     rhf_external_instability_policy: str = "FAIL"
+    # Refine cleared Stage-3 PECs and assemble the single-basis electronic EA.
+    assemble_electronic_ea: bool = False
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -344,6 +346,17 @@ def run_benchmark_acquisition(
                 "excluded_failed_points": excluded}
     _save(output_dir / "stage3_pec_reviews.json", pec_reviews)
 
+    electronic_ea = None
+    if settings.assemble_electronic_ea and settings.compute_points and not pending:
+        from .electronic_ea_stage import run_electronic_ea_stage
+        electronic_ea = run_electronic_ea_stage(
+            system=system, atoms=tuple(manifest_system["atoms"]), requests=requests,
+            point_records=point_result_records, pec_reviews=pec_reviews,
+            stage3_settings=stage3_settings, output_dir=output_dir / "electronic_ea",
+            point_backend=point_runner,
+        )
+        electronic_ea["stage3_purpose"] = stage3_purpose
+
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
     state = {
         "system": system, **identity, "outcome": outcome,
@@ -387,6 +400,13 @@ def run_benchmark_acquisition(
         "reference_warning_summary": _reference_warning_summary(requests, point_result_records),
         "pending_point_ids": pending, "blocked_jobs": blocked,
         "next_actions": [a.kind.value for a in bridge.adaptive_plan.actions],
+        "electronic_ea": None if electronic_ea is None else {
+            k: electronic_ea.get(k) for k in (
+                "status", "ea_lower_ev", "ea_upper_ev", "ea_central_ev", "selected_neutral_job",
+                "selected_anion_job", "reason", "basis", "stage3_purpose")
+        } | {"high_level_competition": {
+            label: {k: v for k, v in c.items() if k in ("status", "selected_job_id", "lowest_job_id")}
+            for label, c in electronic_ea["high_level_competition"].items()}},
         "ground_state_validated": False, "ea_computed": False,
         "state_competition_cleared": False,
         "automatic_pruning_performed": False,
