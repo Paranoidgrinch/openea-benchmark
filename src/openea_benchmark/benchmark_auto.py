@@ -240,6 +240,7 @@ def run_benchmark_acquisition(
     # never promote these diagnostics to a production identity decision.
     pec_reviews = {}
     from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
+    from .adaptive.stage3_axial_symmetry import AxialSymmetryPolicy
     from .workflow import WEEKEND_IDENTITY_THRESHOLDS, WEEKEND_BRANCH_THRESHOLDS
     for job in jobs:
         job_reqs = [r for r in requests if r.job_id == job["job_id"]]
@@ -258,12 +259,15 @@ def run_benchmark_acquisition(
                 requests=job_reqs, results=job_results,
                 identity_thresholds=WEEKEND_IDENTITY_THRESHOLDS,
                 branch_thresholds=WEEKEND_BRANCH_THRESHOLDS,
+                axial_symmetry_policy=AxialSymmetryPolicy(),
             )
             pec_reviews[job["job_id"]] = {
                 "status": "DIAGNOSTIC_ONLY",
                 "initialization_review": resolution.initialization_review.status.value,
                 "geometry_continuity_review": resolution.geometry_continuity_review.status.value,
                 "pec": resolution.pec.to_dict(),
+                "axial_symmetry_evidence": list(resolution.axial_symmetry_evidence),
+                "axial_symmetry_status": "PILOT_DIAGNOSTIC_ONLY_NOT_SOC_MANIFOLD_CERTIFICATION",
                 "threshold_policy": "WEEKEND_PILOT_NOT_PRODUCTION",
             }
         except Exception as exc:
@@ -281,6 +285,22 @@ def run_benchmark_acquisition(
         "charge_groups": open_state,
         "candidate_job_count": len(jobs),
         "stage3_pec_reviews": {key: v["status"] for key, v in pec_reviews.items()},
+        "stage3_identity_summary": {
+            key: {
+                "initialization_review": v.get("initialization_review", "UNAVAILABLE"),
+                "geometry_continuity_review": v.get("geometry_continuity_review", "UNAVAILABLE"),
+                "axial_symmetry_equivalent_comparisons": sum(
+                    1 for item in v.get("axial_symmetry_evidence", [])
+                    if item.get("status") == "EQUIVALENT"
+                ),
+                "axial_symmetry_unresolved_comparisons": sum(
+                    1 for item in v.get("axial_symmetry_evidence", [])
+                    if item.get("status") != "EQUIVALENT"
+                ),
+                "minimum_scout_status": (v.get("pec") or {}).get("minimum_scout", {}).get("status"),
+            }
+            for key, v in pec_reviews.items()
+        },
         "point_request_count": len(requests),
         "completed_point_count": len(completed), "failed_point_count": len(failures),
         "pending_point_count": len(pending),

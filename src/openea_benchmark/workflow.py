@@ -2157,6 +2157,7 @@ def main(
                 "failed": records[name]["failed_point_count"],
                 "pending": records[name]["pending_point_count"],
                 "blocked_jobs": len(records[name]["blocked_jobs"]),
+                "stage3_identity_summary": records[name].get("stage3_identity_summary", {}),
             }), flush=True)
         print("BENCHMARK AUTO RUN COMPLETE: results are evidence, not a certified EA")
         return 0

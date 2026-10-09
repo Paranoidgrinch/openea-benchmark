@@ -45,6 +45,11 @@ from openea_benchmark.state_identity import (
     fingerprint_from_orthonormal_density,
 )
 
+from .stage3_axial_symmetry import (
+    AxialSymmetryEvidence, AxialSymmetryPolicy,
+    compare_initializations_under_axial_symmetry, axial_subspace_alignment,
+)
+
 from .stage3_execution import (
     PointExecutionStatus,
     Stage3ExecutionRequest,
@@ -85,6 +90,7 @@ class HighLevelIdentityResolution:
     continuity_comparisons: tuple[BranchComparison, ...]
     checkpoint_audits: tuple[HighLevelCheckpointAudit, ...]
     pec: HighLevelPEC
+    axial_symmetry_evidence: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -325,6 +331,8 @@ def review_high_level_initializations(
     results: Sequence[Stage3PointResult],
     identity_thresholds: IdentityThresholds,
     audit_settings: CheckpointAuditSettings | None = None,
+    axial_symmetry_policy: AxialSymmetryPolicy | None = None,
+    symmetry_evidence: list[dict[str, Any]] | None = None,
 ) -> tuple[StateIdentityReview, tuple[StateComparison, ...], tuple[HighLevelCheckpointAudit, ...], Mapping[str, _CheckpointEvidence]]:
     """Review multiple initializations at the same geometry using HF fingerprints."""
     if not requests:
@@ -376,7 +384,22 @@ def review_high_level_initializations(
                 evidence_ids.append(
                     f"hl:init:{left_req.request_id}:{right_req.request_id}:{comparison.relation.value}"
                 )
-                if comparison.relation is not StateRelation.SAME_STATE:
+                equivalent = comparison.relation is StateRelation.SAME_STATE
+                if not equivalent and axial_symmetry_policy is not None:
+                    symmetry = compare_initializations_under_axial_symmetry(
+                        left, right, axial_symmetry_policy,
+                    )
+                    if symmetry_evidence is not None:
+                        symmetry_evidence.append({
+                            "stage": "initialization", "left_id": left_req.request_id,
+                            "right_id": right_req.request_id, **symmetry.to_dict(),
+                        })
+                    if symmetry.status == "EQUIVALENT":
+                        equivalent = True
+                        evidence_ids.append(
+                            f"hl:init:axial_orbit:{left_req.request_id}:{right_req.request_id}"
+                        )
+                if not equivalent:
                     unresolved_reasons.append(
                         f"{left_req.request_id} vs {right_req.request_id}: {comparison.relation.value}"
                     )
@@ -393,7 +416,7 @@ def review_high_level_initializations(
             status=IdentityReviewStatus.CLEARED,
             covered_request_ids=tuple(sorted(set(covered))),
             evidence_ids=tuple(evidence_ids),
-            rationale="Every same-geometry Stage-3 initialization is either unique or classified SAME_STATE from HF density fingerprints",
+            rationale="Every same-geometry Stage-3 initialization is unique, fingerprint-equivalent, or explicitly matched by occupied-spin-subspace axial rotation",
         )
     return review, tuple(comparisons), tuple(audits), evidence
 
@@ -432,6 +455,8 @@ def _compare_high_level_geometry(
     right: _CheckpointEvidence,
     *,
     thresholds: BranchThresholds,
+    axial_symmetry_policy: AxialSymmetryPolicy | None = None,
+    symmetry_evidence: list[dict[str, Any]] | None = None,
 ) -> BranchComparison:
     from pyscf import gto
 
@@ -459,6 +484,30 @@ def _compare_high_level_geometry(
         beta_occ_overlap_min=beta_min,
         thresholds=thresholds,
     )
+    if relation is not BranchRelation.CONTINUOUS and axial_symmetry_policy is not None:
+        rotated = axial_subspace_alignment(
+            left_mol=left.mol, right_mol=right.mol,
+            left_alpha=left.alpha_occ_coeff, left_beta=left.beta_occ_coeff,
+            right_alpha=right.alpha_occ_coeff, right_beta=right.beta_occ_coeff,
+            cross_overlap=cross_overlap, policy=axial_symmetry_policy,
+        )
+        if symmetry_evidence is not None:
+            symmetry_evidence.append({
+                "stage": "geometry_continuity", "left_id": left.root.root_id,
+                "right_id": right.root.root_id, **rotated.to_dict(),
+            })
+        if rotated.status == "EQUIVALENT":
+            alpha_min = float(rotated.minimum_alpha_overlap)
+            beta_min = float(rotated.minimum_beta_overlap)
+            alpha_sv = tuple(rotated.alpha_singular_values or ())
+            beta_sv = tuple(rotated.beta_singular_values or ())
+            alpha_mean = float(np.mean(alpha_sv)) if alpha_sv else 1.0
+            beta_mean = float(np.mean(beta_sv)) if beta_sv else 1.0
+            relation = classify_branch_metrics(
+                delta_r_angstrom=dr, delta_s2=ds2,
+                alpha_occ_overlap_min=alpha_min, beta_occ_overlap_min=beta_min,
+                thresholds=thresholds,
+            )
     return BranchComparison(
         root_a=left.root.root_id,
         root_b=right.root.root_id,
@@ -483,6 +532,8 @@ def review_high_level_geometry_continuity(
     evidence: Mapping[str, _CheckpointEvidence],
     initialization_review: StateIdentityReview,
     branch_thresholds: BranchThresholds,
+    axial_symmetry_policy: AxialSymmetryPolicy | None = None,
+    symmetry_evidence: list[dict[str, Any]] | None = None,
 ) -> tuple[StateIdentityReview, tuple[BranchComparison, ...]]:
     """Review the canonical same-state representative across adjacent geometries."""
     if initialization_review.status is not IdentityReviewStatus.CLEARED:
@@ -509,11 +560,18 @@ def review_high_level_geometry_continuity(
     evidence_ids: list[str] = []
     unresolved: list[str] = []
     for left_req, right_req in zip(canonical[:-1], canonical[1:]):
-        comparison = _compare_high_level_geometry(
-            evidence[left_req.request_id],
-            evidence[right_req.request_id],
-            thresholds=branch_thresholds,
-        )
+        if axial_symmetry_policy is None:
+            comparison = _compare_high_level_geometry(
+                evidence[left_req.request_id], evidence[right_req.request_id],
+                thresholds=branch_thresholds,
+            )
+        else:
+            comparison = _compare_high_level_geometry(
+                evidence[left_req.request_id], evidence[right_req.request_id],
+                thresholds=branch_thresholds,
+                axial_symmetry_policy=axial_symmetry_policy,
+                symmetry_evidence=symmetry_evidence,
+            )
         comparisons.append(comparison)
         evidence_ids.append(
             f"hl:continuity:{left_req.request_id}:{right_req.request_id}:{comparison.relation.value}"
@@ -548,19 +606,25 @@ def resolve_high_level_identity_and_pec(
     branch_thresholds: BranchThresholds,
     audit_settings: CheckpointAuditSettings | None = None,
     duplicate_energy_tolerance_hartree: float = 1.0e-7,
+    axial_symmetry_policy: AxialSymmetryPolicy | None = None,
 ) -> HighLevelIdentityResolution:
     """Generate independent HF identity reviews and assemble the guarded PEC."""
+    axial_evidence: list[dict[str, Any]] = []
     init_review, init_comparisons, audits, evidence = review_high_level_initializations(
         requests=requests,
         results=results,
         identity_thresholds=identity_thresholds,
         audit_settings=audit_settings,
+        axial_symmetry_policy=axial_symmetry_policy,
+        symmetry_evidence=axial_evidence,
     )
     continuity_review, continuity_comparisons = review_high_level_geometry_continuity(
         requests=requests,
         evidence=evidence,
         initialization_review=init_review,
         branch_thresholds=branch_thresholds,
+        axial_symmetry_policy=axial_symmetry_policy,
+        symmetry_evidence=axial_evidence,
     )
     pec = assemble_high_level_pec(
         requests=requests,
@@ -576,4 +640,5 @@ def resolve_high_level_identity_and_pec(
         continuity_comparisons=continuity_comparisons,
         checkpoint_audits=audits,
         pec=pec,
+        axial_symmetry_evidence=tuple(axial_evidence),
     )
