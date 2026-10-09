@@ -27,6 +27,17 @@ Scientific invariants
   PySCF ``CCSD.set_frozen()``.
 * A numerical result is not a production EA, not a ground-state assignment,
   and not permission to prune another state.
+* Internal SCF instabilities may be followed (``settings.stability_following_max_steps``):
+  the SCF is restarted along PySCF's internal instability direction within the
+  *same* RHF/ROHF space until internally stable.  This is the D02 action
+  "reoptimize unstable solution"; it never changes the reference type.  The
+  followed solution is a new HF reference whose state identity remains subject
+  to the downstream Stage-3 identity review.
+* An RHF -> UHF external instability is never "repaired" by switching a singlet
+  to a spin-contaminated UHF reference.  With
+  ``rhf_external_instability_policy="RECORD_AND_CONTINUE"`` the RHF reference is
+  kept, the broken-symmetry UHF energy lowering and <S^2> are measured, and an
+  explicit reference warning is recorded for the reference-character gate (D03).
 """
 from __future__ import annotations
 
@@ -47,6 +58,11 @@ class PointExecutionStatus(str, Enum):
     ERROR = "ERROR"
 
 
+_EXTERNAL_INSTABILITY_POLICIES = frozenset({"FAIL", "RECORD_AND_CONTINUE"})
+RHF_EXTERNAL_INSTABILITY_WARNING = "RHF_EXTERNAL_INSTABILITY_RECORDED"
+STABILITY_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_FOLLOWED"
+
+
 @dataclass(frozen=True)
 class Stage3ExecutionSettings:
     scf_conv_tol: float = 1.0e-10
@@ -64,8 +80,17 @@ class Stage3ExecutionSettings:
     scalar_relativistic: str = "NONE"
     verbose: int = 4
     artifact_dir: str | None = None
+    stability_following_max_steps: int = 0
+    rhf_external_instability_policy: str = "FAIL"
 
     def __post_init__(self) -> None:
+        if self.stability_following_max_steps < 0:
+            raise ValueError("stability_following_max_steps must be non-negative")
+        if self.rhf_external_instability_policy not in _EXTERNAL_INSTABILITY_POLICIES:
+            raise ValueError(
+                "rhf_external_instability_policy must be one of "
+                f"{sorted(_EXTERNAL_INSTABILITY_POLICIES)}"
+            )
         for name in ("scf_conv_tol", "scf_conv_tol_grad", "cc_conv_tol", "cc_conv_tol_normt"):
             value = float(getattr(self, name))
             if not isfinite(value) or value <= 0.0:
@@ -184,10 +209,20 @@ class Stage3PointResult:
     ground_state_assigned: bool = False
     authorizes_pruning: bool = False
     high_level_checkpoint_path: str | None = None
+    stability_following_steps: int = 0
+    stability_following_lowering_hartree: float | None = None
+    rhf_external_uhf_lowering_hartree: float | None = None
+    rhf_external_uhf_s2: float | None = None
+    reference_warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # JSON round-trips deliver lists; keep the record hashable/immutable.
+        object.__setattr__(self, "reference_warnings", tuple(self.reference_warnings))
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
+        data["reference_warnings"] = list(self.reference_warnings)
         return data
 
 
@@ -361,6 +396,38 @@ def _empty_result(request: Stage3ExecutionRequest, status: PointExecutionStatus,
     return Stage3PointResult(**data)
 
 
+def _broken_symmetry_uhf_probe(
+    rhf: Any,
+    mo_external: Any,
+    settings: Stage3ExecutionSettings,
+) -> tuple[float | None, float | None]:
+    """Return (E_RHF - E_UHF, <S^2>_UHF) along the RHF->UHF instability.
+
+    Diagnostic only: the UHF solution is never used as a correlated reference
+    and is not written to the high-level checkpoint.
+    """
+    from pyscf import scf
+
+    uhf = scf.UHF(rhf.mol)
+    if settings.scalar_relativistic == "SFX2C1E":
+        uhf = uhf.sfx2c1e()
+    uhf.conv_tol = settings.scf_conv_tol
+    uhf.conv_tol_grad = settings.scf_conv_tol_grad
+    uhf.max_cycle = settings.scf_max_cycle
+    uhf.max_memory = settings.max_memory_mb
+    uhf.chkfile = None
+    occ = (rhf.mo_occ > 0, rhf.mo_occ > 1)
+    uhf.kernel(dm0=uhf.make_rdm1(mo_external, occ))
+    for _ in range(max(1, settings.stability_following_max_steps)):
+        mo_u, _, stable_u, _ = uhf.stability(internal=True, external=False, return_status=True)
+        if stable_u and uhf.converged:
+            break
+        uhf.kernel(dm0=uhf.make_rdm1(mo_u, uhf.mo_occ))
+    if not uhf.converged:
+        return None, None
+    return float(rhf.e_tot) - float(uhf.e_tot), float(uhf.spin_square()[0])
+
+
 def _run_stage3_point_pyscf(
     request: Stage3ExecutionRequest,
     settings: Stage3ExecutionSettings,
@@ -396,6 +463,8 @@ def _run_stage3_point_pyscf(
         symmetry=False,
         verbose=settings.verbose,
         max_memory=settings.max_memory_mb,
+        # Otherwise PySCF copies the calling script's full source into the log.
+        dump_input=False,
     )
 
     if request.scf_reference == "RHF":
@@ -428,6 +497,24 @@ def _run_stage3_point_pyscf(
     mf.max_cycle = settings.scf_max_cycle
     mf.max_memory = settings.max_memory_mb
     mf.kernel(dm0=dm0)
+    start_energy = float(mf.e_tot) if mf.e_tot is not None else None
+
+    # D02: optionally follow internal instabilities within the same reference
+    # space.  A non-converged start is also analyzed when following is enabled,
+    # because a saddle point frequently stalls DIIS.
+    following_steps = 0
+    internal_stable: bool | None = None
+    if mf.converged or settings.stability_following_max_steps > 0:
+        mo_i, _, stable_i, _ = mf.stability(internal=True, external=False, return_status=True)
+        internal_stable = bool(stable_i)
+        while (
+            following_steps < settings.stability_following_max_steps
+            and not (internal_stable and mf.converged)
+        ):
+            mf.kernel(dm0=mf.make_rdm1(mo_i, mf.mo_occ))
+            following_steps += 1
+            mo_i, _, stable_i, _ = mf.stability(internal=True, external=False, return_status=True)
+            internal_stable = bool(stable_i)
 
     try:
         s2, multiplicity = mf.spin_square()
@@ -435,6 +522,13 @@ def _run_stage3_point_pyscf(
         multiplicity = float(multiplicity)
     except Exception:
         s2 = multiplicity = None
+
+    warnings: list[str] = []
+    following_lowering = None
+    if following_steps:
+        if start_energy is not None and mf.e_tot is not None:
+            following_lowering = start_energy - float(mf.e_tot)
+        warnings.append(STABILITY_FOLLOWED_WARNING)
 
     common = dict(
         pyscf_version=getattr(pyscf, "__version__", None),
@@ -447,6 +541,9 @@ def _run_stage3_point_pyscf(
             if high_level_checkpoint is not None and high_level_checkpoint.is_file()
             else None
         ),
+        stability_following_steps=following_steps,
+        stability_following_lowering_hartree=following_lowering,
+        reference_warnings=tuple(warnings),
     )
 
     if not mf.converged:
@@ -454,24 +551,12 @@ def _run_stage3_point_pyscf(
 
     # Stability is deliberately checked on the actual high-level HF reference.
     # ROHF external stability is not available in PySCF and remains explicit None.
-    if request.scf_reference == "RHF":
-        _, _, stable_i, stable_e = mf.stability(
-            internal=True,
-            external=settings.require_rhf_external_stability,
-            return_status=True,
-        )
-        internal_stable = bool(stable_i)
-        external_available = bool(settings.require_rhf_external_stability)
-        external_stable = bool(stable_e) if external_available else None
-    else:
-        _, _, stable_i, _ = mf.stability(
-            internal=True,
-            external=False,
-            return_status=True,
-        )
-        internal_stable = bool(stable_i)
-        external_available = False
-        external_stable = None
+    external_available = request.scf_reference == "RHF" and bool(settings.require_rhf_external_stability)
+    external_stable = None
+    mo_e = None
+    if external_available:
+        _, mo_e, _, stable_e = mf.stability(internal=False, external=True, return_status=True)
+        external_stable = bool(stable_e)
 
     common.update(
         internal_stable=internal_stable,
@@ -481,8 +566,18 @@ def _run_stage3_point_pyscf(
 
     if settings.require_internal_stability and not internal_stable:
         return _empty_result(request, PointExecutionStatus.SCF_UNSTABLE, **common)
-    if request.scf_reference == "RHF" and settings.require_rhf_external_stability and external_stable is False:
-        return _empty_result(request, PointExecutionStatus.SCF_UNSTABLE, **common)
+    if external_stable is False:
+        if settings.rhf_external_instability_policy == "FAIL":
+            return _empty_result(request, PointExecutionStatus.SCF_UNSTABLE, **common)
+        # Quantify, never hide: broken-symmetry UHF lowering and <S^2> are the
+        # magnitude evidence D03 needs.  The correlated reference stays RHF.
+        uhf_lowering, uhf_s2 = _broken_symmetry_uhf_probe(mf, mo_e, settings)
+        warnings.append(RHF_EXTERNAL_INSTABILITY_WARNING)
+        common.update(
+            rhf_external_uhf_lowering_hartree=uhf_lowering,
+            rhf_external_uhf_s2=uhf_s2,
+            reference_warnings=tuple(warnings),
+        )
 
     if request.scf_reference == "ROHF":
         # PySCF converts ROHF CCSD to UCCSD.  Canonicalize alpha/beta occupied

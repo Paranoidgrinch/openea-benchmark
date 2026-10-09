@@ -2065,6 +2065,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto-dry-run", action="store_true",
         help="Plan/select automatically without executing Stage-3 points",
     )
+    parser.add_argument(
+        "--stability-following-steps", type=int, default=4,
+        help="Max D02 internal-instability following steps per Stage-3 HF (0 = fail on instability)",
+    )
+    parser.add_argument(
+        "--rhf-external-instability", choices=("FAIL", "RECORD_AND_CONTINUE"),
+        default="RECORD_AND_CONTINUE",
+        help="RHF->UHF instability: fail the point, or keep RHF and record UHF lowering/<S^2> for D03",
+    )
+    parser.add_argument(
+        "--acquisition-dir", default="benchmark_auto",
+        help="Per-system subdirectory for benchmark-auto records (use a new one when settings change)",
+    )
 
     return parser
 
@@ -2141,13 +2154,15 @@ def main(
                 )
             records[name] = run_benchmark_acquisition(
                 summary=summary, manifest=manifest,
-                output_dir=output_root / name / "benchmark_auto",
+                output_dir=output_root / name / args.acquisition_dir,
                 settings=AcquisitionSettings(
                     max_points=args.max_stage3_points,
                     threads=args.threads,
                     memory_mb=args.stage3_memory_mb,
                     enable_provisional_points=not args.no_provisional_stage3,
                     compute_points=not args.auto_dry_run,
+                    stability_following_max_steps=args.stability_following_steps,
+                    rhf_external_instability_policy=args.rhf_external_instability,
                 ),
             )
             print(f"[BENCHMARK AUTO] {name}: " + json.dumps({

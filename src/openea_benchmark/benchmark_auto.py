@@ -53,6 +53,35 @@ def _input_checked_summary(summary: Mapping[str, Any], system: str) -> None:
         raise ValueError("Scout summary has no sectors")
 
 
+def _reference_warning_summary(
+    requests: Sequence[Stage3ExecutionRequest], records: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict]:
+    """Per-job D02/D03 reference evidence; magnitudes only, no classification."""
+    summary: dict[str, dict] = {}
+    for req in requests:
+        rec = records.get(req.request_id)
+        if not rec or not rec.get("reference_warnings"):
+            continue
+        entry = summary.setdefault(req.job_id, {
+            "points_with_followed_instability": 0,
+            "max_following_lowering_hartree": None,
+            "points_with_rhf_external_instability": 0,
+            "max_uhf_lowering_hartree": None,
+            "max_uhf_s2": None,
+        })
+        if "INTERNAL_INSTABILITY_FOLLOWED" in rec["reference_warnings"]:
+            entry["points_with_followed_instability"] += 1
+        if "RHF_EXTERNAL_INSTABILITY_RECORDED" in rec["reference_warnings"]:
+            entry["points_with_rhf_external_instability"] += 1
+        for key, field in (("max_following_lowering_hartree", "stability_following_lowering_hartree"),
+                           ("max_uhf_lowering_hartree", "rhf_external_uhf_lowering_hartree"),
+                           ("max_uhf_s2", "rhf_external_uhf_s2")):
+            value = rec.get(field)
+            if value is not None and (entry[key] is None or value > entry[key]):
+                entry[key] = value
+    return summary
+
+
 def _job_purpose(bridge: Any) -> str:
     if bridge.release_status is Stage3ReleaseStatus.RELEASED:
         return "RELEASED_HIGH_LEVEL_EVIDENCE"
@@ -78,10 +107,16 @@ class AcquisitionSettings:
     scalar_relativistic: str = "NONE"
     enable_provisional_points: bool = True
     compute_points: bool = True
+    # D02 reoptimization of internally unstable HF references; 0 = legacy fail.
+    stability_following_max_steps: int = 0
+    # FAIL (legacy) or RECORD_AND_CONTINUE (quantified D03 warning, RHF kept).
+    rhf_external_instability_policy: str = "FAIL"
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
             raise ValueError("Invalid point, thread or memory budget")
+        if self.stability_following_max_steps < 0:
+            raise ValueError("stability_following_max_steps must be non-negative")
         if self.scalar_relativistic not in ("NONE", "SFX2C1E"):
             raise ValueError("Unsupported scalar Hamiltonian")
 
@@ -192,6 +227,8 @@ def run_benchmark_acquisition(
         max_memory_mb=settings.memory_mb,
         scalar_relativistic=settings.scalar_relativistic,
         artifact_dir=str(output_dir / "checkpoints"),
+        stability_following_max_steps=settings.stability_following_max_steps,
+        rhf_external_instability_policy=settings.rhf_external_instability_policy,
     )
     signature = _digest({"source": identity, "settings": asdict(stage3_settings), "purpose": stage3_purpose})
     point_dir = output_dir / "points"
@@ -246,23 +283,38 @@ def run_benchmark_acquisition(
         job_reqs = [r for r in requests if r.job_id == job["job_id"]]
         if not job_reqs:
             continue
-        if not all(r.request_id in completed for r in job_reqs):
+        if any(r.request_id in pending for r in job_reqs):
             pec_reviews[job["job_id"]] = {"status": "WAITING_FOR_COMPLETE_POINTS"}
+            continue
+        # A failed point is never silently replaced by a sibling: the review
+        # runs on the completed subset only, lists every excluded request and
+        # is labelled PARTIAL, so it cannot be mistaken for full coverage.
+        reviewed_reqs = [r for r in job_reqs if r.request_id in completed]
+        excluded = [
+            {"request_id": r.request_id, "r_angstrom": r.r_angstrom,
+             "initialization_index": r.initialization_index,
+             "status": point_result_records[r.request_id]["status"]}
+            for r in job_reqs if r.request_id not in completed
+        ]
+        if not reviewed_reqs:
+            pec_reviews[job["job_id"]] = {"status": "NO_COMPLETED_POINTS", "excluded_failed_points": excluded}
             continue
         job_results = [
             Stage3PointResult(**{**point_result_records[r.request_id],
                                  "status": PointExecutionStatus(point_result_records[r.request_id]["status"])})
-            for r in job_reqs
+            for r in reviewed_reqs
         ]
         try:
             resolution = resolve_high_level_identity_and_pec(
-                requests=job_reqs, results=job_results,
+                requests=reviewed_reqs, results=job_results,
                 identity_thresholds=WEEKEND_IDENTITY_THRESHOLDS,
                 branch_thresholds=WEEKEND_BRANCH_THRESHOLDS,
                 axial_symmetry_policy=AxialSymmetryPolicy(),
             )
             pec_reviews[job["job_id"]] = {
-                "status": "DIAGNOSTIC_ONLY",
+                "status": "DIAGNOSTIC_ONLY" if not excluded else "DIAGNOSTIC_ONLY_PARTIAL",
+                "complete_point_coverage": not excluded,
+                "excluded_failed_points": excluded,
                 "initialization_review": resolution.initialization_review.status.value,
                 "geometry_continuity_review": resolution.geometry_continuity_review.status.value,
                 "pec": resolution.pec.to_dict(),
@@ -272,7 +324,8 @@ def run_benchmark_acquisition(
             }
         except Exception as exc:
             pec_reviews[job["job_id"]] = {
-                "status": "UNRESOLVED", "reason": f"{type(exc).__name__}: {exc}"}
+                "status": "UNRESOLVED", "reason": f"{type(exc).__name__}: {exc}",
+                "excluded_failed_points": excluded}
     _save(output_dir / "stage3_pec_reviews.json", pec_reviews)
 
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
@@ -298,6 +351,8 @@ def run_benchmark_acquisition(
                     if item.get("status") != "EQUIVALENT"
                 ),
                 "minimum_scout_status": (v.get("pec") or {}).get("minimum_scout", {}).get("status"),
+                "complete_point_coverage": v.get("complete_point_coverage", False),
+                "excluded_failed_point_count": len(v.get("excluded_failed_points", [])),
             }
             for key, v in pec_reviews.items()
         },
@@ -312,6 +367,7 @@ def run_benchmark_acquisition(
              "error_message": point_result_records[request_id].get("error_message")}
             for request_id in failures
         ],
+        "reference_warning_summary": _reference_warning_summary(requests, point_result_records),
         "pending_point_ids": pending, "blocked_jobs": blocked,
         "next_actions": [a.kind.value for a in bridge.adaptive_plan.actions],
         "ground_state_validated": False, "ea_computed": False,
