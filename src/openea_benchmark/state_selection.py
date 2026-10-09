@@ -104,11 +104,13 @@ def build_state_selection_report(
         "neutral": {
             "qualified": [],
             "unresolved": [],
+            "asymptote_resolved": [],
             "flags": set(),
         },
         "anion": {
             "qualified": [],
             "unresolved": [],
+            "asymptote_resolved": [],
             "flags": set(),
         },
     }
@@ -233,6 +235,24 @@ def build_state_selection_report(
 
                 qualified_in_sector += 1
 
+            elif (
+                status == "dissociative_to_asymptote"
+                and graph_resolved
+                and sector_status == "dft_scout_complete"
+            ):
+                # D09 continuation evidence: sampled to a plateau on the
+                # computed fragment asymptote without a sampled well.  Not a
+                # seed, not pruned: recorded with its evidence.
+                group["asymptote_resolved"].append({
+                    "charge": charge,
+                    "spin_2s": spin,
+                    "component_id": component_id,
+                    "minimum_status": status,
+                    "observed_lowest_energy_hartree": observed_min,
+                    "asymptote_evidence": scout.get("asymptote_evidence"),
+                    "extended_r_max_angstrom": scout.get("extended_r_max_angstrom"),
+                })
+
             else:
                 group["unresolved"].append({
                     "charge": charge,
@@ -304,6 +324,7 @@ def build_state_selection_report(
             "provisional_high_level_seed": provisional_seed,
             "bracketed_candidates": qualified,
             "unresolved_components": unresolved,
+            "asymptote_resolved_components": group["asymptote_resolved"],
             "flags": sorted(flags),
             "all_scouted_components_bracketed": (
                 bool(qualified)

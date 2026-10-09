@@ -20,6 +20,7 @@ from .adaptive.stage3_execution import (
     Stage3PointResult, build_stage3_execution_requests,
 )
 from .adaptive.stage3_loop import execute_stage3_batch_with_retries
+from .open_pec_extension import apply_open_pec_extension, asymptote_review_from_extension
 from .state_selection import build_state_selection_report
 
 
@@ -88,13 +89,22 @@ def _job_purpose(bridge: Any) -> str:
     return "PROVISIONAL_EVIDENCE_ONLY_NOT_SCIENTIFIC_RELEASE"
 
 
-def build_benchmark_acquisition_plan(*, summary: Mapping[str, Any], manifest: Mapping[str, Any]) -> tuple[dict, Any]:
+def build_benchmark_acquisition_plan(
+    *, summary: Mapping[str, Any], manifest: Mapping[str, Any],
+    open_pec_extension: Mapping[str, Any] | None = None,
+) -> tuple[dict, Any]:
     system = str(summary.get("system", ""))
     _input_checked_summary(summary, system)
+    asymptote_review = None
+    if open_pec_extension is not None:
+        summary = apply_open_pec_extension(summary, open_pec_extension)
     selection = build_state_selection_report(summary)
+    if open_pec_extension is not None:
+        asymptote_review = asymptote_review_from_extension(summary, open_pec_extension, selection)
     bridge = build_adaptive_stage3_plan(
         system_summary=summary, selection_report=selection, manifest=manifest,
         evidence_id="benchmark-scout:" + _digest(summary),
+        asymptote_review=asymptote_review,
     )
     return selection, bridge
 
@@ -126,6 +136,7 @@ def run_benchmark_acquisition(
     settings: AcquisitionSettings = AcquisitionSettings(),
     point_runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None = None,
     allow_missing_checkpoints_for_tests: bool = False,
+    open_pec_extension: Mapping[str, Any] | None = None,
 ) -> dict:
     """Advance one system automatically as far as available evidence permits.
 
@@ -149,9 +160,13 @@ def run_benchmark_acquisition(
             raise ValueError("Scout initial geometry differs from supplied manifest")
 
     output_dir = Path(output_dir)
-    selection, bridge = build_benchmark_acquisition_plan(summary=summary, manifest=manifest)
+    selection, bridge = build_benchmark_acquisition_plan(
+        summary=summary, manifest=manifest, open_pec_extension=open_pec_extension)
     manifest_fingerprint = _digest({"system": manifest["systems"][system], "protocol": manifest["protocol"]})
-    source_fingerprint = _digest(summary)
+    source_fingerprint = (
+        _digest(summary) if open_pec_extension is None
+        else _digest({"scout": summary, "open_pec_extension": open_pec_extension})
+    )
     identity = {"manifest_sha256": manifest_fingerprint, "scout_sha256": source_fingerprint}
     state_path = output_dir / "auto_state.json"
     if state_path.exists():
@@ -170,6 +185,7 @@ def run_benchmark_acquisition(
             "competition_status": group["competition_status"],
             "open_components": len(group["unresolved_components"]),
             "bracketed_candidates": len(group["bracketed_candidates"]),
+            "asymptote_resolved_components": len(group.get("asymptote_resolved_components", ())),
             "open_diagnostics": [
                 {"component_id": item.get("component_id"),
                  "spin_2s": item.get("spin_2s"),
@@ -335,6 +351,7 @@ def run_benchmark_acquisition(
         "stage3_purpose": stage3_purpose,
         "stage3_release": bridge.release_status.value,
         "stage3_blocking_reasons": list(bridge.blocking_reasons),
+        "open_pec_extension_applied": open_pec_extension is not None,
         "charge_groups": open_state,
         "candidate_job_count": len(jobs),
         "stage3_pec_reviews": {key: v["status"] for key, v in pec_reviews.items()},

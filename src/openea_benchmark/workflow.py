@@ -2075,6 +2075,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="RHF->UHF instability: fail the point, or keep RHF and record UHF lowering/<S^2> for D03",
     )
     parser.add_argument(
+        "--no-open-pec-extension", action="store_true",
+        help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
+    )
+    parser.add_argument(
         "--acquisition-dir", default="benchmark_auto",
         help="Per-system subdirectory for benchmark-auto records (use a new one when settings change)",
     )
@@ -2152,8 +2156,24 @@ def main(
                     manifest=manifest, system_name=name, output_root=output_root,
                     guesses=guesses, settings=settings, resume=args.resume,
                 )
+            extension = None
+            extension_path = output_root / name / "open_pec_extension.json"
+            if args.no_open_pec_extension:
+                pass
+            elif args.auto_dry_run:
+                # Dry runs never compute; reuse existing evidence only.
+                if extension_path.exists():
+                    extension = json.loads(extension_path.read_text())
+            else:
+                from pyscf import lib as pyscf_lib
+                from .open_pec_extension import run_open_pec_extension
+                pyscf_lib.num_threads(args.threads)
+                print(f"[BENCHMARK AUTO] EXTEND_OPEN_PEC / fragment asymptotes for {name}", flush=True)
+                extension = run_open_pec_extension(
+                    summary=summary, output_dir=output_root / name, grid_level=args.grid_level,
+                )
             records[name] = run_benchmark_acquisition(
-                summary=summary, manifest=manifest,
+                summary=summary, manifest=manifest, open_pec_extension=extension,
                 output_dir=output_root / name / args.acquisition_dir,
                 settings=AcquisitionSettings(
                     max_points=args.max_stage3_points,
