@@ -24,7 +24,7 @@ the planner's `EXTEND_OPEN_PEC` action and no asymptote evidence existed for D09
      Stage-3 seed.
    - `DISSOCIATIVE_TO_ASYMPTOTE`: energy flattens (< 10 meV per step beyond 2.5 Å) onto
      the computed compatible asymptote (within 0.25 eV) -> status
-     `dissociative_to_asymptote`, recorded under `asymptote_resolved_components`; never a seed.
+     `dissociative_to_asymptote`, recorded under `resolved_open_components`; never a seed.
    - `UNRESOLVED`: no plateau, asymptote mismatch, SCF failure, <S^2> jump > 0.3
      (possible state switch), short-R limit, step budget exhausted.
 4. **Automated D09 review** (`asymptote_review_from_extension`): `CLEARED` only when no

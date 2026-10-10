@@ -146,7 +146,7 @@ def test_dissociative_component_resolved_but_never_a_seed(tmp_path):
     selection = build_state_selection_report(merged)
     neutral = selection["charge_groups"]["neutral"]
     assert not neutral["unresolved_components"]
-    assert [c["minimum_status"] for c in neutral["asymptote_resolved_components"]] == [DISSOCIATIVE_STATUS]
+    assert [c["minimum_status"] for c in neutral["resolved_open_components"]] == [DISSOCIATIVE_STATUS]
     assert {c["spin_2s"] for c in neutral["bracketed_candidates"]} == {1}
 
 
@@ -165,3 +165,32 @@ def test_unresolved_extension_keeps_d09_open(tmp_path):
                                       settings=AcquisitionSettings(compute_points=False), open_pec_extension=ext)
     assert state["open_pec_extension_applied"] is True
     assert state["stage3_release"] != "RELEASED"
+
+
+def test_extension_reproducing_a_bracketed_branch_is_merged_not_a_new_seed(tmp_path):
+    summary, _ = _summary(tmp_path)
+    summary["atoms"] = ["O", "H"]
+    # put the open component into the bracketed neutral doublet sector, right below its points
+    neutral = summary["sectors"][0]
+    open_scout = summary["sectors"].pop(2)["manifold_pec_scouts"][0]
+    for p in open_scout["pec"]["points"]:
+        p["r_angstrom"] = round(p["r_angstrom"] - 0.25, 6)  # edge 0.95 -> steps hit 1.0, 1.1, 1.2
+    neutral["manifold_pec_scouts"].append(open_scout)
+    bracketed = {round(p["r_angstrom"], 6): p["energy_center_hartree"]
+                 for p in neutral["manifold_pec_scouts"][0]["pec"]["points"]}
+    for p in open_scout["pec"]["points"]:
+        mid = f"open_{p['r_angstrom']}"
+        p["manifold_id"] = mid
+        neutral["manifolds"].append({"manifold_id": mid, "r_angstrom": p["r_angstrom"],
+                                     "member_root_ids": [mid], "unique_state_root_ids": [mid]})
+        neutral["representative_roots"].append({**neutral["representative_roots"][0], "root_id": mid,
+                                                "r_angstrom": p["r_angstrom"]})
+    atom_energy, point = _fake_backends(tmp_path, lambda r: bracketed.get(round(r, 6), -9.0 - 0.1 * r))
+    ext = run_open_pec_extension(summary=summary, output_dir=tmp_path / "sys", policy=POLICY,
+                                 atom_energy=atom_energy, continuation_point=point)
+    merged = apply_open_pec_extension(summary, ext)
+    statuses = [sc["minimum_scout"]["status"] for sc in merged["sectors"][0]["manifold_pec_scouts"]]
+    assert "merged_into_bracketed_component" in statuses
+    selection = build_state_selection_report(merged)
+    assert len(selection["charge_groups"]["neutral"]["bracketed_candidates"]) == 1
+    assert not selection["charge_groups"]["neutral"]["unresolved_components"]

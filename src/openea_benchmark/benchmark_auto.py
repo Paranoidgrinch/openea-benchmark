@@ -187,7 +187,7 @@ def run_benchmark_acquisition(
             "competition_status": group["competition_status"],
             "open_components": len(group["unresolved_components"]),
             "bracketed_candidates": len(group["bracketed_candidates"]),
-            "asymptote_resolved_components": len(group.get("asymptote_resolved_components", ())),
+            "resolved_open_components": len(group.get("resolved_open_components", ())),
             "open_diagnostics": [
                 {"component_id": item.get("component_id"),
                  "spin_2s": item.get("spin_2s"),
@@ -402,8 +402,8 @@ def run_benchmark_acquisition(
         "next_actions": [a.kind.value for a in bridge.adaptive_plan.actions],
         "electronic_ea": None if electronic_ea is None else {
             k: electronic_ea.get(k) for k in (
-                "status", "ea_lower_ev", "ea_upper_ev", "ea_central_ev", "selected_neutral_job",
-                "selected_anion_job", "reason", "basis", "stage3_purpose")
+                "status", "verdict", "sign_at_this_level", "ea_lower_ev", "ea_upper_ev", "ea_central_ev",
+                "selected_neutral_job", "selected_anion_job", "reason", "basis", "stage3_purpose")
         } | {"high_level_competition": {
             label: {k: v for k, v in c.items() if k in ("status", "selected_job_id", "lowest_job_id")}
             for label, c in electronic_ea["high_level_competition"].items()}},

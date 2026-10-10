@@ -51,7 +51,7 @@ def main() -> int:
         system=requests[0].system, atoms=tuple(args.atoms), requests=requests, point_records=records,
         pec_reviews=reviews, stage3_settings=settings, output_dir=acq / args.output_name,
     )
-    summary = {k: result.get(k) for k in ("system", "status", "ea_lower_ev", "ea_upper_ev", "ea_central_ev",
+    summary = {k: result.get(k) for k in ("system", "status", "verdict", "sign_at_this_level", "ea_lower_ev", "ea_upper_ev", "ea_central_ev",
                                           "selected_neutral_job", "selected_anion_job", "reason", "basis")}
     summary["competition"] = {k: v["status"] for k, v in result["high_level_competition"].items()}
     summary["candidates"] = {lab: [(c["job_id"].split("__manifold")[0], c["loop_status"], c["equilibrium_status"])

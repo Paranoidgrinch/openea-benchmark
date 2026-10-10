@@ -40,6 +40,10 @@ from .minimum_scout import MinimumScoutThresholds, scout_local_pec_minimum
 HARTREE_TO_EV = 27.211386245988
 OPEN_STATUSES = ("decreases_toward_higher_r", "decreases_toward_lower_r")
 DISSOCIATIVE_STATUS = "dissociative_to_asymptote"
+MERGED_STATUS = "merged_into_bracketed_component"
+# Same geometry + energy agreement this tight means the continuation landed on
+# the very SCF solution of an already bracketed component of the same sector.
+MERGE_ENERGY_TOLERANCE_HARTREE = 1.0e-6
 EXTENSION_ORIGIN = "OPEN_PEC_CONTINUATION"
 
 
@@ -339,7 +343,15 @@ def apply_open_pec_extension(summary: Mapping[str, Any], extension: Mapping[str,
             ext = components.get(scout.get("component_id"))
             if not ext or (scout.get("minimum_scout") or {}).get("status") not in OPEN_STATUSES:
                 continue
-            if ext["classification"] == "MINIMUM_BRACKETED":
+            merged_into = _coincident_bracketed_component(sector, scout, ext)
+            if ext["classification"] == "MINIMUM_BRACKETED" and merged_into is not None:
+                scout["minimum_scout"] = {
+                    **scout["minimum_scout"], "status": MERGED_STATUS, "candidates": [],
+                    "scout_status_before_extension": scout["minimum_scout"]["status"],
+                    "merged_into_component_id": merged_into["component_id"],
+                    "coincident_points": merged_into["points"],
+                }
+            elif ext["classification"] == "MINIMUM_BRACKETED":
                 _merge_minimum(sector, scout, ext, thresholds)
             elif ext["classification"] == "DISSOCIATIVE_TO_ASYMPTOTE":
                 scout["minimum_scout"] = {
@@ -352,6 +364,25 @@ def apply_open_pec_extension(summary: Mapping[str, Any], extension: Mapping[str,
                 }
     merged["open_pec_extension_applied"] = True
     return merged
+
+
+def _coincident_bracketed_component(sector: Mapping[str, Any], scout: Mapping[str, Any],
+                                    ext: Mapping[str, Any]) -> dict | None:
+    """Bracketed component of the same sector whose sampled points the continuation reproduced."""
+    for other in sector.get("manifold_pec_scouts", ()):
+        if other is scout or (other.get("minimum_scout") or {}).get("status") != "bracketed_single_minimum":
+            continue
+        hits = []
+        for point in ext["scan"][1:]:
+            for ref in other["pec"]["points"]:
+                if (abs(float(ref["r_angstrom"]) - point["r_angstrom"]) < 1.0e-6
+                        and abs(float(ref["energy_center_hartree"]) - point["energy_hartree"])
+                        < MERGE_ENERGY_TOLERANCE_HARTREE):
+                    hits.append({"r_angstrom": point["r_angstrom"],
+                                 "delta_hartree": point["energy_hartree"] - float(ref["energy_center_hartree"])})
+        if hits:
+            return {"component_id": other["component_id"], "points": hits}
+    return None
 
 
 def _merge_minimum(sector: dict, scout: dict, ext: Mapping[str, Any], thresholds) -> None:

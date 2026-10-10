@@ -57,3 +57,20 @@ four MgH candidates converged and resolved; D04 CLEARED for both charges (neutra
 anion singlet), anion 2.1 eV below the lowest dissociation channel (Mg + H-), status
 **BOUND**, electronic EA = 0.757 eV (def2-TZVPPD, single basis, no CBS/ZPE). This is the
 first EA produced by the workflow from the two-atom manifest entry without manual steps.
+
+## Patch 32 — no verdict at single-basis level; duplicate extension seeds merged
+
+Wave-0 NO (EA_exp ~ +0.03 eV) came out as `UNBOUND` because `decide_ea` turned a
+single-basis interval that only carries equilibrium-resolution uncertainty into a sign
+verdict. The stage now reports `status = ELECTRONIC_EA_EVALUATED`, the interval
+`[L_N - U_A, U_N - L_A]`, `sign_at_this_level` (POSITIVE / NEGATIVE / STRADDLES_ZERO),
+`interval_scope = EQUILIBRIUM_RESOLUTION_ONLY_...` and
+`verdict = NOT_ISSUED_SINGLE_BASIS_INTERMEDIATE`; the canonical decision is kept only as
+`single_basis_decision_audit_only`. BOUND/UNBOUND belongs to the final resolver after
+basis/diffuse/ZPE layers.
+
+Open-PEC extension pieces whose continuation reproduces an already bracketed component of
+the same sector (same R, |dE| < 1e-6 Eh, i.e. the same SCF solution) are now classified
+`merged_into_bracketed_component` and are not separate seeds (wave-0 N2- doublet, SiC
+singlet). After the fix N2 runs end-to-end in one `benchmark-auto` call:
+EA_el = -2.34 eV (N2- unbound), D04 cleared for both charges.

@@ -73,3 +73,12 @@ def test_atomic_scan_picks_lowest_spin_and_builds_channels(tmp_path):
 def test_cli_runs_electronic_ea_by_default():
     args = build_parser().parse_args(["m.yaml", "--mode", "benchmark-auto"])
     assert args.no_electronic_ea is False
+
+
+def test_single_basis_interval_reports_sign_not_verdict():
+    from openea_benchmark.electronic_ea_stage import single_basis_ea_interval
+    n = entry("n", center=-1.0, lo=-1.0 - 1e-6, hi=-1.0 + 1e-6)
+    a = entry("a", center=-1.0 + 0.007 * H, lo=-1.0 + 0.007 * H - 1e-6, hi=-1.0 + 0.007 * H + 1e-6)
+    lower, upper, central, sign = single_basis_ea_interval(n, a)
+    assert central == pytest.approx(-0.007, abs=1e-6)
+    assert sign == "NEGATIVE"   # a near-threshold negative value is only a sign at this level

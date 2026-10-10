@@ -16,7 +16,10 @@ OH-specific scripts:
    UNRESOLVED for the selected neutral/anion pair.
 
 The output is an ELECTRONIC EA in one finite basis: no CBS, core-valence,
-relativity, SOC or ZPE.  It is never labelled a production EA.  No
+relativity, SOC or ZPE.  It is never labelled a production EA and never issues a
+BOUND/UNBOUND verdict: its interval only carries equilibrium-resolution
+uncertainty, so a near-threshold sign at this level is not decisive (wave-0 NO:
+EA_exp ~ +0.03 eV, single-basis electronic value negative).  No
 experimental value is read.
 """
 from __future__ import annotations
@@ -207,6 +210,15 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}
 
 
+def single_basis_ea_interval(neutral: Mapping[str, Any], anion: Mapping[str, Any]) -> tuple[float, float, float, str]:
+    """[L_N - U_A, U_N - L_A] in eV plus the sign *at this level only* (never a verdict)."""
+    lower = (neutral["energy_lower_hartree"] - anion["energy_upper_hartree"]) * HARTREE_TO_EV
+    upper = (neutral["energy_upper_hartree"] - anion["energy_lower_hartree"]) * HARTREE_TO_EV
+    central = (neutral["energy_central_hartree"] - anion["energy_central_hartree"]) * HARTREE_TO_EV
+    sign = "POSITIVE" if lower > 0.0 else ("NEGATIVE" if upper <= 0.0 else "STRADDLES_ZERO")
+    return lower, upper, central, sign
+
+
 def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequence[Stage3ExecutionRequest],
                             point_records: Mapping[str, Mapping[str, Any]], pec_reviews: Mapping[str, Mapping[str, Any]],
                             stage3_settings: Stage3ExecutionSettings, output_dir: Path,
@@ -288,10 +300,17 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         "is_production_ea": False, "validation_metadata_used_in_computation": False,
     }
     n_id, a_id = competition["neutral"].get("selected_job_id"), competition["anion"].get("selected_job_id")
+    record["verdict"] = "NOT_ISSUED_SINGLE_BASIS_INTERMEDIATE"
     if n_id is None or a_id is None:
         record.update(status="UNRESOLVED", reason="high-level state competition not cleared",
-                      ea_lower_ev=None, ea_upper_ev=None, ea_central_ev=None)
+                      ea_lower_ev=None, ea_upper_ev=None, ea_central_ev=None, sign_at_this_level=None)
     else:
+        neutral = next(e for e in entries["neutral"] if e["job_id"] == n_id)
+        anion = next(e for e in entries["anion"] if e["job_id"] == a_id)
+        # EA interval from the two equilibrium intervals.  It carries ONLY the
+        # equilibrium-resolution uncertainty of this single basis; it is a
+        # number for the next layers, not a bound/unbound verdict.
+        lower, upper, central, sign = single_basis_ea_interval(neutral, anion)
         result = evaluate_stage3_electronic_ea(
             neutral_loop_result=loops[n_id], anion_loop_result=loops[a_id],
             equilibrium_settings=policy.equilibrium(), anion_dissociation_channels=channels,
@@ -299,8 +318,10 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
             target_half_width_ev=policy.target_half_width_ev,
             neutral_state_id=n_id, anion_state_id=a_id)
         d = result.ea_decision
-        record.update(status=result.status.value, selected_neutral_job=n_id, selected_anion_job=a_id,
-                      ea_lower_ev=d.ea_lower_ev, ea_upper_ev=d.ea_upper_ev, ea_central_ev=d.ea_central_ev,
+        record.update(status="ELECTRONIC_EA_EVALUATED", selected_neutral_job=n_id, selected_anion_job=a_id,
+                      ea_lower_ev=lower, ea_upper_ev=upper, ea_central_ev=central, sign_at_this_level=sign,
+                      interval_scope="EQUILIBRIUM_RESOLUTION_ONLY_NO_BASIS_ZPE_CORRELATION_UNCERTAINTY",
+                      single_basis_decision_audit_only=result.status.value,
                       decision_rationale=list(d.rationale), evidence=list(result.evidence),
                       anion_binding=None if result.anion_binding is None else {
                           "status": result.anion_binding.status.value,
