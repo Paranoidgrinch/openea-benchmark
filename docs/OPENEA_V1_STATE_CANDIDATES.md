@@ -24,3 +24,27 @@ O2 29/18, AlO 19/20, FeH 31/32.
 
 Next redesign steps: compute per symmetry block (PySCF symmetry=True, Dooh/Coov irreps),
 follow only symmetry-preserving instabilities, track PECs per block.
+
+## Redesign step 3 — symmetry-block SCF and symmetry scout (Patches 34/35)
+
+`symmetry_states.py` runs SCF in the abelian subgroups C2v (heteronuclear) / D2h
+(homonuclear). In PySCF's real Coov/Dooh irreps the x/y components of a pi shell are
+coupled, so a Pi state with pi_x^2 pi_y^1 has no stationary point there (OH X2Pi did not
+converge); in C2v/D2h both components are independent. |m| of every orbital is measured
+from <Lz^2> (int1e_cg_irxp), labels follow from the occupied orbitals: at most one unpaired
+x/y component overall, else the determinant mixes Lambda and is reported as MR-only.
+Symmetry-preserving instabilities are followed, symmetry-breaking ones only recorded.
+x/y partner occupations of the same Lambda state are kept once.
+
+`symmetry_scout.py` (script `scripts/openea_symmetry_scout.py A B --output DIR`): from two
+element symbols, Wigner-Witmer labels -> symmetric reference at the covalent-radius start
+geometry -> single-determinant occupations per label -> seeded R scan per block (0.05 Å
+steps near the start, growing to 0.5 Å) until a bracketed minimum or a large-R plateau.
+A label change along a scan is never accepted.
+
+First real runs (PBE0/def2-TZVPPD):
+- OH: X2Pi R=0.97 Å, E=-75.688729 (identical to the old scout), OH- X1Sigma+ R=0.97 Å;
+  2Delta/2Sigma- and OH- 1Delta/1Pi reported MR-only.
+- O2: X3Sigma_g- R=1.17 Å with no symmetry-breaking instability at any scan point (the
+  state that broke the old Stage-3 continuity), O2- X2Pi_g R=1.32 Å; a1Delta_g, b1Sigma_g+
+  etc. reported MR-only.

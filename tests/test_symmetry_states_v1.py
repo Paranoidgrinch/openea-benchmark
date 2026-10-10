@@ -1,36 +1,37 @@
-"""Symmetry-block labels from irrep occupations and constrained SCF."""
+"""Symmetry-block labels from occupied orbitals (abelian subgroups) and constrained SCF."""
 import pytest
 
 from openea_benchmark.state_candidates import MolecularSymmetry
 from openea_benchmark.symmetry_states import (
-    BlockOccupation, build_symmetric_molecule, enumerate_block_occupations, label_from_irrep_nelec,
-    parse_irrep, run_block_scf,
+    BlockOccupation, OrbitalInfo, build_symmetric_molecule, enumerate_block_occupations, label_from_orbitals,
+    orbital_table, run_block_scf,
 )
 
-O2_CORE = {"A1g": (3, 3), "A1u": (2, 2), "E1ux": (1, 1), "E1uy": (1, 1)}
+
+def orb(i, irrep, m, gu=None, e=0.0):
+    return OrbitalInfo(i, e, irrep, m, gu)
 
 
-def test_parse_linear_irreps():
-    assert parse_irrep("E1gy").sigma_v_odd and parse_irrep("E1gy").m == 1
-    assert not parse_irrep("A1").sigma_v_odd and parse_irrep("A2u").sigma_v_odd
+# O2 valence in D2h: sigma_g (Ag), sigma_u (B1u), pi_u (B2u/B3u), pi_g* (B2g/B3g)
+CORE = [orb(0, "Ag", 0, "g"), orb(1, "B1u", 0, "u"), orb(2, "Ag", 0, "g"), orb(3, "B1u", 0, "u"),
+        orb(4, "Ag", 0, "g"), orb(5, "B2u", 1, "u"), orb(6, "B3u", 1, "u")]
+PIG_X, PIG_Y = orb(7, "B2g", 1, "g"), orb(8, "B3g", 1, "g")
 
 
-def test_o2_labels_from_counts():
-    x = label_from_irrep_nelec({**O2_CORE, "E1gx": (1, 0), "E1gy": (1, 0)}, like_nuclei=True)
-    assert x.label == "3Sigmag-"
-    closed_pix2 = label_from_irrep_nelec({**O2_CORE, "E1gx": (1, 1), "E1gy": (0, 0)}, like_nuclei=True)
-    assert closed_pix2 is None  # (pi_x)^2 mixes 1Sigma_g+ and 1Delta_g -> multi-determinant
-    anion = label_from_irrep_nelec({**O2_CORE, "E1gx": (1, 0), "E1gy": (1, 1)}, like_nuclei=True)
-    assert anion.label == "2Pig"
+def test_o2_labels():
+    assert label_from_orbitals(CORE + [PIG_X, PIG_Y], CORE, like_nuclei=True).label == "3Sigmag-"
+    assert label_from_orbitals(CORE + [PIG_X], CORE + [PIG_X], like_nuclei=True) is None  # (pi_gx)^2: MR
+    assert label_from_orbitals(CORE + [PIG_X, PIG_Y], CORE + [PIG_Y], like_nuclei=True).label == "2Pig"
 
 
 def test_heteronuclear_labels():
-    oh = label_from_irrep_nelec({"A1": (3, 3), "E1x": (1, 1), "E1y": (1, 0)}, like_nuclei=False)
-    assert oh.label == "2Pi"
-    alo = label_from_irrep_nelec({"A1": (7, 6), "E1x": (2, 2), "E1y": (2, 2)}, like_nuclei=False)
-    assert alo.label == "2Sigma+"
-    mixed = label_from_irrep_nelec({"A1": (3, 3), "E1x": (1, 0), "E2x": (1, 0)}, like_nuclei=False)
-    assert mixed is None  # Lambda^2 = 1 + 4 is no perfect square
+    core = [orb(0, "A1", 0), orb(1, "A1", 0), orb(2, "A1", 0), orb(3, "B1", 1)]
+    piy = orb(4, "B2", 1)
+    assert label_from_orbitals(core + [piy], core, like_nuclei=False).label == "2Pi"
+    two_pix = [orb(0, "A1", 0), orb(3, "B1", 1), orb(9, "B1", 1)]
+    assert label_from_orbitals(two_pix, two_pix, like_nuclei=False) is None
+    pi_delta = [orb(0, "A1", 0), orb(3, "B1", 1), orb(9, "A1", 2)]
+    assert label_from_orbitals(pi_delta, [orb(0, "A1", 0)], like_nuclei=False) is None
 
 
 @pytest.fixture(scope="module")
@@ -39,23 +40,37 @@ def o2():
     return build_symmetric_molecule(("O", "O"), 1.21, basis="cc-pvdz", charge=0, two_s=2)
 
 
-def test_enumeration_contains_o2_ground_and_excited_blocks(o2):
+def test_measured_m_and_enumeration_on_o2(o2):
     from pyscf import scf
     ref = scf.ROHF(o2); ref.verbose = 0; ref.kernel()
-    from pyscf.scf import hf_symm
-    names = dict(zip(o2.irrep_id, o2.irrep_name))
-    irreps = [names[i] for i in hf_symm.get_orbsym(o2, ref.mo_coeff)]
-    occs = enumerate_block_occupations(irreps, ref.mo_energy, n_alpha=9, n_beta=7, like_nuclei=True)
+    table = orbital_table(o2, ref.mo_coeff, ref.mo_energy)
+    assert sorted({o.m for o in table[:10]}) == [0, 1]
+    occs = enumerate_block_occupations(table, n_alpha=9, n_beta=7, like_nuclei=True)
     labels = {o.symmetry.label for o in occs}
     assert {"3Sigmag-", "3Sigmau+", "3Pig", "3Piu"} <= labels
-    lowest = min(occs, key=lambda o: o.orbital_energy_sum)
-    assert lowest.symmetry.label == "3Sigmag-"
+    assert min(occs, key=lambda o: o.orbital_energy_sum).symmetry.label == "3Sigmag-"
 
 
-def test_block_scf_o2_ground_state_is_clean_and_stable(o2):
-    occ = BlockOccupation(MolecularSymmetry(2, 0, "g", "-"),
-                          tuple(sorted({**O2_CORE, "E1gx": (1, 0), "E1gy": (1, 0)}.items())), 0.0)
+def test_block_scf_o2_ground_state(o2):
+    occ = BlockOccupation(MolecularSymmetry(2, 0, "g", "-"), tuple(sorted({
+        "Ag": (3, 3), "B1u": (2, 2), "B2u": (1, 1), "B3u": (1, 1), "B2g": (1, 0), "B3g": (1, 0)}.items())), 0.0)
     res = run_block_scf(o2, occ)
-    assert res.converged and res.symmetry.label == "3Sigmag-"
-    assert res.stable_within_symmetry is True
-    assert not res.warnings or res.warnings == ["SYMMETRY_BREAKING_INSTABILITY_RECORDED_NOT_FOLLOWED"]
+    assert res.converged and res.symmetry.label == "3Sigmag-" and res.stable_within_symmetry
+
+
+def test_block_scf_oh_pi_converges_in_c2v():
+    pytest.importorskip("pyscf")
+    mol = build_symmetric_molecule(("O", "H"), 0.97, basis="cc-pvdz", charge=0, two_s=1)
+    occ = BlockOccupation(MolecularSymmetry(1, 1), (("A1", (3, 3)), ("B1", (1, 1)), ("B2", (1, 0))), 0.0)
+    res = run_block_scf(mol, occ)
+    assert res.converged and res.symmetry.label == "2Pi"
+
+
+def test_xy_partner_components_are_not_separate_states():
+    table = [orb(0, "A1", 0, e=-20), orb(1, "A1", 0, e=-1.2), orb(2, "A1", 0, e=-0.6),
+             orb(3, "B1", 1, e=-0.4), orb(4, "B2", 1, e=-0.4), orb(5, "A1", 0, e=0.1)]
+    occs = enumerate_block_occupations(table, n_alpha=5, n_beta=4, like_nuclei=False, keep_per_label=2)
+    from openea_benchmark.symmetry_states import swap_xy
+    pi = [o.irrep_nelec for o in occs if o.symmetry.label == "2Pi"]
+    assert (("A1", (3, 3)), ("B1", (1, 1)), ("B2", (1, 0))) in pi
+    assert all(swap_xy(a) != b for a in pi for b in pi)  # no x/y partner kept twice
