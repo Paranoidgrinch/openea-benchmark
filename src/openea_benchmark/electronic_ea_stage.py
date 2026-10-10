@@ -55,7 +55,7 @@ class ElectronicEAStagePolicy:
     refinement_target_bracket_width_angstrom: float = 0.021
     refinement_min_separation_angstrom: float = 1.0e-7
     refinement_energy_tie_hartree: float = 1.0e-8
-    max_refinement_rounds: int = 6
+    max_refinement_rounds: int = 12
     equilibrium_max_side_points: int = 2
     equilibrium_min_models: int = 2
     equilibrium_min_curvature: float = 1.0e-3
@@ -255,9 +255,13 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                  "r_central_angstrom": None}
         label = "neutral" if entry["charge"] == 0 else "anion"
         entries[label].append(entry)
+        # An unbracketed high-level curve (minimum at the grid edge, e.g. because
+        # the DFT and CCSD(T) minima differ) is extended by the refinement loop
+        # rather than left as an unresolved D04 competitor.
         eligible = (review.get("initialization_review") == "CLEARED"
                     and review.get("geometry_continuity_review") == "CLEARED"
-                    and (review.get("pec") or {}).get("minimum_scout", {}).get("status") == "BRACKETED_SINGLE_MINIMUM")
+                    and (review.get("pec") or {}).get("minimum_scout", {}).get("status")
+                    in ("BRACKETED_SINGLE_MINIMUM", "NO_BRACKETED_MINIMUM"))
         if not eligible:
             entry["equilibrium_status"] = "NOT_ELIGIBLE_REVIEW_NOT_CLEARED"
             continue

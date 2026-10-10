@@ -40,6 +40,8 @@ x/y partner occupations of the same Lambda state are kept once.
 element symbols, Wigner-Witmer labels -> symmetric reference at the covalent-radius start
 geometry -> single-determinant occupations per label -> seeded R scan per block (0.05 Å
 steps near the start, growing to 0.5 Å) until a bracketed minimum or a large-R plateau.
+A bracket left coarse by the grown steps is bisected (seeded from the minimum point, at
+most `max_bracket_refinements`) until both neighbours lie within one fine step.
 A label change along a scan is never accepted.
 
 First real runs (PBE0/def2-TZVPPD):
@@ -70,3 +72,13 @@ acquisition -> electronic EA stage. No YAML system entry, spin list or start geo
 First run, O + H: Stage-3 RELEASED, 20/20 points, automated D04 cleared (X2Pi / X1Sigma+),
 electronic EA 1.7044 eV (def2-TZVPPD) - identical to the YAML-driven route with half of the
 CCSD(T) points; 14 high-lying blocks excluded by the dissociation-limit bound.
+
+## Patch 37 — coarse scout brackets and unbracketed high-level curves (wave-0 ClO)
+
+ClO- 3Pi lies far from the covalent start; the grown steps bracketed its DFT minimum only
+between 2.24 and 2.87 Å, the CCSD(T) grid at 2.44-2.54 Å was still downhill, and the
+competitor (0.95 eV above X1Sigma+) blocked D04 under the 1 eV margin for unresolved
+candidates. Fixes: (1) the scout bisects coarse brackets to one fine step; (2) the
+electronic-EA stage also refines curves whose high-level minimum is not bracketed
+(NO_BRACKETED_MINIMUM) - the canonical loop extends towards the lower energy - with
+`max_refinement_rounds` 12.

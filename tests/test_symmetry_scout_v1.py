@@ -52,6 +52,17 @@ def test_scan_brackets_minimum(tmp_path):
     assert abs(res["minimum"]["r_angstrom"] - 0.95) < 1e-9 or abs(res["minimum"]["r_angstrom"] - 1.0) < 1e-9
 
 
+def test_scan_refines_coarse_bracket_from_grown_steps(tmp_path):
+    # Minimum far from the start: the grown steps bracket it coarsely; the
+    # bracket is bisected until both neighbours lie within one fine step.
+    res = scan_block(("Cl", "O"), -1, _occ(), 1.6, POLICY, tmp_path, _runner(lambda r: (r - 2.37) ** 2))
+    assert res["status"] == "BRACKETED_SINGLE_MINIMUM"
+    rs = [p["r_angstrom"] for p in res["points"]]
+    i = rs.index(res["minimum"]["r_angstrom"])
+    assert rs[i] - rs[i - 1] <= POLICY.step_angstrom + 1e-9 and rs[i + 1] - rs[i] <= POLICY.step_angstrom + 1e-9
+    assert abs(res["minimum"]["r_angstrom"] - 2.37) <= POLICY.step_angstrom
+
+
 def test_scan_detects_dissociative_plateau(tmp_path):
     import math
     res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path, _runner(lambda r: math.exp(-6 * r)))

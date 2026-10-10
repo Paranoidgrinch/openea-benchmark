@@ -46,6 +46,7 @@ class SymmetryScoutPolicy:
     step_growth: float = 1.5        # then geometric growth ...
     max_step_angstrom: float = 0.5  # ... up to this step
     max_points_per_side: int = 16
+    max_bracket_refinements: int = 8
     min_r_angstrom: float = 0.5
     max_r_angstrom: float = 4.0
     plateau_energy_tolerance_ev: float = 0.01
@@ -160,6 +161,20 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
             prev = p
         else:
             status[direction] = "BUDGET"
+    # The grown steps can leave a coarse bracket around the discrete minimum;
+    # bisect its wider side until both neighbours lie within one fine step, so
+    # the high-level grid placed around it actually contains the minimum.
+    for _ in range(policy.max_bracket_refinements):
+        ok = [p for p in sorted(points.values(), key=lambda p: p["r_angstrom"]) if p["converged"]]
+        i = min(range(len(ok)), key=lambda j: ok[j]["energy_hartree"])
+        if not 0 < i < len(ok) - 1 or any(p["label"] != occ.symmetry.label for p in ok):
+            break
+        left, right = ok[i]["r_angstrom"] - ok[i - 1]["r_angstrom"], ok[i + 1]["r_angstrom"] - ok[i]["r_angstrom"]
+        if max(left, right) <= policy.step_angstrom + 1e-9:
+            break
+        r = ok[i]["r_angstrom"] + (-left / 2 if left >= right else right / 2)
+        if round(r, 4) in points or not compute(r, ok[i]["checkpoint"])["converged"]:
+            break
     ordered = sorted(points.values(), key=lambda p: p["r_angstrom"])
     ok = [p for p in ordered if p["converged"]]
     energies = [p["energy_hartree"] for p in ok]

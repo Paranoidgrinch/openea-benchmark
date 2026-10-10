@@ -14,7 +14,8 @@ For one system, after acquisition (enabled by default in `benchmark-auto`;
 `scripts/openea_electronic_ea_from_acquisition.py`):
 
 1. **Refinement.** Every Stage-3 job whose acquisition review cleared initialization
-   identity and geometry continuity with a bracketed sampled minimum is passed to the
+   identity and geometry continuity with a bracketed sampled minimum - or with no bracketed
+   minimum yet, in which case the loop extends the grid downhill (Patch 37) - is passed to the
    canonical `run_stage3_refinement_loop` (completed points only). The loop uses the same
    identity semantics as the acquisition review, including the axial SO(2) orbit
    equivalence for Pi/Delta initializations. New points are cached in
