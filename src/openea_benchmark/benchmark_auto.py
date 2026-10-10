@@ -365,6 +365,10 @@ def run_benchmark_acquisition(
         "stage3_release": bridge.release_status.value,
         "stage3_blocking_reasons": list(bridge.blocking_reasons),
         "open_pec_extension_applied": open_pec_extension is not None,
+        # Wigner-Witmer labels that no single high-spin determinant represents
+        # (e.g. 1Delta, open-shell singlets): not computed, an explicit gap.
+        "mr_only_candidates_not_computed": [
+            f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())],
         "charge_groups": open_state,
         "candidate_job_count": len(jobs),
         "stage3_pec_reviews": {key: v["status"] for key, v in pec_reviews.items()},

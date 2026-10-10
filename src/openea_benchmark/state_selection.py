@@ -239,6 +239,7 @@ def build_state_selection_report(
                 status in (
                     "dissociative_to_asymptote",
                     "merged_into_bracketed_component",
+                    "above_lowest_dissociation_limit",
                 )
                 and graph_resolved
                 and sector_status == "dft_scout_complete"
@@ -254,6 +255,7 @@ def build_state_selection_report(
                     "observed_lowest_energy_hartree": observed_min,
                     "asymptote_evidence": scout.get("asymptote_evidence"),
                     "merged_into_component_id": scout.get("merged_into_component_id"),
+                    "dissociation_limit_evidence": scout.get("dissociation_limit_evidence"),
                     "extended_r_max_angstrom": scout.get("extended_r_max_angstrom"),
                 })
 

@@ -62,3 +62,39 @@ def test_label_change_is_never_accepted(tmp_path):
     res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path,
                      _runner(lambda r: (r - 0.97) ** 2, label="2Sigma+"))
     assert res["status"] == "LABEL_CHANGED"
+
+
+def _record(blocks):
+    return {"system": "OH", "atoms": ["O", "H"], "r0_angstrom": 0.97,
+            "policy": {"functional": "PBE0", "basis": "def2-TZVPPD"},
+            "charges": {"0": {"plan": {"mr_only_or_outside_window": [{"label": "2Delta", "count": 1, "channels": []}]},
+                              "blocks": blocks}}}
+
+
+def _block(label, two_s, energies, status, higher="RISES"):
+    pts = [{"r_angstrom": r, "energy_hartree": e, "converged": True, "stable_within_symmetry": True,
+            "checkpoint": f"{r}.chk"} for r, e in energies]
+    i = min(range(len(pts)), key=lambda k: pts[k]["energy_hartree"])
+    return {"label": label, "two_s": two_s, "irrep_nelec": [["A1", [3, 3]], ["B1", [1, 1]], ["B2", [1, 0]]],
+            "status": status, "side_status": {"lower_r": "RISES", "higher_r": higher},
+            "minimum": {"r_angstrom": pts[i]["r_angstrom"], "energy_hartree": pts[i]["energy_hartree"]},
+            "points": pts}
+
+
+def test_export_excludes_blocks_above_lowest_dissociation_limit_and_keeps_ground():
+    from openea_benchmark.open_pec_extension import atom_key
+    from openea_benchmark.state_selection import build_state_selection_report
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    atomic = {atom_key("O", 0, 2): {"energy_hartree": -75.0}, atom_key("H", 0, 1): {"energy_hartree": -0.5}}
+    ground = _block("2Pi", 1, [(0.92, -75.60), (0.97, -75.65), (1.02, -75.62)], "BRACKETED_SINGLE_MINIMUM")
+    junk = _block("2Sigma+", 1, [(2.1, -74.80), (2.16, -74.85), (2.2, -74.82)], "BRACKETED_SINGLE_MINIMUM")
+    summary = to_legacy_summary(_record({"g": ground, "j": junk}), atomic=atomic)
+    statuses = {sc["component_id"]: sc["minimum_scout"]["status"] for sec in summary["sectors"]
+                for sc in sec["manifold_pec_scouts"]}
+    assert statuses == {"g": "bracketed_single_minimum", "j": "above_lowest_dissociation_limit"}
+    sel = build_state_selection_report(summary)["charge_groups"]["neutral"]
+    assert [c["component_id"] for c in sel["bracketed_candidates"]] == ["g"]
+    assert not sel["unresolved_components"]
+    assert summary["mr_only_candidates"][0]["label"] == "2Delta"
+    sc = next(sc for sec in summary["sectors"] for sc in sec["manifold_pec_scouts"] if sc["component_id"] == "g")
+    assert sc["symmetry_block"]["point_group"] == "C2v"

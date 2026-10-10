@@ -594,6 +594,11 @@ def _comparison_seed_requests(
             dft_center_energy_hartree=source_request.dft_center_energy_hartree,
             requires_independent_state_identity_validation=True,
             authorizes_pruning=False,
+            # irrep occupations are basis independent: the same symmetry block
+            point_group=source_request.point_group,
+            irrep_nelec=(None if source_request.irrep_nelec is None
+                         else dict(source_request.irrep_nelec)),
+            symmetry_label=source_request.symmetry_label,
         ))
     return tuple(output)
 

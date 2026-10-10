@@ -48,3 +48,25 @@ First real runs (PBE0/def2-TZVPPD):
 - O2: X3Sigma_g- R=1.17 Å with no symmetry-breaking instability at any scan point (the
   state that broke the old Stage-3 continuity), O2- X2Pi_g R=1.32 Å; a1Delta_g, b1Sigma_g+
   etc. reported MR-only.
+
+## Redesign step 3c — two-atom input end to end (Patch 36)
+
+`python -m openea_benchmark.workflow --mode symmetry-auto --atoms A B --output DIR`
+
+symmetry scout -> DFT fragment asymptotes (open-PEC executor) -> legacy summary export
+(`to_legacy_summary`) + synthesized manifest (`manifest_for_two_atoms`) -> benchmark-auto
+acquisition -> electronic EA stage. No YAML system entry, spin list or start geometry.
+
+- Stage-3 requests carry `point_group`, `irrep_nelec`, `symmetry_label`; the ROHF/RHF
+  reference is solved in the same symmetry block as the scout, also in refinement and
+  nuclear-motion requests, so state identity is fixed by symmetry from DFT to CCSD(T).
+- Dissociation-limit bound: the ground state of a charge lies at or below its lowest
+  dissociation limit. A block whose lowest sampled scout energy (scanned to large R)
+  is above the lowest computed fragment limit of its charge by more than 1.0 eV is
+  `above_lowest_dissociation_limit` (resolved, not a Stage-3 seed, evidence recorded).
+- Labels without single-determinant representation are listed as
+  `mr_only_candidates_not_computed` in auto_state (explicit open gap).
+
+First run, O + H: Stage-3 RELEASED, 20/20 points, automated D04 cleared (X2Pi / X1Sigma+),
+electronic EA 1.7044 eV (def2-TZVPPD) - identical to the YAML-driven route with half of the
+CCSD(T) points; 14 high-lying blocks excluded by the dissociation-limit bound.

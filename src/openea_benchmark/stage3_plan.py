@@ -350,6 +350,9 @@ def build_stage3_plan(
                     "sector_discontinuous_edges"
                 ),
                 "execution_status": "PLANNED_NOT_RUN",
+                # Symmetry-scout components carry their block (label, point
+                # group, irrep occupation); legacy scouts have none.
+                "symmetry_block": scout.get("symmetry_block"),
             })
 
     job_ids = [job["job_id"] for job in jobs]

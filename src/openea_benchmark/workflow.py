@@ -1999,6 +1999,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "manifest",
         type=Path,
+        nargs="?",
+        default=None,
+        help="Benchmark manifest (not needed with --atoms in symmetry-auto mode)",
+    )
+    parser.add_argument(
+        "--atoms", nargs=2, metavar=("A", "B"), default=None,
+        help="Two element symbols; with --mode symmetry-auto no manifest is needed",
     )
 
     parser.add_argument(
@@ -2007,6 +2014,7 @@ def build_parser() -> argparse.ArgumentParser:
             "plan",
             "dft-scout",
             "benchmark-auto",
+            "symmetry-auto",
         ),
         default="plan",
     )
@@ -2090,6 +2098,51 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_symmetry_auto(args) -> int:
+    """Two element symbols -> symmetry scout -> asymptotes -> Stage-3 -> electronic EA."""
+    from pyscf import lib as pyscf_lib
+
+    from .benchmark_auto import AcquisitionSettings, run_benchmark_acquisition
+    from .open_pec_extension import run_open_pec_extension
+    from .symmetry_scout import manifest_for_two_atoms, run_symmetry_scout, to_legacy_summary
+
+    if not args.atoms or args.output is None:
+        raise SystemExit("symmetry-auto needs --atoms A B and --output DIR")
+    atom_a, atom_b = args.atoms
+    pyscf_lib.num_threads(args.threads)
+    system_dir = args.output / f"{atom_a}{atom_b}"
+    print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
+    record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
+    preliminary = to_legacy_summary(record)
+    extension = None
+    if not args.no_open_pec_extension:
+        print(f"[SYMMETRY AUTO] fragment asymptotes / open PECs {atom_a}{atom_b}", flush=True)
+        extension = run_open_pec_extension(summary=preliminary, output_dir=system_dir,
+                                           grid_level=args.grid_level)
+    summary = to_legacy_summary(record, atomic=(extension or {}).get("atomic"))
+    manifest = manifest_for_two_atoms(summary)
+    _write_json(system_dir / "summary.json", summary)
+    _write_json(system_dir / "manifest.json", manifest)
+    state = run_benchmark_acquisition(
+        summary=summary, manifest=manifest, open_pec_extension=extension,
+        output_dir=system_dir / args.acquisition_dir,
+        settings=AcquisitionSettings(
+            max_points=args.max_stage3_points, threads=args.threads, memory_mb=args.stage3_memory_mb,
+            enable_provisional_points=not args.no_provisional_stage3, compute_points=not args.auto_dry_run,
+            stability_following_max_steps=args.stability_following_steps,
+            rhf_external_instability_policy=args.rhf_external_instability,
+            assemble_electronic_ea=not args.no_electronic_ea,
+        ),
+    )
+    print("[SYMMETRY AUTO] " + json.dumps({
+        "system": summary["system"], "stage3_release": state["stage3_release"],
+        "completed": state["completed_point_count"], "failed": state["failed_point_count"],
+        "mr_only_candidates": len(summary["mr_only_candidates"]),
+        "electronic_ea": state.get("electronic_ea"),
+    }, default=str), flush=True)
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -2099,6 +2152,12 @@ def main(
             argv
         )
     )
+
+    if args.mode == "symmetry-auto":
+        return _run_symmetry_auto(args)
+
+    if args.manifest is None:
+        raise SystemExit("a manifest is required unless --mode symmetry-auto --atoms A B is used")
 
     manifest = load_manifest(
         args.manifest

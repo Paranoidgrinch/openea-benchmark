@@ -234,3 +234,129 @@ def _symmetry_from_label(label: str):
     mult, name, gu, refl = m.groups()
     inverse = {v: k for k, v in _LAMBDA_LETTER.items()}
     return MolecularSymmetry(int(mult) - 1, inverse[name], gu or None, refl or None)
+
+
+# ------------------------------------------------------------ legacy export
+
+_STATUS_MAP = {"BRACKETED_SINGLE_MINIMUM": "bracketed_single_minimum"}
+
+
+def lowest_dissociation_limit(atomic: Mapping[str, Any], atom_a: str, atom_b: str, charge: int) -> dict | None:
+    """Lowest fragment channel of this total charge, any spin coupling (computed DFT atoms)."""
+    from .open_pec_extension import compatible_asymptote
+    best = None
+    for two_s in range(0, 13):
+        asym = compatible_asymptote(atomic, atom_a, atom_b, charge, two_s)
+        if asym and (best is None or asym["energy_hartree"] < best["energy_hartree"]):
+            best = asym
+    return best
+
+
+def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | None = None,
+                      asymptote_tolerance_ev: float = 0.25,
+                      above_limit_margin_ev: float = 1.0) -> dict:
+    """Symmetry-scout record -> scout-summary schema used by state selection and Stage-3 planning.
+
+    Every block is one PEC component carrying ``symmetry_block``.  A large-R plateau is
+    accepted as ``dissociative_to_asymptote`` only when it lands on the computed
+    spin-compatible fragment asymptote (``atomic`` from the open-PEC executor);
+    otherwise it stays open.  Labels without a single-determinant occupation are
+    listed under ``mr_only_candidates`` (an explicit, unclosed coverage gap).
+    """
+    from .open_pec_extension import compatible_asymptote
+    atom_a, atom_b = record["atoms"]
+    pg = "D2h" if atom_a == atom_b else "C2v"
+    method = {"functional": record["policy"]["functional"], "basis": record["policy"]["basis"]}
+    sectors: dict[tuple[int, int], dict] = {}
+    mr_only = []
+    for q_str, entry in record["charges"].items():
+        charge = int(q_str)
+        mr_only += [{"charge": charge, **m} for m in entry["plan"]["mr_only_or_outside_window"]]
+        # The ground state of a charge lies at or below its lowest dissociation
+        # limit (separated ground-state fragments are an accessible state).  A
+        # block whose lowest sampled energy is above that limit by more than a
+        # DFT margin cannot be the ground state of this charge.
+        limit = lowest_dissociation_limit(atomic, atom_a, atom_b, charge) if atomic else None
+        for bid, block in entry["blocks"].items():
+            two_s = int(block["two_s"])
+            sector = sectors.setdefault((charge, two_s), {
+                "charge": charge, "spin_2s": two_s, "tracking_mode": "manifold",
+                "manifold_branch_graph_unambiguous": True,
+                "manifold_branch_graph": {"discontinuous_edges": [], "bridged_edges": []},
+                "sector_status": "dft_scout_complete",
+                "adaptive_grid": {"stop_reason": "SYMMETRY_BLOCK_SCAN"},
+                "method": method, "label": f"{record['system']} q={charge:+d} 2S={two_s}",
+                "manifold_pec_scouts": [], "manifolds": [], "representative_roots": []})
+            pts = []
+            for p in block["points"]:
+                if not p["converged"]:
+                    continue
+                root = f"{bid}__R{p['r_angstrom']:.4f}"
+                pts.append({"r_angstrom": p["r_angstrom"], "energy_center_hartree": p["energy_hartree"],
+                            "energy_spread_mev": 0.0, "manifold_id": root})
+                sector["manifolds"].append({"manifold_id": root, "r_angstrom": p["r_angstrom"],
+                                            "energy_center_hartree": p["energy_hartree"],
+                                            "member_root_ids": [root], "unique_state_root_ids": [root]})
+                sector["representative_roots"].append({
+                    "root_id": root, "checkpoint_path": p["checkpoint"], "r_angstrom": p["r_angstrom"],
+                    "energy_hartree": p["energy_hartree"], "s2": None,
+                    "internal_stable": p["stable_within_symmetry"], "origin_guess": "SYMMETRY_BLOCK",
+                    "status": "CANONICALIZED", "charge": charge, "spin_2s": two_s})
+            status = _STATUS_MAP.get(block["status"], block["status"].lower())
+            minimum_scout: dict[str, Any] = {"status": status, "component_id": bid, "candidates": []}
+            lowest = min((p["energy_center_hartree"] for p in pts), default=None)
+            reaches_large_r = block.get("side_status", {}).get("higher_r") in ("R_LIMIT", "PLATEAU", "RISES")
+            if (limit is not None and lowest is not None and reaches_large_r
+                    and (lowest - limit["energy_hartree"]) * HARTREE_TO_EV > above_limit_margin_ev):
+                minimum_scout = {"status": "above_lowest_dissociation_limit", "component_id": bid, "candidates": [],
+                                 "scout_status": status,
+                                 "dissociation_limit_evidence": {
+                                     "channel": limit["channel"], "limit_hartree": limit["energy_hartree"],
+                                     "lowest_sampled_hartree": lowest, "margin_ev": above_limit_margin_ev,
+                                     "lowest_minus_limit_ev": (lowest - limit["energy_hartree"]) * HARTREE_TO_EV}}
+            elif status == "bracketed_single_minimum":
+                m = block["minimum"]
+                minimum_scout["candidates"] = [{"r_angstrom": m["r_angstrom"], "energy_hartree": m["energy_hartree"],
+                                                "root_id": f"{bid}__R{m['r_angstrom']:.4f}"}]
+            elif block["status"] == "DISSOCIATIVE_PLATEAU" and atomic:
+                asym = compatible_asymptote(atomic, atom_a, atom_b, charge, two_s)
+                last = max(pts, key=lambda p: p["r_angstrom"]) if pts else None
+                if asym and last and abs(last["energy_center_hartree"] - asym["energy_hartree"]) * HARTREE_TO_EV \
+                        <= asymptote_tolerance_ev:
+                    minimum_scout = {"status": "dissociative_to_asymptote", "component_id": bid, "candidates": [],
+                                     "asymptote_evidence": {
+                                         "asymptote_channel": asym["channel"],
+                                         "asymptote_hartree": asym["energy_hartree"],
+                                         "plateau_minus_asymptote_ev":
+                                             (last["energy_center_hartree"] - asym["energy_hartree"]) * HARTREE_TO_EV}}
+                else:
+                    minimum_scout["status"] = "plateau_not_on_computed_asymptote"
+            sector["manifold_pec_scouts"].append({
+                "component_id": bid, "pec": {"component_id": bid, "points": pts}, "minimum_scout": minimum_scout,
+                "symmetry_block": {"label": block["label"], "point_group": pg, "two_s": two_s,
+                                   "irrep_nelec": block["irrep_nelec"]}})
+    spins = {q: sorted({s for (c, s) in sectors if c == q}) for q in (0, -1)}
+    return {
+        "system": record["system"], "atoms": [atom_a, atom_b],
+        "computational_input": {"initial_R_angstrom": record["r0_angstrom"],
+                                "candidate_neutral_2S": spins[0], "candidate_anion_2S": spins[-1],
+                                "source": "WIGNER_WITMER_SYMMETRY_SCOUT"},
+        "sectors": [sectors[k] for k in sorted(sectors)],
+        "mr_only_candidates": mr_only,
+        "validation_metadata_used_in_computation": False,
+    }
+
+
+def manifest_for_two_atoms(summary: Mapping[str, Any], *, basis: str = "def2-TZVPPD") -> dict:
+    """Minimal manifest so the existing Stage-3 planner can run without a hand-written system entry."""
+    ci = summary["computational_input"]
+    return {
+        "benchmark": {"name": "two_atom_input", "purpose": "automatic from element symbols"},
+        "systems": {summary["system"]: {"atoms": list(summary["atoms"]),
+                                        "initial_R_angstrom": ci["initial_R_angstrom"],
+                                        "candidate_neutral_2S": ci["candidate_neutral_2S"],
+                                        "candidate_anion_2S": ci["candidate_anion_2S"]}},
+        "protocol": {"stage_3_high_level_local_pec": {
+            "reference": "ROHF", "methods": ["CCSD", "CCSD(T)"], "basis": basis,
+            "relative_grid_angstrom": [-0.05, -0.025, 0.0, 0.025, 0.05]}},
+    }

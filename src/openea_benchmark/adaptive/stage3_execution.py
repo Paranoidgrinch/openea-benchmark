@@ -132,6 +132,11 @@ class Stage3ExecutionRequest:
     requires_independent_state_identity_validation: bool
     basis_by_element: Mapping[str, str] | None = None
     authorizes_pruning: bool = False
+    # Symmetry block (abelian point group + irrep occupation as (alpha, beta));
+    # None keeps the legacy symmetry-free reference.
+    point_group: str | None = None
+    irrep_nelec: Mapping[str, tuple[int, int]] | None = None
+    symmetry_label: str | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip() or not self.job_id.strip():
@@ -166,6 +171,13 @@ class Stage3ExecutionRequest:
             raise ValueError("Execution request requires explicit checkpoint provenance")
         if self.authorizes_pruning:
             raise ValueError("Stage-3 execution never authorizes state pruning")
+        if (self.irrep_nelec is None) != (self.point_group is None):
+            raise ValueError("irrep_nelec and point_group must be given together")
+        if self.irrep_nelec is not None:
+            na = sum(int(v[0]) for v in self.irrep_nelec.values())
+            nb = sum(int(v[1]) for v in self.irrep_nelec.values())
+            if na - nb != self.spin_2s:
+                raise ValueError("irrep_nelec does not match spin_2s")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -352,6 +364,12 @@ def build_stage3_execution_requests(
                     requires_independent_state_identity_validation=bool(
                         job.get("requires_independent_state_identity_validation", True)
                     ),
+                    point_group=(job.get("symmetry_block") or {}).get("point_group"),
+                    irrep_nelec=(
+                        {k: (int(v[0]), int(v[1])) for k, v in job["symmetry_block"]["irrep_nelec"]}
+                        if job.get("symmetry_block") else None
+                    ),
+                    symmetry_label=(job.get("symmetry_block") or {}).get("label"),
                 ))
 
     return tuple(requests)
@@ -460,7 +478,7 @@ def _run_stage3_point_pyscf(
         charge=request.charge,
         spin=request.spin_2s,
         unit="Angstrom",
-        symmetry=False,
+        symmetry=request.point_group if request.point_group else False,
         verbose=settings.verbose,
         max_memory=settings.max_memory_mb,
         # Otherwise PySCF copies the calling script's full source into the log.
@@ -476,6 +494,15 @@ def _run_stage3_point_pyscf(
         mf = scf.ROHF(mol)
         dm0 = scf.rohf.init_guess_by_chkfile(
             mol, request.source_checkpoint_path, project=settings.checkpoint_project
+        )
+
+    if request.irrep_nelec is not None:
+        # Same symmetry block as the scout: the electronic state label is fixed
+        # by the irrep occupation, not inferred afterwards.
+        mf.irrep_nelec = (
+            {k: (int(v[0]), int(v[1])) for k, v in request.irrep_nelec.items()}
+            if request.scf_reference == "ROHF"
+            else {k: int(v[0]) + int(v[1]) for k, v in request.irrep_nelec.items()}
         )
 
     if settings.scalar_relativistic == "SFX2C1E":
