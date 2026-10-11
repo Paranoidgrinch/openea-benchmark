@@ -97,3 +97,20 @@ def test_failed_point_reseeded_from_previous_basis(tmp_path, monkeypatch):
     reseed = anion["points"]["d-aug-cc-pv5z"]["reseeded"]
     assert reseed["first_status"] == "SCF_NOT_CONVERGED"
     assert reseed["seed_checkpoint"] == "/cbs/A__CBS__aug-cc-pv5z"
+
+
+def test_error_results_are_not_cached(tmp_path):
+    from openea_benchmark.electronic_ea_stage import cached_point_runner
+    calls = []
+
+    def flaky(req, settings):
+        calls.append(req.request_id)
+        status = PointExecutionStatus.ERROR if len(calls) == 1 else PointExecutionStatus.COMPLETED
+        return _empty_result(req, status, reference_warnings=())
+
+    runner = cached_point_runner(tmp_path, "sig", flaky)
+    req = request("A", -1, 0)
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.ERROR
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
+    assert len(calls) == 2

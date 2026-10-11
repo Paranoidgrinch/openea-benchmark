@@ -128,6 +128,10 @@ class CachedPointRunner:
         from .point_pool import core_slot
         with core_slot():
             result = run_stage3_point(request, settings=settings, runner=self.backend)
+        if result.status is PointExecutionStatus.ERROR:
+            # Infrastructure errors (e.g. scratch disk full) are not a property of
+            # the point: never cached, so a resumed run recomputes them.
+            return result
         _save_json(path, {"request_id": request.request_id, "fingerprint": fingerprint,
                           "request": request.to_dict(), "result": result.to_dict()})
         return result
