@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive.stage3_execution import (
-    SEED_CONTINUOUS_BRANCH, Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult,
+    SEED_CONTINUOUS_BRANCH, PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings,
+    Stage3PointResult,
 )
 from .attachment.component_resolved_cbs import (
     PRIMARY_EXPONENTS, extrapolate_species, ComponentPair, resolve_cbs,
@@ -131,8 +132,29 @@ def _states_to_compute(ea: Mapping[str, Any], policy: CBSStagePolicy) -> list[di
     return states
 
 
-def _run_point(runner, request, settings):
-    return runner(request, settings)
+def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]]:
+    """One state's basis series in order.  A point that fails from the projected TZ
+    reference is retried once, seeded from the last completed larger-basis reference of
+    the same state (same irrep occupation, no following) and with doubled SCF/CC cycles;
+    the retry is recorded, never silent."""
+    out: list[tuple[Any, dict | None]] = []
+    previous_checkpoint = None
+    for req in requests:
+        result, reseed = runner(req, settings), None
+        if result.status is not PointExecutionStatus.COMPLETED:
+            seed = previous_checkpoint or req.source_checkpoint_path
+            retry = replace(req, request_id=req.request_id + "__RESEED", source_checkpoint_path=str(seed),
+                            source_link_status=("CBS_BASIS_CONTINUATION_FROM_PREVIOUS_CARDINAL"
+                                                if previous_checkpoint else req.source_link_status))
+            retry_settings = replace(settings, scf_max_cycle=2 * settings.scf_max_cycle,
+                                     cc_max_cycle=2 * settings.cc_max_cycle)
+            reseed = {"first_status": result.status.value, "seed_checkpoint": str(seed),
+                      "scf_max_cycle": retry_settings.scf_max_cycle}
+            result = runner(retry, retry_settings)
+        if result.status is PointExecutionStatus.COMPLETED and result.high_level_checkpoint_path:
+            previous_checkpoint = result.high_level_checkpoint_path
+        out.append((result, reseed))
+    return out
 
 
 def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
@@ -191,12 +213,21 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
             jobs.append((state, label, prov, req))
         computed.append(state)
 
-    # Every (state, basis) point is independent: concurrent on the point pool if configured.
-    results = run_parallel(_run_point, [(runner, req, settings) for _, _, _, req in jobs])
-    for (state, label, prov, _), result in zip(jobs, results):
+    # States run concurrently on the point pool; the basis series of one state runs in
+    # order so a failed point can be re-seeded from the previous basis of that state.
+    chains: dict[int, list[int]] = {}
+    for index, (state, _, _, _) in enumerate(jobs):
+        chains.setdefault(id(state), []).append(index)
+    chain_results = run_parallel(_run_state_chain, [(runner, [jobs[i][3] for i in idx], settings)
+                                                    for idx in chains.values()])
+    results: list = [None] * len(jobs)
+    for idx, outcome in zip(chains.values(), chain_results):
+        for i, item in zip(idx, outcome):
+            results[i] = item
+    for (state, label, prov, _), (result, reseed) in zip(jobs, results):
         res = result.to_dict()
         state["points"][label] = {
-            "status": res["status"], "basis_by_element": prov,
+            "status": res["status"], "basis_by_element": prov, "reseeded": reseed,
             "scf_energy_hartree": res["scf_energy_hartree"],
             "ccsd_correlation_hartree": res["ccsd_correlation_hartree"],
             "triples_correction_hartree": res["triples_correction_hartree"],

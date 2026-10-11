@@ -17,7 +17,10 @@ def request(job, charge, two_s):
 
 def backend(req, settings):
     assert settings.frozen_core and settings.checkpoint_project
-    assert req.reference_branch == "SEED_CONTINUOUS" and req.source_checkpoint_path.startswith("/hl/")
+    assert req.reference_branch == "SEED_CONTINUOUS"
+    assert req.source_checkpoint_path.startswith("/hl/") or req.request_id.endswith("__RESEED")
+    if FAIL_DAUG_FROM_TZ and req.job_id == "A" and req.basis.startswith("d-") and "__RESEED" not in req.request_id:
+        return _empty_result(req, PointExecutionStatus.SCF_NOT_CONVERGED, reference_warnings=())
     key = req.job_id[0]
     scf, corr, trip = CBS[key]
     x = 4 if "pvqz" in req.basis else 5
@@ -30,7 +33,10 @@ def backend(req, settings):
                          ccsd_t_total_hartree=(scf + corr + trip + shift + 0.01 * x ** -PRIMARY_EXPONENTS["scf"]
                                                + 0.1 * x ** -PRIMARY_EXPONENTS["ccsd_correlation"]
                                                + 0.01 * x ** -PRIMARY_EXPONENTS["triples"]),
-                         reference_warnings=())
+                         reference_warnings=(), high_level_checkpoint_path=f"/cbs/{req.request_id}")
+
+
+FAIL_DAUG_FROM_TZ = False
 
 
 def ea_record(competitor_gap_ev):
@@ -79,3 +85,15 @@ def test_basis_policy():
     shells = [[0, [1.0, 1.0]], [0, [0.1, 1.0]], [2, [2.0, 1.0, 0.0], [0.5, 0.0, 1.0]]]
     added = _even_tempered_extra_diffuse(shells)[len(shells):]
     assert [(l, round(e, 12), c) for l, (e, c) in added] == [(0, 0.01, 1.0), (2, 0.125, 1.0)]
+
+
+def test_failed_point_reseeded_from_previous_basis(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "FAIL_DAUG_FROM_TZ", True)
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "CLEARED"
+    import json
+    states = json.loads((tmp_path / "cbs" / "cbs.json").read_text())["states"]
+    anion = next(s for s in states if s["job_id"] == "A")
+    reseed = anion["points"]["d-aug-cc-pv5z"]["reseeded"]
+    assert reseed["first_status"] == "SCF_NOT_CONVERGED"
+    assert reseed["seed_checkpoint"] == "/cbs/A__CBS__aug-cc-pv5z"
