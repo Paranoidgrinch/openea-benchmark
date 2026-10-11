@@ -2095,6 +2095,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="PySCF memory for the CBS-layer CCSD(T) points",
     )
     parser.add_argument(
+        "--point-workers", type=int, default=1,
+        help="concurrent independent calculations (scout blocks, Stage-3/CBS points), each with --threads",
+    )
+    parser.add_argument(
+        "--core-slots", type=int, default=0,
+        help="machine-wide limit of concurrent calculations shared by all runs using --core-slots-dir",
+    )
+    parser.add_argument(
+        "--core-slots-dir", type=Path, default=None,
+        help="lock directory of the shared core-slot budget",
+    )
+    parser.add_argument(
         "--no-open-pec-extension", action="store_true",
         help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
     )
@@ -2118,7 +2130,10 @@ def _run_symmetry_auto(args) -> int:
         raise SystemExit("symmetry-auto needs --atoms A B and --output DIR")
     atom_a, atom_b = args.atoms
     from .compute_threads import set_compute_threads
+    from .point_pool import configure_point_pool
     set_compute_threads(args.threads)
+    configure_point_pool(workers=args.point_workers, threads=args.threads,
+                         slot_dir=args.core_slots_dir, n_slots=args.core_slots)
     system_dir = args.output / f"{atom_a}{atom_b}"
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
     record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
@@ -2126,8 +2141,10 @@ def _run_symmetry_auto(args) -> int:
     extension = None
     if not args.no_open_pec_extension:
         print(f"[SYMMETRY AUTO] fragment asymptotes / open PECs {atom_a}{atom_b}", flush=True)
-        extension = run_open_pec_extension(summary=preliminary, output_dir=system_dir,
-                                           grid_level=args.grid_level)
+        from .point_pool import core_slot
+        with core_slot():
+            extension = run_open_pec_extension(summary=preliminary, output_dir=system_dir,
+                                               grid_level=args.grid_level)
     summary = to_legacy_summary(record, atomic=(extension or {}).get("atomic"))
     manifest = manifest_for_two_atoms(summary)
     _write_json(system_dir / "summary.json", summary)

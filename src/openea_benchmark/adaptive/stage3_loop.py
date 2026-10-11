@@ -244,50 +244,65 @@ def _is_retryable_result(
     return True
 
 
+def _execute_one_with_retries(
+    request: Stage3ExecutionRequest,
+    settings: Stage3ExecutionSettings,
+    retry_settings: Stage3LoopRetrySettings,
+    runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None,
+) -> tuple[Stage3PointResult, tuple[Stage3ExecutionAttempt, ...]]:
+    """Bounded retry chain of one request (module level: runs in pool workers)."""
+    attempts: list[Stage3ExecutionAttempt] = []
+    retry_index = 0
+    while True:
+        attempt_settings = (
+            settings
+            if retry_index == 0
+            else _settings_for_retry(settings, retry_index, retry_settings)
+        )
+        result = run_stage3_point(request, settings=attempt_settings, runner=runner)
+        attempts.append(Stage3ExecutionAttempt(
+            request_id=request.request_id,
+            attempt_index=retry_index,
+            status=result.status.value,
+            scf_max_cycle=attempt_settings.scf_max_cycle,
+            cc_max_cycle=attempt_settings.cc_max_cycle,
+            error_type=result.error_type,
+            error_message=result.error_message,
+        ))
+
+        if result.status is PointExecutionStatus.COMPLETED:
+            return result, tuple(attempts)
+
+        can_retry = (
+            _is_retryable_result(result, retry_settings)
+            and retry_index < retry_settings.max_retries_per_request
+        )
+        if not can_retry:
+            return result, tuple(attempts)
+
+        retry_index += 1
+
+
 def _execute_batch_with_retries(
     requests: Sequence[Stage3ExecutionRequest],
     *,
     settings: Stage3ExecutionSettings,
     retry_settings: Stage3LoopRetrySettings,
     runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None,
+    on_result: Callable[[int, tuple], None] | None = None,
 ) -> tuple[tuple[Stage3PointResult, ...], tuple[Stage3ExecutionAttempt, ...]]:
-    final_results: list[Stage3PointResult] = []
-    attempts: list[Stage3ExecutionAttempt] = []
+    # Requests of one batch are independent: they run concurrently on the shared
+    # point pool when one is configured (results and attempts stay in input order).
+    from ..point_pool import run_parallel
 
-    for request in requests:
-        retry_index = 0
-        while True:
-            attempt_settings = (
-                settings
-                if retry_index == 0
-                else _settings_for_retry(settings, retry_index, retry_settings)
-            )
-            result = run_stage3_point(request, settings=attempt_settings, runner=runner)
-            attempts.append(Stage3ExecutionAttempt(
-                request_id=request.request_id,
-                attempt_index=retry_index,
-                status=result.status.value,
-                scf_max_cycle=attempt_settings.scf_max_cycle,
-                cc_max_cycle=attempt_settings.cc_max_cycle,
-                error_type=result.error_type,
-                error_message=result.error_message,
-            ))
-
-            if result.status is PointExecutionStatus.COMPLETED:
-                final_results.append(result)
-                break
-
-            can_retry = (
-                _is_retryable_result(result, retry_settings)
-                and retry_index < retry_settings.max_retries_per_request
-            )
-            if not can_retry:
-                final_results.append(result)
-                break
-
-            retry_index += 1
-
-    return tuple(final_results), tuple(attempts)
+    outcomes = run_parallel(
+        _execute_one_with_retries,
+        [(request, settings, retry_settings, runner) for request in requests],
+        on_result=on_result,
+    )
+    final_results = tuple(result for result, _ in outcomes)
+    attempts = tuple(attempt for _, chain in outcomes for attempt in chain)
+    return final_results, attempts
 
 
 def execute_stage3_batch_with_retries(
@@ -296,6 +311,7 @@ def execute_stage3_batch_with_retries(
     settings: Stage3ExecutionSettings,
     retry_settings: Stage3LoopRetrySettings | None = None,
     runner: Callable[[Stage3ExecutionRequest, Stage3ExecutionSettings], Stage3PointResult] | None = None,
+    on_result: Callable[[int, tuple], None] | None = None,
 ) -> tuple[tuple[Stage3PointResult, ...], tuple[Stage3ExecutionAttempt, ...]]:
     """Execute one explicit Stage-3 batch using the canonical bounded retry policy.
 
@@ -312,6 +328,7 @@ def execute_stage3_batch_with_retries(
         settings=settings,
         retry_settings=retry_settings or Stage3LoopRetrySettings(),
         runner=runner,
+        on_result=on_result,
     )
 
 

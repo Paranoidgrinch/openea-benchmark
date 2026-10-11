@@ -40,6 +40,7 @@ from .attachment.component_resolved_cbs import (
     PRIMARY_EXPONENTS, extrapolate_species, ComponentPair, resolve_cbs,
 )
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner
+from .point_pool import run_parallel
 
 CARDINAL_LETTER = {2: "d", 3: "t", 4: "q", 5: "5", 6: "6"}
 TIGHT_D_ELEMENTS = frozenset({"Al", "Si", "P", "S", "Cl", "Ar"})
@@ -130,6 +131,10 @@ def _states_to_compute(ea: Mapping[str, Any], policy: CBSStagePolicy) -> list[di
     return states
 
 
+def _run_point(runner, request, settings):
+    return runner(request, settings)
+
+
 def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
                   point_records: Mapping[str, Mapping[str, Any]], refinement_dir: Path,
                   stage3_settings: Stage3ExecutionSettings, output_dir: Path,
@@ -161,6 +166,7 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         series.append((policy.high_cardinal, True))
     states = _states_to_compute(electronic_ea, policy)
     computed = []
+    jobs: list[tuple[dict, str, dict, Stage3ExecutionRequest]] = []
     for state in states:
         src = template[state["job_id"]]
         recs = _job_point_records(state["job_id"], point_records, Path(refinement_dir))
@@ -182,15 +188,20 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
                           source_link_status="CBS_BASIS_CONTINUATION_FROM_HIGH_LEVEL_REFERENCE",
                           reference_branch=SEED_CONTINUOUS_BRANCH)
             print(f"[CBS] {src.system} {state['job_id']} {label} R={state['r']:.5f}", flush=True)
-            res = runner(req, settings).to_dict()
-            state["points"][label] = {
-                "status": res["status"], "basis_by_element": prov,
-                "scf_energy_hartree": res["scf_energy_hartree"],
-                "ccsd_correlation_hartree": res["ccsd_correlation_hartree"],
-                "triples_correction_hartree": res["triples_correction_hartree"],
-                "ccsd_t_total_hartree": res["ccsd_t_total_hartree"],
-                "reference_warnings": res["reference_warnings"], "error_message": res.get("error_message")}
+            jobs.append((state, label, prov, req))
         computed.append(state)
+
+    # Every (state, basis) point is independent: concurrent on the point pool if configured.
+    results = run_parallel(_run_point, [(runner, req, settings) for _, _, _, req in jobs])
+    for (state, label, prov, _), result in zip(jobs, results):
+        res = result.to_dict()
+        state["points"][label] = {
+            "status": res["status"], "basis_by_element": prov,
+            "scf_energy_hartree": res["scf_energy_hartree"],
+            "ccsd_correlation_hartree": res["ccsd_correlation_hartree"],
+            "triples_correction_hartree": res["triples_correction_hartree"],
+            "ccsd_t_total_hartree": res["ccsd_t_total_hartree"],
+            "reference_warnings": res["reference_warnings"], "error_message": res.get("error_message")}
     record["states"] = computed
 
     def ok(state, label):

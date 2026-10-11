@@ -19,7 +19,8 @@ from .adaptive.stage3_execution import (
     PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings,
     Stage3PointResult, build_stage3_execution_requests,
 )
-from .adaptive.stage3_loop import execute_stage3_batch_with_retries
+from .adaptive.stage3_loop import Stage3LoopRetrySettings, _execute_one_with_retries
+from .point_pool import run_parallel
 from .open_pec_extension import apply_open_pec_extension, asymptote_review_from_extension
 from .reference_branches import (
     FOLLOWED_SUFFIX, MERGED_STATUS, SEED_SUFFIX, SUPERSEDED_STATUS, branches_identical,
@@ -268,28 +269,8 @@ def run_benchmark_acquisition(
 
     # Nothing gets silently skipped.  Each point is either cached, executed,
     # or explicitly pending, and the manifest fingerprint is verified on resume.
-    def run_point(req: Stage3ExecutionRequest) -> None:
-        nonlocal ran
-        record_path = point_dir / (sha256(req.request_id.encode()).hexdigest() + ".json")
-        fingerprint = _digest({"request": req.to_dict(), "batch": signature,
-                               "source_checkpoint_sha256": checkpoint_hashes.get(req.source_checkpoint_path)})
-        if record_path.exists():
-            existing = _load(record_path)
-            if existing.get("fingerprint") != fingerprint or existing.get("request_id") != req.request_id:
-                raise ValueError(f"Stale/conflicting point artifact: {record_path}")
-            status = existing["result"]["status"]
-            point_result_records[req.request_id] = existing["result"]
-            (completed if status == "COMPLETED" else failures).append(req.request_id)
-            return
-        if not settings.compute_points or ran >= settings.max_points:
-            pending.append(req.request_id)
-            return
-        print(f"[AUTO STAGE-3] {req.system} q={req.charge:+d} 2S={req.spin_2s} "
-              f"R={req.r_angstrom:.6f} A / {stage3_purpose}"
-              + (f" / {req.reference_branch}" if req.reference_branch else ""), flush=True)
-        (result,), attempts = execute_stage3_batch_with_retries(
-            (req,), settings=stage3_settings, runner=point_runner,
-        )
+    def save_point(req: Stage3ExecutionRequest, record_path: Path, fingerprint: str, outcome: tuple) -> None:
+        result, attempts = outcome
         _save(record_path, {
             "request_id": req.request_id, "fingerprint": fingerprint,
             "purpose": stage3_purpose, "request": req.to_dict(), "result": result.to_dict(),
@@ -297,12 +278,41 @@ def run_benchmark_acquisition(
             "scientific_release": bridge.release_status is Stage3ReleaseStatus.RELEASED,
             "validation_reference_used": False,
         })
-        point_result_records[req.request_id] = result.to_dict()
-        ran += 1
-        (completed if result.status is PointExecutionStatus.COMPLETED else failures).append(req.request_id)
 
-    for req in requests:
-        run_point(req)
+    def run_points(batch: Sequence[Stage3ExecutionRequest]) -> None:
+        """Cached points are reused, the rest run concurrently on the point pool (if any)."""
+        nonlocal ran
+        todo: list[tuple[Stage3ExecutionRequest, Path, str]] = []
+        for req in batch:
+            record_path = point_dir / (sha256(req.request_id.encode()).hexdigest() + ".json")
+            fingerprint = _digest({"request": req.to_dict(), "batch": signature,
+                                   "source_checkpoint_sha256": checkpoint_hashes.get(req.source_checkpoint_path)})
+            if record_path.exists():
+                existing = _load(record_path)
+                if existing.get("fingerprint") != fingerprint or existing.get("request_id") != req.request_id:
+                    raise ValueError(f"Stale/conflicting point artifact: {record_path}")
+                status = existing["result"]["status"]
+                point_result_records[req.request_id] = existing["result"]
+                (completed if status == "COMPLETED" else failures).append(req.request_id)
+                continue
+            if not settings.compute_points or ran + len(todo) >= settings.max_points:
+                pending.append(req.request_id)
+                continue
+            todo.append((req, record_path, fingerprint))
+        for req, _, _ in todo:
+            print(f"[AUTO STAGE-3] {req.system} q={req.charge:+d} 2S={req.spin_2s} "
+                  f"R={req.r_angstrom:.6f} A / {stage3_purpose}"
+                  + (f" / {req.reference_branch}" if req.reference_branch else ""), flush=True)
+        outcomes = run_parallel(
+            _execute_one_with_retries,
+            [(req, stage3_settings, Stage3LoopRetrySettings(), point_runner) for req, _, _ in todo],
+            on_result=lambda index, outcome: save_point(*todo[index], outcome))
+        for (req, _, _), (result, _) in zip(todo, outcomes):
+            point_result_records[req.request_id] = result.to_dict()
+            ran += 1
+            (completed if result.status is PointExecutionStatus.COMPLETED else failures).append(req.request_id)
+
+    run_points(requests)
 
     # Patch 38: a job mixing followed and unfollowed ROHF references is split
     # into two individually continuous reference branches (both computed at
@@ -314,8 +324,10 @@ def run_benchmark_acquisition(
         for parent in mixed_reference_jobs(requests, point_result_records):
             parent_reqs = [r for r in requests if r.job_id == parent]
             branch_reqs = build_branch_requests(parent_reqs, point_result_records, output_dir / "checkpoints")
+            # Followed-branch points are seeded from their neighbour's reference
+            # produced in this run, so branch points run one after another.
             for req in branch_reqs:
-                run_point(req)
+                run_points([req])
             requests.extend(branch_reqs)
             superseded[parent] = SUPERSEDED_STATUS
             for suffix in (SEED_SUFFIX, FOLLOWED_SUFFIX):

@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .point_pool import run_parallel
 from .state_candidates import candidate_spin_sectors, enumerate_state_candidates
 from .symmetry_states import (
     BlockOccupation, build_symmetric_molecule, enumerate_block_occupations, orbital_table, run_block_scf,
@@ -227,6 +228,7 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
                                          "irrep_nelec": [[k, list(v)] for k, v in o.irrep_nelec],
                                          "orbital_energy_sum": o.orbital_energy_sum} for o in plan["blocks"]]}
             _save(path, record)
+        todo = []
         for b in entry["plan"]["blocks"]:
             occ = BlockOccupation(_symmetry_from_label(b["label"]),
                                   tuple((k, tuple(v)) for k, v in b["irrep_nelec"]), b["orbital_energy_sum"])
@@ -234,11 +236,23 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
             if bid in entry["blocks"]:
                 continue
             print(f"[SYMMETRY SCOUT] {atom_a}{atom_b} q={charge:+d} {b['label']} {bid}", flush=True)
-            runner = scf_runner_factory(charge, occ) if scf_runner_factory else None
+            todo.append((b, bid, occ))
+
+        def store(index: int, scan: dict, entry=entry, todo=todo) -> None:
+            b, bid, _ = todo[index]
             entry["blocks"][bid] = {"label": b["label"], "two_s": b["two_s"], "irrep_nelec": b["irrep_nelec"],
-                                    **scan_block((atom_a, atom_b), charge, occ, r0, policy,
-                                                 output_dir / "symmetry_checkpoints", runner)}
+                                    **scan}
             _save(path, record)
+
+        # Blocks are independent scans (own seeds, own checkpoint names): they run
+        # concurrently on the point pool; injected test runners stay serial.
+        args = [((atom_a, atom_b), charge, occ, r0, policy, output_dir / "symmetry_checkpoints",
+                 scf_runner_factory(charge, occ) if scf_runner_factory else None) for _, _, occ in todo]
+        if scf_runner_factory:
+            for index, item in enumerate(args):
+                store(index, scan_block(*item))
+        else:
+            run_parallel(scan_block, args, on_result=store)
     return record
 
 

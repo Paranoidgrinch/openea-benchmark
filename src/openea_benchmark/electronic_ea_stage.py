@@ -105,24 +105,37 @@ def _result_from_record(record: Mapping[str, Any]) -> Stage3PointResult:
     return Stage3PointResult(**{**record, "status": PointExecutionStatus(record["status"])})
 
 
-def cached_point_runner(cache_dir: Path, settings_signature: str,
-                        backend: Callable[..., Stage3PointResult] | None = None):
-    """Stage-3 runner that persists every refinement point (resume without recompute)."""
-    cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
+class CachedPointRunner:
+    """Stage-3 runner that persists every refinement point (resume without recompute).
 
-    def runner(request: Stage3ExecutionRequest, settings: Stage3ExecutionSettings) -> Stage3PointResult:
+    A class rather than a closure so it can be shipped to point-pool workers.
+    """
+
+    def __init__(self, cache_dir: Path, settings_signature: str,
+                 backend: Callable[..., Stage3PointResult] | None = None):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.settings_signature = settings_signature
+        self.backend = backend
+
+    def __call__(self, request: Stage3ExecutionRequest, settings: Stage3ExecutionSettings) -> Stage3PointResult:
         fingerprint = sha256(json.dumps({"request": request.to_dict(), "settings": asdict(settings),
-                                         "batch": settings_signature}, sort_keys=True, default=str)
+                                         "batch": self.settings_signature}, sort_keys=True, default=str)
                              .encode()).hexdigest()
-        path = cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
+        path = self.cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
         if path.exists():
             return _result_from_record(json.loads(path.read_text())["result"])
-        result = run_stage3_point(request, settings=settings, runner=backend)
+        from .point_pool import core_slot
+        with core_slot():
+            result = run_stage3_point(request, settings=settings, runner=self.backend)
         _save_json(path, {"request_id": request.request_id, "fingerprint": fingerprint,
                           "request": request.to_dict(), "result": result.to_dict()})
         return result
-    return runner
+
+
+def cached_point_runner(cache_dir: Path, settings_signature: str,
+                        backend: Callable[..., Stage3PointResult] | None = None) -> CachedPointRunner:
+    return CachedPointRunner(cache_dir, settings_signature, backend)
 
 
 def _atomic_electrons(symbol: str, charge: int) -> int:
@@ -254,29 +267,9 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
 
     loops: dict[str, Any] = {}
     entries = {"neutral": [], "anion": []}
-    for job_id, job_reqs in sorted(by_job.items()):
-        review = pec_reviews.get(job_id, {})
-        done = [r for r in job_reqs if (point_records.get(r.request_id) or {}).get("status") == "COMPLETED"]
-        sampled = [point_records[r.request_id]["ccsd_t_total_hartree"] for r in done
-                   if point_records[r.request_id].get("ccsd_t_total_hartree") is not None]
-        entry = {"job_id": job_id, "charge": job_reqs[0].charge, "spin_2s": job_reqs[0].spin_2s,
-                 "lowest_sampled_hartree": min(sampled) if sampled else None,
-                 "loop_status": None, "bridge_status": None, "equilibrium_status": "NOT_ATTEMPTED",
-                 "energy_central_hartree": None, "energy_lower_hartree": None, "energy_upper_hartree": None,
-                 "r_central_angstrom": None, "branch_of": branch_parent(job_id),
-                 "reference_branch": job_reqs[0].reference_branch}
-        label = "neutral" if entry["charge"] == 0 else "anion"
-        entries[label].append(entry)
-        # An unbracketed high-level curve (minimum at the grid edge, e.g. because
-        # the DFT and CCSD(T) minima differ) is extended by the refinement loop
-        # rather than left as an unresolved D04 competitor.
-        eligible = (review.get("initialization_review") == "CLEARED"
-                    and review.get("geometry_continuity_review") == "CLEARED"
-                    and (review.get("pec") or {}).get("minimum_scout", {}).get("status")
-                    in ("BRACKETED_SINGLE_MINIMUM", "NO_BRACKETED_MINIMUM"))
-        if not eligible:
-            entry["equilibrium_status"] = "NOT_ELIGIBLE_REVIEW_NOT_CLEARED"
-            continue
+    work: list[tuple] = []
+
+    def refine(job_id: str, entry: dict, done: list) -> None:
         print(f"[ELECTRONIC EA] {system} refine {job_id}", flush=True)
         loop = run_stage3_refinement_loop(
             initial_requests=done, initial_results=[_result_from_record(point_records[r.request_id]) for r in done],
@@ -300,6 +293,39 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                              r_central_angstrom=eq.geometry_central_angstrom)
         else:
             entry["equilibrium_status"] = "BRIDGE_NOT_READY"
+
+    for job_id, job_reqs in sorted(by_job.items()):
+        review = pec_reviews.get(job_id, {})
+        done = [r for r in job_reqs if (point_records.get(r.request_id) or {}).get("status") == "COMPLETED"]
+        sampled = [point_records[r.request_id]["ccsd_t_total_hartree"] for r in done
+                   if point_records[r.request_id].get("ccsd_t_total_hartree") is not None]
+        entry = {"job_id": job_id, "charge": job_reqs[0].charge, "spin_2s": job_reqs[0].spin_2s,
+                 "lowest_sampled_hartree": min(sampled) if sampled else None,
+                 "loop_status": None, "bridge_status": None, "equilibrium_status": "NOT_ATTEMPTED",
+                 "energy_central_hartree": None, "energy_lower_hartree": None, "energy_upper_hartree": None,
+                 "r_central_angstrom": None, "branch_of": branch_parent(job_id),
+                 "reference_branch": job_reqs[0].reference_branch}
+        label = "neutral" if entry["charge"] == 0 else "anion"
+        entries[label].append(entry)
+        # An unbracketed high-level curve (minimum at the grid edge, e.g. because
+        # the DFT and CCSD(T) minima differ) is extended by the refinement loop
+        # rather than left as an unresolved D04 competitor.
+        eligible = (review.get("initialization_review") == "CLEARED"
+                    and review.get("geometry_continuity_review") == "CLEARED"
+                    and (review.get("pec") or {}).get("minimum_scout", {}).get("status")
+                    in ("BRACKETED_SINGLE_MINIMUM", "NO_BRACKETED_MINIMUM"))
+        if not eligible:
+            entry["equilibrium_status"] = "NOT_ELIGIBLE_REVIEW_NOT_CLEARED"
+            continue
+        work.append((job_id, entry, done))
+
+    # Refinement loops of different jobs are independent: with a point pool they run
+    # concurrently (threads here only wait; the calculations run in pool workers).
+    from concurrent.futures import ThreadPoolExecutor
+    from .point_pool import pool_workers
+    with ThreadPoolExecutor(max_workers=max(1, min(len(work), pool_workers()))) as executor:
+        for _ in executor.map(lambda item: refine(*item), work):
+            pass
 
     competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev)
                    for label, items in entries.items()}
