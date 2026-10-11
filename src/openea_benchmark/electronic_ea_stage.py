@@ -270,6 +270,15 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
     work: list[tuple] = []
 
     def refine(job_id: str, entry: dict, done: list) -> None:
+        # One job's refinement error is recorded on that candidate (fail closed in
+        # D04) instead of aborting the refinement of every other job.
+        try:
+            _refine(job_id, entry, done)
+        except Exception as exc:  # noqa: BLE001
+            entry["equilibrium_status"] = "REFINEMENT_ERROR"
+            entry["loop_rationale"] = f"{type(exc).__name__}: {exc}"
+
+    def _refine(job_id: str, entry: dict, done: list) -> None:
         print(f"[ELECTRONIC EA] {system} refine {job_id}", flush=True)
         loop = run_stage3_refinement_loop(
             initial_requests=done, initial_results=[_result_from_record(point_records[r.request_id]) for r in done],

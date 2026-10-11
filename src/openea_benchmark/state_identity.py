@@ -646,9 +646,12 @@ def compare_states(
         a,
         b,
     ):
-        if (
-            root.status
-            != SCFRunStatus.CANONICALIZED
+        # A converged root whose internal instability was *tested and recorded*
+        # (seed-continuous reference branch) is admitted as well: the comparison
+        # uses energy, <S^2> and the density fingerprint, not stability.
+        if not (
+            root.status == SCFRunStatus.CANONICALIZED
+            or (root.status == SCFRunStatus.CONVERGED and root.internal_stable is False)
         ):
             raise ValueError(
                 "state identity requires canonicalized roots"
