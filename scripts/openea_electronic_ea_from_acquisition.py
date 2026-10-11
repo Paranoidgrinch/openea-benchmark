@@ -35,15 +35,23 @@ def main() -> int:
     lib.num_threads(args.threads)
 
     acq = args.acquisition_dir
+    # Only points of the current Stage-3 plan (and its reference-branch jobs):
+    # an acquisition directory may hold records of jobs a later plan excluded.
+    plan_jobs = {job["job_id"] for job in json.loads((acq / "stage3_plan.json").read_text())["jobs"]}
+    reviews = json.loads((acq / "stage3_pec_reviews.json").read_text())
     requests, records = [], {}
     for path in sorted((acq / "points").glob("*.json")):
         data = json.loads(path.read_text())
+        job = data["request"]["job_id"]
+        if job not in plan_jobs and job not in reviews:
+            continue
+        if str((reviews.get(job) or {}).get("status", "")).startswith("SUPERSEDED"):
+            continue
         req = dict(data["request"])
         req["atoms"] = tuple(req["atoms"])
         req["methods"] = tuple(req["methods"])
         requests.append(Stage3ExecutionRequest(**req))
         records[data["request_id"]] = data["result"]
-    reviews = json.loads((acq / "stage3_pec_reviews.json").read_text())
     settings = Stage3ExecutionSettings(
         max_memory_mb=args.memory_mb, artifact_dir=str(acq / "checkpoints"),
         stability_following_max_steps=args.stability_following_steps,
