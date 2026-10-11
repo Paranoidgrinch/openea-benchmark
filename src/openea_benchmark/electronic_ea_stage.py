@@ -44,6 +44,7 @@ from .attachment.equilibrium import EquilibriumResolverSettings, EquilibriumStat
 from .attachment.fragment_execution import AtomicFragmentRequest, FragmentExecutionStatus, run_atomic_fragment
 from .attachment.stage3_bridge import Stage3AttachmentBridgeStatus, bridge_stage3_loop_to_attachment
 from .attachment.workflow import evaluate_stage3_electronic_ea
+from .reference_branches import branch_parent
 
 HARTREE_TO_EV = 27.211386245988
 
@@ -188,7 +189,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
                 "reason": f"no {label} candidate has a resolved equilibrium interval"}
     lowest = min(resolved, key=lambda e: e["energy_central_hartree"])
     upper = lowest["energy_upper_hartree"]
-    blocking, excluded = [], []
+    blocking, excluded, siblings = [], [], []
     for e in entries:
         if e is lowest:
             continue
@@ -197,6 +198,14 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
             blocking.append({"job_id": e["job_id"], "reason": "no energy evidence"})
             continue
         gap_ev = (floor - upper) * HARTREE_TO_EV
+        if lowest.get("branch_of") and e.get("branch_of") == lowest["branch_of"] and (
+                e["equilibrium_status"] == "RESOLVED" or gap_ev > 0.0):
+            # Same symmetry-labelled state, other ROHF reference branch: not a
+            # competitor; its CCSD(T) offset is the reference sensitivity.
+            siblings.append({"job_id": e["job_id"], "equilibrium_status": e["equilibrium_status"],
+                             "offset_ev": ((e["energy_central_hartree"] if e["energy_central_hartree"] is not None
+                                            else floor) - lowest["energy_central_hartree"]) * HARTREE_TO_EV})
+            continue
         if e["equilibrium_status"] == "RESOLVED" and gap_ev > 0.0:
             continue  # cleanly separated interval
         if e["equilibrium_status"] != "RESOLVED" and gap_ev > margin_ev:
@@ -206,6 +215,8 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
     return {"status": "CLEARED" if not blocking else "UNRESOLVED",
             "selected_job_id": lowest["job_id"] if not blocking else None,
             "lowest_job_id": lowest["job_id"], "blocking": blocking, "excluded_by_margin": excluded,
+            "reference_branch_siblings": siblings,
+            "reference_sensitivity_ev": max((abs(x["offset_ev"]) for x in siblings), default=0.0),
             "rule": "AUTOMATED_HIGH_LEVEL_D04: lowest resolved equilibrium interval must lie below every "
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}
 
@@ -252,7 +263,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                  "lowest_sampled_hartree": min(sampled) if sampled else None,
                  "loop_status": None, "bridge_status": None, "equilibrium_status": "NOT_ATTEMPTED",
                  "energy_central_hartree": None, "energy_lower_hartree": None, "energy_upper_hartree": None,
-                 "r_central_angstrom": None}
+                 "r_central_angstrom": None, "branch_of": branch_parent(job_id),
+                 "reference_branch": job_reqs[0].reference_branch}
         label = "neutral" if entry["charge"] == 0 else "anion"
         entries[label].append(entry)
         # An unbracketed high-level curve (minimum at the grid edge, e.g. because
@@ -315,6 +327,13 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         # equilibrium-resolution uncertainty of this single basis; it is a
         # number for the next layers, not a bound/unbound verdict.
         lower, upper, central, sign = single_basis_ea_interval(neutral, anion)
+        # Reference-branch sensitivity widens the interval on both sides; it is
+        # an uncertainty of the single-reference treatment, not a correction.
+        widen = (competition["neutral"].get("reference_sensitivity_ev", 0.0)
+                 + competition["anion"].get("reference_sensitivity_ev", 0.0))
+        if widen:
+            lower, upper = lower - widen, upper + widen
+            sign = "POSITIVE" if lower > 0.0 else ("NEGATIVE" if upper <= 0.0 else "STRADDLES_ZERO")
         result = evaluate_stage3_electronic_ea(
             neutral_loop_result=loops[n_id], anion_loop_result=loops[a_id],
             equilibrium_settings=policy.equilibrium(), anion_dissociation_channels=channels,
@@ -325,6 +344,7 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         record.update(status="ELECTRONIC_EA_EVALUATED", selected_neutral_job=n_id, selected_anion_job=a_id,
                       ea_lower_ev=lower, ea_upper_ev=upper, ea_central_ev=central, sign_at_this_level=sign,
                       interval_scope="EQUILIBRIUM_RESOLUTION_ONLY_NO_BASIS_ZPE_CORRELATION_UNCERTAINTY",
+                      reference_sensitivity_ev=widen,
                       single_basis_decision_audit_only=result.status.value,
                       decision_rationale=list(d.rationale), evidence=list(result.evidence),
                       anion_binding=None if result.anion_binding is None else {

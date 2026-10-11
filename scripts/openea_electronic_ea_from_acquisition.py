@@ -27,6 +27,8 @@ def main() -> int:
     parser.add_argument("--stability-following-steps", type=int, default=4)
     parser.add_argument("--rhf-external-instability", default="RECORD_AND_CONTINUE")
     parser.add_argument("--output-name", default="electronic_ea")
+    parser.add_argument("--cbs", action="store_true", help="also run the frozen-core CBS layer")
+    parser.add_argument("--cbs-memory-mb", type=int, default=48000)
     args = parser.parse_args()
 
     from pyscf import lib
@@ -56,6 +58,14 @@ def main() -> int:
     summary["competition"] = {k: v["status"] for k, v in result["high_level_competition"].items()}
     summary["candidates"] = {lab: [(c["job_id"].split("__manifold")[0], c["loop_status"], c["equilibrium_status"])
                                    for c in items] for lab, items in result["candidates"].items()}
+    if args.cbs:
+        from openea_benchmark.cbs_stage import CBSStagePolicy, run_cbs_stage
+        cbs = run_cbs_stage(electronic_ea=result, requests=requests, point_records=records,
+                            refinement_dir=acq / args.output_name / "refinement_points", stage3_settings=settings,
+                            output_dir=acq / (args.output_name + "_cbs"),
+                            policy=CBSStagePolicy(max_memory_mb=args.cbs_memory_mb))
+        summary["cbs"] = {k: cbs.get(k) for k in ("status", "reason", "ea_cbs_ev", "ea_cbs_lower_ev",
+                                                  "ea_cbs_upper_ev", "fixed_basis_ea_ev")}
     print(json.dumps(summary, indent=2))
     return 0
 

@@ -505,6 +505,7 @@ def build_stage3_refinement_requests(
                 irrep_nelec=(None if source_request.irrep_nelec is None
                              else dict(source_request.irrep_nelec)),
                 symmetry_label=source_request.symmetry_label,
+                reference_branch=source_request.reference_branch,
             ))
         geometry_index += 1
 

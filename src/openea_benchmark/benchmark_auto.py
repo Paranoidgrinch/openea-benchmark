@@ -21,6 +21,10 @@ from .adaptive.stage3_execution import (
 )
 from .adaptive.stage3_loop import execute_stage3_batch_with_retries
 from .open_pec_extension import apply_open_pec_extension, asymptote_review_from_extension
+from .reference_branches import (
+    FOLLOWED_SUFFIX, MERGED_STATUS, SEED_SUFFIX, SUPERSEDED_STATUS, branches_identical,
+    build_branch_requests, mixed_reference_jobs,
+)
 from .state_selection import build_state_selection_report
 
 
@@ -123,6 +127,11 @@ class AcquisitionSettings:
     rhf_external_instability_policy: str = "FAIL"
     # Refine cleared Stage-3 PECs and assemble the single-basis electronic EA.
     assemble_electronic_ea: bool = False
+    # Patch 38: split jobs mixing followed/unfollowed ROHF references.
+    reference_branch_splitting: bool = True
+    # Patch 39: frozen-core aug-cc-pV{Q,5}Z (+d-aug) CBS after the electronic EA.
+    cbs_stage: bool = False
+    cbs_memory_mb: int = 48000
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -259,7 +268,8 @@ def run_benchmark_acquisition(
 
     # Nothing gets silently skipped.  Each point is either cached, executed,
     # or explicitly pending, and the manifest fingerprint is verified on resume.
-    for req in requests:
+    def run_point(req: Stage3ExecutionRequest) -> None:
+        nonlocal ran
         record_path = point_dir / (sha256(req.request_id.encode()).hexdigest() + ".json")
         fingerprint = _digest({"request": req.to_dict(), "batch": signature,
                                "source_checkpoint_sha256": checkpoint_hashes.get(req.source_checkpoint_path)})
@@ -270,12 +280,13 @@ def run_benchmark_acquisition(
             status = existing["result"]["status"]
             point_result_records[req.request_id] = existing["result"]
             (completed if status == "COMPLETED" else failures).append(req.request_id)
-            continue
+            return
         if not settings.compute_points or ran >= settings.max_points:
             pending.append(req.request_id)
-            continue
+            return
         print(f"[AUTO STAGE-3] {req.system} q={req.charge:+d} 2S={req.spin_2s} "
-              f"R={req.r_angstrom:.6f} A / {stage3_purpose}", flush=True)
+              f"R={req.r_angstrom:.6f} A / {stage3_purpose}"
+              + (f" / {req.reference_branch}" if req.reference_branch else ""), flush=True)
         (result,), attempts = execute_stage3_batch_with_retries(
             (req,), settings=stage3_settings, runner=point_runner,
         )
@@ -290,6 +301,31 @@ def run_benchmark_acquisition(
         ran += 1
         (completed if result.status is PointExecutionStatus.COMPLETED else failures).append(req.request_id)
 
+    for req in requests:
+        run_point(req)
+
+    # Patch 38: a job mixing followed and unfollowed ROHF references is split
+    # into two individually continuous reference branches (both computed at
+    # every point); the parent is superseded.  Branch checkpoints are produced
+    # in this run, so their (absent) source hashes stay out of the fingerprint.
+    superseded: dict[str, str] = {}
+    branch_jobs: list[dict] = []
+    if settings.reference_branch_splitting and not pending:
+        for parent in mixed_reference_jobs(requests, point_result_records):
+            parent_reqs = [r for r in requests if r.job_id == parent]
+            branch_reqs = build_branch_requests(parent_reqs, point_result_records, output_dir / "checkpoints")
+            for req in branch_reqs:
+                run_point(req)
+            requests.extend(branch_reqs)
+            superseded[parent] = SUPERSEDED_STATUS
+            for suffix in (SEED_SUFFIX, FOLLOWED_SUFFIX):
+                if any(r.job_id == parent + suffix for r in branch_reqs):
+                    branch_jobs.append({"job_id": parent + suffix})
+            seed_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + SEED_SUFFIX]
+            fol_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + FOLLOWED_SUFFIX]
+            if branches_identical(seed_recs, fol_recs):
+                superseded[parent + FOLLOWED_SUFFIX] = MERGED_STATUS
+
     # Call existing high-level identity/PEC analysis automatically for each
     # completed job.  WEEKEND_* thresholds are explicitly a pilot policy;
     # never promote these diagnostics to a production identity decision.
@@ -297,9 +333,12 @@ def run_benchmark_acquisition(
     from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
     from .adaptive.stage3_axial_symmetry import AxialSymmetryPolicy
     from .workflow import WEEKEND_IDENTITY_THRESHOLDS, WEEKEND_BRANCH_THRESHOLDS
-    for job in jobs:
+    for job in (*jobs, *branch_jobs):
         job_reqs = [r for r in requests if r.job_id == job["job_id"]]
         if not job_reqs:
+            continue
+        if job["job_id"] in superseded:
+            pec_reviews[job["job_id"]] = {"status": superseded[job["job_id"]]}
             continue
         if any(r.request_id in pending for r in job_reqs):
             pec_reviews[job["job_id"]] = {"status": "WAITING_FOR_COMPLETE_POINTS"}
@@ -350,12 +389,23 @@ def run_benchmark_acquisition(
     if settings.assemble_electronic_ea and settings.compute_points and not pending:
         from .electronic_ea_stage import run_electronic_ea_stage
         electronic_ea = run_electronic_ea_stage(
-            system=system, atoms=tuple(manifest_system["atoms"]), requests=requests,
+            system=system, atoms=tuple(manifest_system["atoms"]),
+            requests=[r for r in requests if r.job_id not in superseded],
             point_records=point_result_records, pec_reviews=pec_reviews,
             stage3_settings=stage3_settings, output_dir=output_dir / "electronic_ea",
             point_backend=point_runner,
         )
         electronic_ea["stage3_purpose"] = stage3_purpose
+
+    cbs = None
+    if electronic_ea is not None and settings.cbs_stage:
+        from .cbs_stage import CBSStagePolicy, run_cbs_stage
+        cbs = run_cbs_stage(
+            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
+            point_records=point_result_records,
+            refinement_dir=output_dir / "electronic_ea" / "refinement_points",
+            stage3_settings=stage3_settings, output_dir=output_dir / "cbs",
+            policy=CBSStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
     state = {
@@ -365,6 +415,7 @@ def run_benchmark_acquisition(
         "stage3_release": bridge.release_status.value,
         "stage3_blocking_reasons": list(bridge.blocking_reasons),
         "open_pec_extension_applied": open_pec_extension is not None,
+        "reference_branch_splits": {job: status for job, status in superseded.items()},
         # Wigner-Witmer labels that no single high-spin determinant represents
         # (e.g. 1Delta, open-shell singlets): not computed, an explicit gap.
         "mr_only_candidates_not_computed": [
@@ -411,6 +462,11 @@ def run_benchmark_acquisition(
         } | {"high_level_competition": {
             label: {k: v for k, v in c.items() if k in ("status", "selected_job_id", "lowest_job_id")}
             for label, c in electronic_ea["high_level_competition"].items()}},
+        "cbs": None if cbs is None else {
+            k: cbs.get(k) for k in ("status", "reason", "ea_cbs_ev", "ea_cbs_lower_ev", "ea_cbs_upper_ev",
+                                    "fixed_basis_ea_ev", "competitor_ranking_at_cbs", "verdict")}
+        | {"diffuse_correction_ev": (cbs.get("cbs") or {}).get("diffuse_correction_ev"),
+           "model_sensitivity_ev": (cbs.get("cbs") or {}).get("cbs_model_sensitivity_bound_ev")},
         "ground_state_validated": False, "ea_computed": False,
         "state_competition_cleared": False,
         "automatic_pruning_performed": False,

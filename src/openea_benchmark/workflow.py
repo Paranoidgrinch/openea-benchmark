@@ -2087,6 +2087,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop after Stage-3 acquisition (skip refinement, equilibrium, fragments and electronic EA)",
     )
     parser.add_argument(
+        "--no-cbs", action="store_true",
+        help="Skip the frozen-core aug-cc-pV{Q,5}Z (+d-aug) CBS layer after the electronic EA",
+    )
+    parser.add_argument(
+        "--cbs-memory-mb", type=int, default=48000,
+        help="PySCF memory for the CBS-layer CCSD(T) points",
+    )
+    parser.add_argument(
         "--no-open-pec-extension", action="store_true",
         help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
     )
@@ -2132,6 +2140,8 @@ def _run_symmetry_auto(args) -> int:
             stability_following_max_steps=args.stability_following_steps,
             rhf_external_instability_policy=args.rhf_external_instability,
             assemble_electronic_ea=not args.no_electronic_ea,
+            cbs_stage=not args.no_cbs and not args.no_electronic_ea,
+            cbs_memory_mb=args.cbs_memory_mb,
         ),
     )
     print("[SYMMETRY AUTO] " + json.dumps({
@@ -2139,6 +2149,7 @@ def _run_symmetry_auto(args) -> int:
         "completed": state["completed_point_count"], "failed": state["failed_point_count"],
         "mr_only_candidates": len(summary["mr_only_candidates"]),
         "electronic_ea": state.get("electronic_ea"),
+        "cbs": state.get("cbs"),
     }, default=str), flush=True)
     return 0
 

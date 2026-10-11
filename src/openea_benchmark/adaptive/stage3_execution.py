@@ -107,6 +107,16 @@ class Stage3ExecutionSettings:
             raise ValueError("artifact_dir must be non-empty when supplied")
 
 
+# SEED_CONTINUOUS: the reference converged from the seed is kept even when an
+# internal instability exists (recorded, never followed), so the branch stays
+# continuous.  STABILITY_FOLLOWED: the lower reference reached by following,
+# propagated along R from point to point.
+SEED_CONTINUOUS_BRANCH = "SEED_CONTINUOUS"
+STABILITY_FOLLOWED_BRANCH = "STABILITY_FOLLOWED"
+REFERENCE_BRANCHES = (None, SEED_CONTINUOUS_BRANCH, STABILITY_FOLLOWED_BRANCH)
+INSTABILITY_NOT_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_RECORDED_SEED_BRANCH_KEPT"
+
+
 @dataclass(frozen=True)
 class Stage3ExecutionRequest:
     request_id: str
@@ -137,8 +147,13 @@ class Stage3ExecutionRequest:
     point_group: str | None = None
     irrep_nelec: Mapping[str, tuple[int, int]] | None = None
     symmetry_label: str | None = None
+    # Reference branch of a job whose ROHF references split into two
+    # solutions along R (see REFERENCE_BRANCHES); None = default behaviour.
+    reference_branch: str | None = None
 
     def __post_init__(self) -> None:
+        if self.reference_branch not in REFERENCE_BRANCHES:
+            raise ValueError(f"unknown reference_branch {self.reference_branch!r}")
         if not self.request_id.strip() or not self.job_id.strip():
             raise ValueError("Execution request requires stable IDs")
         if len(self.atoms) != 2 or any(not str(x).strip() for x in self.atoms):
@@ -531,11 +546,13 @@ def _run_stage3_point_pyscf(
     # because a saddle point frequently stalls DIIS.
     following_steps = 0
     internal_stable: bool | None = None
-    if mf.converged or settings.stability_following_max_steps > 0:
+    seed_branch = request.reference_branch == SEED_CONTINUOUS_BRANCH
+    max_following = 0 if seed_branch else settings.stability_following_max_steps
+    if mf.converged or max_following > 0:
         mo_i, _, stable_i, _ = mf.stability(internal=True, external=False, return_status=True)
         internal_stable = bool(stable_i)
         while (
-            following_steps < settings.stability_following_max_steps
+            following_steps < max_following
             and not (internal_stable and mf.converged)
         ):
             mf.kernel(dm0=mf.make_rdm1(mo_i, mf.mo_occ))
@@ -591,7 +608,10 @@ def _run_stage3_point_pyscf(
         external_stable=external_stable,
     )
 
-    if settings.require_internal_stability and not internal_stable:
+    if seed_branch and internal_stable is False:
+        warnings.append(INSTABILITY_NOT_FOLLOWED_WARNING)
+        common.update(reference_warnings=tuple(warnings))
+    elif settings.require_internal_stability and not internal_stable:
         return _empty_result(request, PointExecutionStatus.SCF_UNSTABLE, **common)
     if external_stable is False:
         if settings.rhf_external_instability_policy == "FAIL":
