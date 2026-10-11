@@ -7,7 +7,7 @@ from openea_benchmark.adaptive.stage3_execution import Stage3ExecutionRequest
 from openea_benchmark.adaptive.stage3_naming import checkpoint_artifact_basename
 from openea_benchmark.electronic_ea_stage import _competition
 from openea_benchmark.reference_branches import (
-    branch_parent, branches_identical, build_branch_requests, mixed_reference_jobs,
+    branch_parent, branches_identical, build_branch_requests, followed_only_jobs, mixed_reference_jobs,
 )
 
 H = 1.0 / 27.211386245988
@@ -81,3 +81,18 @@ def test_reference_branches_of_one_state_do_not_compete():
     # a genuine other state inside the interval still blocks
     blocked = _competition("neutral", [entry("p__refS", -1.0, "p"), entry("q", -1.0 + 1e-6)], 1.0)
     assert blocked["status"] == "UNRESOLVED"
+
+
+def test_followed_everywhere_uses_single_lowest_scf_anchor(tmp_path):
+    """v2 AlO X2Sigma+: every point followed, reaching different ROHF solutions."""
+    reqs = [request(i, r) for i, r in enumerate(RS)]
+    recs = records(reqs, set(RS))
+    scf = dict(zip(RS, (-316.7651, -316.7654, -316.7696, -316.7606, -316.7573)))
+    for r in reqs:
+        recs[r.request_id]["scf_energy_hartree"] = scf[r.r_angstrom]
+    assert followed_only_jobs(reqs, recs) == ["AlO__q+0__2Sigma+"]
+    assert followed_only_jobs(reqs, records(reqs, {1.62})) == []
+    fol = [r for r in build_branch_requests(reqs, recs, tmp_path) if r.reference_branch == "STABILITY_FOLLOWED"]
+    assert [r.r_angstrom for r in fol] == [1.595, 1.57, 1.62, 1.545, 1.645]
+    assert fol[0].source_link_status == "REFERENCE_BRANCH_ANCHOR"
+    assert all(r.source_link_status == "REFERENCE_BRANCH_NEIGHBOUR_CONTINUATION" for r in fol[1:])

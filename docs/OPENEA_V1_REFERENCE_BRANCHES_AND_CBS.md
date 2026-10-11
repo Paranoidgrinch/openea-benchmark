@@ -25,6 +25,13 @@ The job mixed two curves and the continuity review rejected it (fail-closed, cor
   recorded as `reference_sensitivity_ev` and widens the EA interval on both sides.
   A second reference solution is itself a hint of multireference character.
 - `Stage3ExecutionRequest.reference_branch` is carried into refinement/D12 requests.
+- v2 rerun (2026-10-11, scout bisection moved the grid): every AlO X2Sigma+ point
+  followed an instability, but to *different* solutions (SCF -316.7651/-316.7654/
+  -316.7696/-316.7606/-316.7573 Eh), so nothing was "mixed" and the job stayed
+  rejected.  Jobs where every point followed and the continuity review is not
+  CLEARED are now split as well; the followed branch starts from the single
+  lowest-SCF followed point and continues neighbour to neighbour.  Seed-branch
+  points run concurrently, followed-branch points in order.
 
 Real check (AlO X2Sigma+, R = 1.62 Å, seed branch): CCSD(T) -317.264295 Eh, smooth
 with the unfollowed points (followed branch: -317.262164 Eh).
@@ -50,5 +57,9 @@ CLI on by default in `symmetry-auto`, `--no-cbs`, `--cbs-memory-mb`; also
   diffuse correction, NEED_MORE_EVIDENCE if model sensitivity exceeds 0.005 eV).
 - Competitors are re-ranked with their primary CBS energy; any competitor not above
   the selected state gives `UNRESOLVED_STATE_ORDER_AT_CBS`.
+- Each state's basis series runs in order (states concurrently on the point pool); a
+  point that fails from the projected TZ reference is retried once from the previous
+  completed basis of the same state with doubled cycles (`reseeded` in cbs.json).
+  Seen for the NO and O2 anions in d-aug-cc-pV5Z.
 - Not a production EA: no core-valence, scalar relativity, SOC, post-CCSD(T), ZPE,
   anion-binding layers; `verdict = NOT_ISSUED_NO_CV_SR_ZPE_BINDING_LAYERS`.

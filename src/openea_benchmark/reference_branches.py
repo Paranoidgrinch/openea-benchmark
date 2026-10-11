@@ -15,6 +15,9 @@ as separate, individually continuous jobs:
 * ``<job>__refF`` (STABILITY_FOLLOWED): starting at the points where following
   happened, propagated from neighbour to neighbour along R (each point seeded
   from the already computed high-level reference next to it), following on.
+  If following happened at every point and the curve is not continuous (v2
+  AlO X2Sigma+: each point reached a different solution), the job is split too
+  and the followed branch starts from the single lowest-SCF followed point.
 
 The parent job is superseded.  Both branches describe the same symmetry-
 labelled state; the electronic-EA stage compares them by their CCSD(T)
@@ -60,6 +63,20 @@ def mixed_reference_jobs(requests: Sequence[Stage3ExecutionRequest],
                   if any(s > 0 for s in steps) and any(s == 0 for s in steps))
 
 
+def followed_only_jobs(requests: Sequence[Stage3ExecutionRequest],
+                       records: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """Jobs (>= 2 completed points) where every completed point followed an instability."""
+    by_job: dict[str, list[int]] = {}
+    for req in requests:
+        if req.reference_branch is not None:
+            continue
+        rec = records.get(req.request_id) or {}
+        if rec.get("status") != "COMPLETED":
+            continue
+        by_job.setdefault(req.job_id, []).append(int(rec.get("stability_following_steps") or 0))
+    return sorted(job for job, steps in by_job.items() if len(steps) >= 2 and all(s > 0 for s in steps))
+
+
 def _branch_request(req: Stage3ExecutionRequest, suffix: str, branch: str, **changes) -> Stage3ExecutionRequest:
     return replace(req, request_id=req.request_id + suffix, job_id=req.job_id + suffix,
                    reference_branch=branch, **changes)
@@ -85,6 +102,12 @@ def build_branch_requests(parent_requests: Sequence[Stage3ExecutionRequest],
                    if int(records[r.request_id].get("stability_following_steps") or 0) > 0]
         if not anchors:
             continue
+        if len(anchors) == len(line) and len(line) > 1:
+            # Following happened everywhere (and may have reached different
+            # solutions): one anchor only, the lowest-SCF followed reference,
+            # continued from neighbour to neighbour.
+            anchors = [min(anchors, key=lambda i: float(records[line[i].request_id].get("scf_energy_hartree")
+                                                         or float("inf")))]
         order = sorted(range(len(line)), key=lambda i: (min(abs(i - a) for a in anchors), i))
         for i in order:
             req = line[i]

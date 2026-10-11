@@ -24,7 +24,7 @@ from .point_pool import run_parallel
 from .open_pec_extension import apply_open_pec_extension, asymptote_review_from_extension
 from .reference_branches import (
     FOLLOWED_SUFFIX, MERGED_STATUS, SEED_SUFFIX, SUPERSEDED_STATUS, branches_identical,
-    build_branch_requests, mixed_reference_jobs,
+    build_branch_requests, followed_only_jobs, mixed_reference_jobs,
 )
 from .state_selection import build_state_selection_report
 
@@ -314,30 +314,6 @@ def run_benchmark_acquisition(
 
     run_points(requests)
 
-    # Patch 38: a job mixing followed and unfollowed ROHF references is split
-    # into two individually continuous reference branches (both computed at
-    # every point); the parent is superseded.  Branch checkpoints are produced
-    # in this run, so their (absent) source hashes stay out of the fingerprint.
-    superseded: dict[str, str] = {}
-    branch_jobs: list[dict] = []
-    if settings.reference_branch_splitting and not pending:
-        for parent in mixed_reference_jobs(requests, point_result_records):
-            parent_reqs = [r for r in requests if r.job_id == parent]
-            branch_reqs = build_branch_requests(parent_reqs, point_result_records, output_dir / "checkpoints")
-            # Followed-branch points are seeded from their neighbour's reference
-            # produced in this run, so branch points run one after another.
-            for req in branch_reqs:
-                run_points([req])
-            requests.extend(branch_reqs)
-            superseded[parent] = SUPERSEDED_STATUS
-            for suffix in (SEED_SUFFIX, FOLLOWED_SUFFIX):
-                if any(r.job_id == parent + suffix for r in branch_reqs):
-                    branch_jobs.append({"job_id": parent + suffix})
-            seed_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + SEED_SUFFIX]
-            fol_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + FOLLOWED_SUFFIX]
-            if branches_identical(seed_recs, fol_recs):
-                superseded[parent + FOLLOWED_SUFFIX] = MERGED_STATUS
-
     # Call existing high-level identity/PEC analysis automatically for each
     # completed job.  WEEKEND_* thresholds are explicitly a pilot policy;
     # never promote these diagnostics to a production identity decision.
@@ -345,16 +321,13 @@ def run_benchmark_acquisition(
     from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
     from .adaptive.stage3_axial_symmetry import AxialSymmetryPolicy
     from .workflow import WEEKEND_IDENTITY_THRESHOLDS, WEEKEND_BRANCH_THRESHOLDS
-    for job in (*jobs, *branch_jobs):
-        job_reqs = [r for r in requests if r.job_id == job["job_id"]]
+
+    def review_job(job_id: str) -> dict | None:
+        job_reqs = [r for r in requests if r.job_id == job_id]
         if not job_reqs:
-            continue
-        if job["job_id"] in superseded:
-            pec_reviews[job["job_id"]] = {"status": superseded[job["job_id"]]}
-            continue
+            return None
         if any(r.request_id in pending for r in job_reqs):
-            pec_reviews[job["job_id"]] = {"status": "WAITING_FOR_COMPLETE_POINTS"}
-            continue
+            return {"status": "WAITING_FOR_COMPLETE_POINTS"}
         # A failed point is never silently replaced by a sibling: the review
         # runs on the completed subset only, lists every excluded request and
         # is labelled PARTIAL, so it cannot be mistaken for full coverage.
@@ -366,8 +339,7 @@ def run_benchmark_acquisition(
             for r in job_reqs if r.request_id not in completed
         ]
         if not reviewed_reqs:
-            pec_reviews[job["job_id"]] = {"status": "NO_COMPLETED_POINTS", "excluded_failed_points": excluded}
-            continue
+            return {"status": "NO_COMPLETED_POINTS", "excluded_failed_points": excluded}
         job_results = [
             Stage3PointResult(**{**point_result_records[r.request_id],
                                  "status": PointExecutionStatus(point_result_records[r.request_id]["status"])})
@@ -380,7 +352,7 @@ def run_benchmark_acquisition(
                 branch_thresholds=WEEKEND_BRANCH_THRESHOLDS,
                 axial_symmetry_policy=AxialSymmetryPolicy(),
             )
-            pec_reviews[job["job_id"]] = {
+            return {
                 "status": "DIAGNOSTIC_ONLY" if not excluded else "DIAGNOSTIC_ONLY_PARTIAL",
                 "complete_point_coverage": not excluded,
                 "excluded_failed_points": excluded,
@@ -392,9 +364,50 @@ def run_benchmark_acquisition(
                 "threshold_policy": "WEEKEND_PILOT_NOT_PRODUCTION",
             }
         except Exception as exc:
-            pec_reviews[job["job_id"]] = {
-                "status": "UNRESOLVED", "reason": f"{type(exc).__name__}: {exc}",
-                "excluded_failed_points": excluded}
+            return {"status": "UNRESOLVED", "reason": f"{type(exc).__name__}: {exc}",
+                    "excluded_failed_points": excluded}
+
+    # Patch 38: a job mixing followed and unfollowed ROHF references (or landing on
+    # different followed solutions) is split
+    # into two individually continuous reference branches (both computed at
+    # every point); the parent is superseded.  Branch checkpoints are produced
+    # in this run, so their (absent) source hashes stay out of the fingerprint.
+    superseded: dict[str, str] = {}
+    branch_jobs: list[dict] = []
+    if settings.reference_branch_splitting and not pending:
+        to_split = set(mixed_reference_jobs(requests, point_result_records))
+        # A job whose every point followed an instability but whose curve is not
+        # continuous landed on different ROHF solutions at different R: split too.
+        for parent in followed_only_jobs(requests, point_result_records):
+            review = review_job(parent) or {}
+            if review.get("geometry_continuity_review") not in (None, "CLEARED"):
+                to_split.add(parent)
+        for parent in sorted(to_split):
+            parent_reqs = [r for r in requests if r.job_id == parent]
+            branch_reqs = build_branch_requests(parent_reqs, point_result_records, output_dir / "checkpoints")
+            # Seed-branch points are independent (concurrent); followed-branch points
+            # are seeded from their neighbour's reference produced in this run.
+            run_points([r for r in branch_reqs if r.job_id == parent + SEED_SUFFIX])
+            for req in branch_reqs:
+                if req.job_id == parent + FOLLOWED_SUFFIX:
+                    run_points([req])
+            requests.extend(branch_reqs)
+            superseded[parent] = SUPERSEDED_STATUS
+            for suffix in (SEED_SUFFIX, FOLLOWED_SUFFIX):
+                if any(r.job_id == parent + suffix for r in branch_reqs):
+                    branch_jobs.append({"job_id": parent + suffix})
+            seed_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + SEED_SUFFIX]
+            fol_recs = [point_result_records.get(r.request_id, {}) for r in branch_reqs if r.job_id == parent + FOLLOWED_SUFFIX]
+            if branches_identical(seed_recs, fol_recs):
+                superseded[parent + FOLLOWED_SUFFIX] = MERGED_STATUS
+
+    for job in (*jobs, *branch_jobs):
+        if job["job_id"] in superseded:
+            pec_reviews[job["job_id"]] = {"status": superseded[job["job_id"]]}
+            continue
+        review = review_job(job["job_id"])
+        if review is not None:
+            pec_reviews[job["job_id"]] = review
     _save(output_dir / "stage3_pec_reviews.json", pec_reviews)
 
     electronic_ea = None
