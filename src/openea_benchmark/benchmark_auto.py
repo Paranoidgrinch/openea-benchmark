@@ -247,8 +247,8 @@ def run_benchmark_acquisition(
         raise ValueError("Duplicate cross-job Stage-3 point request IDs")
 
     if settings.compute_points and requests and point_runner is None:
-        from pyscf import lib
-        lib.num_threads(settings.threads)
+        from .compute_threads import set_compute_threads
+        set_compute_threads(settings.threads)
 
     stage3_settings = Stage3ExecutionSettings(
         max_memory_mb=settings.memory_mb,

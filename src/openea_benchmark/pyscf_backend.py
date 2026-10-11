@@ -925,9 +925,8 @@ def run_scf_attempt(
     if settings is None:
         settings = SCFSettings()
 
-    lib.num_threads(
-        settings.num_threads
-    )
+    from .compute_threads import set_compute_threads
+    set_compute_threads(settings.num_threads)
 
     guess = str(guess).strip()
 

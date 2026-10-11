@@ -2117,7 +2117,8 @@ def _run_symmetry_auto(args) -> int:
     if not args.atoms or args.output is None:
         raise SystemExit("symmetry-auto needs --atoms A B and --output DIR")
     atom_a, atom_b = args.atoms
-    pyscf_lib.num_threads(args.threads)
+    from .compute_threads import set_compute_threads
+    set_compute_threads(args.threads)
     system_dir = args.output / f"{atom_a}{atom_b}"
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
     record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
@@ -2241,7 +2242,8 @@ def main(
             else:
                 from pyscf import lib as pyscf_lib
                 from .open_pec_extension import run_open_pec_extension
-                pyscf_lib.num_threads(args.threads)
+                from .compute_threads import set_compute_threads
+                set_compute_threads(args.threads)
                 print(f"[BENCHMARK AUTO] EXTEND_OPEN_PEC / fragment asymptotes for {name}", flush=True)
                 extension = run_open_pec_extension(
                     summary=summary, output_dir=output_root / name, grid_level=args.grid_level,
