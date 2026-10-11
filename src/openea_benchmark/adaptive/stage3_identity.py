@@ -201,7 +201,9 @@ def _root_for_high_level_result(
         origin_guess=request.source_root_id,
         scf_path="stage3_high_level_hf",
         reference=request.scf_reference,
-        status=SCFRunStatus.CANONICALIZED,
+        # A seed-continuous reference branch keeps an internally unstable ROHF
+        # solution on purpose (recorded); it is converged, not canonicalized.
+        status=(SCFRunStatus.CANONICALIZED if result.internal_stable is True else SCFRunStatus.CONVERGED),
         energy_hartree=float(result.scf_energy_hartree),
         internal_stable=result.internal_stable,
         external_stable=result.external_stable,

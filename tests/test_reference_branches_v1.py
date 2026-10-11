@@ -96,3 +96,19 @@ def test_followed_everywhere_uses_single_lowest_scf_anchor(tmp_path):
     assert [r.r_angstrom for r in fol] == [1.595, 1.57, 1.62, 1.545, 1.645]
     assert fol[0].source_link_status == "REFERENCE_BRANCH_ANCHOR"
     assert all(r.source_link_status == "REFERENCE_BRANCH_NEIGHBOUR_CONTINUATION" for r in fol[1:])
+
+
+def test_seed_branch_unstable_reference_is_a_converged_identity_root():
+    """v2 AlO refS: the kept, internally unstable ROHF reference must reach the identity review."""
+    from openea_benchmark.adaptive.stage3_execution import PointExecutionStatus, _empty_result
+    from openea_benchmark.adaptive.stage3_identity import _root_for_high_level_result
+    from openea_benchmark.root_record import SCFRunStatus
+    req = request(0, 1.6)
+    stable = _empty_result(req, PointExecutionStatus.COMPLETED, scf_energy_hartree=-316.76, s2=0.75,
+                           internal_stable=True, reference_warnings=())
+    unstable = _empty_result(req, PointExecutionStatus.COMPLETED, scf_energy_hartree=-316.76, s2=0.75,
+                             internal_stable=False,
+                             reference_warnings=("INTERNAL_INSTABILITY_RECORDED_SEED_BRANCH_KEPT",))
+    assert _root_for_high_level_result(req, stable).status is SCFRunStatus.CANONICALIZED
+    root = _root_for_high_level_result(req, unstable)
+    assert root.status is SCFRunStatus.CONVERGED and root.internal_stable is False
