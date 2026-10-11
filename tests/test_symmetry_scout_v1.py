@@ -109,3 +109,17 @@ def test_export_excludes_blocks_above_lowest_dissociation_limit_and_keeps_ground
     assert summary["mr_only_candidates"][0]["label"] == "2Delta"
     sc = next(sc for sec in summary["sectors"] for sc in sec["manifold_pec_scouts"] if sc["component_id"] == "g")
     assert sc["symmetry_block"]["point_group"] == "C2v"
+
+
+def test_legacy_summary_independent_of_record_key_order():
+    """Fresh (insertion-ordered) and reloaded (sorted) scout records give one summary."""
+    import json
+    from pathlib import Path
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    candidates = sorted(Path(__file__).resolve().parents[1].glob("../openea_two_atom*/*/symmetry_scout/symmetry_scout.json"))
+    if not candidates:
+        import pytest
+        pytest.skip("no stored scout record")
+    record = json.loads(candidates[0].read_text())
+    reversed_order = json.loads(json.dumps(record), object_pairs_hook=lambda kv: dict(reversed(kv)))
+    assert json.dumps(to_legacy_summary(record), sort_keys=True) == json.dumps(to_legacy_summary(reversed_order), sort_keys=True)

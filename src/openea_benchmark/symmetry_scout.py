@@ -279,6 +279,11 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
     listed under ``mr_only_candidates`` (an explicit, unclosed coverage gap).
     """
     from .open_pec_extension import compatible_asymptote
+    # Canonical key order: a freshly computed record (insertion order) and the same
+    # record reloaded from symmetry_scout.json must give an identical summary, since
+    # the summary digest fingerprints every Stage-3 point on resume.
+    record = json.loads(json.dumps(record, sort_keys=True))
+    atomic = None if atomic is None else json.loads(json.dumps(atomic, sort_keys=True))
     atom_a, atom_b = record["atoms"]
     pg = "D2h" if atom_a == atom_b else "C2v"
     method = {"functional": record["policy"]["functional"], "basis": record["policy"]["basis"]}
