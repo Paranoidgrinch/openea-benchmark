@@ -679,7 +679,7 @@ def _run_stage3_point_pyscf(
     mycc.max_memory = settings.max_memory_mb
 
     # Reuse the same transformed integrals for CCSD and (T).
-    eris = mycc.ao2mo()
+    eris = _ccsd_eris_within_memory(mycc)
     ecorr, t1, t2 = mycc.kernel(eris=eris)
     ccsd_converged = bool(mycc.converged)
     ccsd_total = float(mycc.e_tot) if mycc.e_tot is not None else None
@@ -750,6 +750,31 @@ def valence_frozen_core_orbitals(mol: Any) -> int:
         n = elements.chemcore_atm[z] if n is None else n
         core += max(0, n - ncore_ecp)
     return core
+
+
+def uccsd_incore_memory_mb(nmo: int, nao: int) -> float:
+    """Memory of PySCF's in-core UCCSD integrals: eri_aa, eri_bb, eri_ab as full
+    nmo^4 arrays plus their sliced copies (~1 more), plus the AO integrals of the SCF."""
+    nao_pair = nao * (nao + 1) // 2
+    return (4 * nmo**4 + nao_pair**2) * 8 / 1e6
+
+
+def _ccsd_eris_within_memory(mycc: Any) -> Any:
+    """``mycc.ao2mo()``, but UCCSD goes out-of-core when its real in-core need exceeds max_memory.
+
+    PySCF's UCCSD.ao2mo estimates one nmo^4 array but builds three; at aug-cc-pV5Z
+    (C2, nmo ~250) that is ~150 GB under a 48 GB max_memory and ran the server out
+    of memory (2026-10-12).  Out-of-core integrals give the same energies.
+    """
+    from pyscf import lib
+    from pyscf.cc import uccsd
+
+    if isinstance(mycc, uccsd.UCCSD):
+        nmo = max(mycc.get_nmo())
+        nao = mycc.mo_coeff[0].shape[0]
+        if uccsd_incore_memory_mb(nmo, nao) + lib.current_memory()[0] >= mycc.max_memory:
+            return uccsd._make_eris_outcore(mycc, mycc.mo_coeff)
+    return mycc.ao2mo()
 
 
 def _amplitude_diagnostics(mycc: Any, t1: Any, t2: Any) -> tuple[float | None, str | None, float | None, float | None]:
