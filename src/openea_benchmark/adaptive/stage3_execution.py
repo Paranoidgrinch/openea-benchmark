@@ -764,7 +764,10 @@ def _ccsd_eris_within_memory(mycc: Any) -> Any:
 
     PySCF's UCCSD.ao2mo estimates one nmo^4 array but builds three; at aug-cc-pV5Z
     (C2, nmo ~250) that is ~150 GB under a 48 GB max_memory and ran the server out
-    of memory (2026-10-12).  Out-of-core integrals give the same energies.
+    of memory (2026-10-12).  Out of core, the vvvv blocks would take ~100 GB of disk
+    per d-aug-cc-pV5Z point (the scratch then exceeded the disk quota), so the
+    particle-particle ladder is contracted AO-direct instead (``direct``): only the
+    small o/v blocks go to disk.  Same energies either way.
     """
     from pyscf import lib
     from pyscf.cc import uccsd
@@ -773,6 +776,7 @@ def _ccsd_eris_within_memory(mycc: Any) -> Any:
         nmo = max(mycc.get_nmo())
         nao = mycc.mo_coeff[0].shape[0]
         if uccsd_incore_memory_mb(nmo, nao) + lib.current_memory()[0] >= mycc.max_memory:
+            mycc.direct = True
             return uccsd._make_eris_outcore(mycc, mycc.mo_coeff)
     return mycc.ao2mo()
 

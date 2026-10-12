@@ -18,6 +18,8 @@ def test_outcore_uccsd_t_matches_incore():
         mycc.max_memory = max_memory
         eris = _ccsd_eris_within_memory(mycc)
         assert hasattr(eris, "feri") == (max_memory == 1)  # out-of-core integrals live in an HDF5 file
+        if max_memory == 1:  # AO-direct ladder: no vvvv block written to disk
+            assert mycc.direct and "vvvv" not in eris.feri
         mycc.kernel(eris=eris)
         energies.append(mycc.e_tot + mycc.ccsd_t(eris=eris))
     assert abs(energies[0] - energies[1]) < 1e-9
