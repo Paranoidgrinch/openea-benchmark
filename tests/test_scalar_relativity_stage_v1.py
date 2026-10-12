@@ -33,7 +33,7 @@ def test_stage_and_assembly(tmp_path):
                                       refinement_dir=tmp_path / "none", stage3_settings=Stage3ExecutionSettings(),
                                       output_dir=tmp_path / "sr", point_backend=backend)
     assert res["status"] == "SCALAR_RELATIVITY_CLEARED"
-    assert abs(res["delta_sr_ev"] - 0.0032) < 1e-9  # neutral lowered: EA = E_N - E_A drops? no: +|shift|
+    assert abs(res["delta_sr_ev"] - 0.0032) < 1e-9  # neutral raised by 3.2 meV: EA up
     cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
            "ea_cbs_upper_ev": 1.01}
     nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
