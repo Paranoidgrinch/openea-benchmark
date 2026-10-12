@@ -2095,6 +2095,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the zero-point (v=0) nuclear-motion layer and the adiabatic-EA assembly",
     )
     parser.add_argument(
+        "--no-post-cc", action="store_true",
+        help="Skip the post-CCSD(T) layer (CCSDT and CCSDTQ increments, CCpy)",
+    )
+    parser.add_argument(
         "--no-sr", action="store_true",
         help="Skip the scalar-relativity (all-electron SFX2C1E minus NR CCSD(T)) layer",
     )
@@ -2192,6 +2196,7 @@ def _run_symmetry_auto(args) -> int:
             cv_stage=not args.no_cv and not args.no_electronic_ea,
             soc_stage=not args.no_soc and not args.no_electronic_ea,
             sr_stage=not args.no_sr and not args.no_electronic_ea,
+            post_cc_stage=not args.no_post_cc and not args.no_electronic_ea,
         ),
     )
     print("[SYMMETRY AUTO] " + json.dumps({
@@ -2203,6 +2208,7 @@ def _run_symmetry_auto(args) -> int:
         "core_valence": state.get("core_valence"),
         "spin_orbit": state.get("spin_orbit"),
         "scalar_relativity": state.get("scalar_relativity"),
+        "post_ccsd_t": state.get("post_ccsd_t"),
         "adiabatic_ea": state.get("adiabatic_ea"),
     }, default=str), flush=True)
     return 0

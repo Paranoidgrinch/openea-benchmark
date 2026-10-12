@@ -434,8 +434,9 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
                           core_valence: Mapping[str, Any] | None = None,
                           spin_orbit: Mapping[str, Any] | None = None,
                           scalar_relativity: Mapping[str, Any] | None = None,
+                          post_ccsd_t: Mapping[str, Any] | None = None,
                           output_dir: Path | None = None) -> dict:
-    """EA_0 = EA_e(CBS) + Delta_ZPE [+ Delta_CV] [+ Delta_SR] [+ Delta_SO], worst-case intervals.
+    """EA_0 = EA_e(CBS) + Delta_ZPE [+ CV] [+ SR] [+ SO] [+ post-CCSD(T)], worst-case intervals.
 
     Each correction enters only when its layer CLEARED; otherwise the status is
     recorded and the correction is left out (``includes_*`` false).
@@ -443,16 +444,19 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     cv_ok = bool(core_valence) and core_valence.get("status") == "CORE_VALENCE_CLEARED"
     so_ok = bool(spin_orbit) and spin_orbit.get("status") == "CLEARED"
     sr_ok = bool(scalar_relativity) and scalar_relativity.get("status") == "SCALAR_RELATIVITY_CLEARED"
-    missing = [name for name, ok in (("CV", cv_ok), ("SR", sr_ok), ("SOC", so_ok), ("POST_CCSD_T", False))
+    pc_ok = bool(post_ccsd_t) and post_ccsd_t.get("status") == "CLEARED"
+    missing = [name for name, ok in (("CV", cv_ok), ("SR", sr_ok), ("SOC", so_ok), ("POST_CCSD_T", pc_ok))
                if not ok]
     record: dict[str, Any] = {
         "stage": "ADIABATIC_EA_ASSEMBLY", "includes_cbs": True, "includes_zpe": True,
         "includes_core_valence": cv_ok, "includes_scalar_relativity": sr_ok, "includes_soc": so_ok,
-        "includes_post_ccsd_t": False, "is_production_ea": False,
-        "verdict": f"NOT_ISSUED_NO_{'_'.join(missing)}_LAYERS",
+        "includes_post_ccsd_t": pc_ok, "is_production_ea": False,
+        "verdict": (f"NOT_ISSUED_NO_{'_'.join(missing)}_LAYERS" if missing
+                    else "NOT_ISSUED_NO_FINAL_RESOLVER"),
         "core_valence_status": None if not core_valence else core_valence.get("status"),
         "spin_orbit_status": None if not spin_orbit else spin_orbit.get("status"),
         "scalar_relativity_status": None if not scalar_relativity else scalar_relativity.get("status"),
+        "post_ccsd_t_status": None if not post_ccsd_t else post_ccsd_t.get("status"),
         "validation_metadata_used_in_computation": False}
 
     def done(**fields):
@@ -476,7 +480,8 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     dso, sob = ((float(spin_orbit["delta_ea_so_ev"]), float(spin_orbit["bound_ev"])) if so_ok else (0.0, 0.0))
     dsr, srb = ((float(scalar_relativity["delta_sr_ev"]), float(scalar_relativity["delta_sr_bound_ev"] or 0.0))
                 if sr_ok else (0.0, 0.0))
-    shift, width = dz + dcv + dso + dsr, hw + cvb + sob + srb
+    dpc, pcb = ((float(post_ccsd_t["delta_post_ev"]), float(post_ccsd_t["bound_ev"])) if pc_ok else (0.0, 0.0))
+    shift, width = dz + dcv + dso + dsr + dpc, hw + cvb + sob + srb + pcb
     ea0 = float(cbs["ea_cbs_ev"]) + shift
     lower = float(cbs["ea_cbs_lower_ev"]) + shift - width
     upper = float(cbs["ea_cbs_upper_ev"]) + shift + width
@@ -495,5 +500,6 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
                 delta_cv_ev=dcv if cv_ok else None, delta_cv_bound_ev=cvb if cv_ok else None,
                 delta_so_ev=dso if so_ok else None, delta_so_bound_ev=sob if so_ok else None,
                 delta_sr_ev=dsr if sr_ok else None, delta_sr_bound_ev=srb if sr_ok else None,
+                delta_post_ccsd_t_ev=dpc if pc_ok else None, delta_post_ccsd_t_bound_ev=pcb if pc_ok else None,
                 anion_vibrational_binding=vib, cbs_status=cbs.get("status"),
                 multireference_screening=cbs.get("multireference_screening"))

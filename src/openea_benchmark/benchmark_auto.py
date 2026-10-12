@@ -137,6 +137,7 @@ class AcquisitionSettings:
     cv_stage: bool = False
     soc_stage: bool = False
     sr_stage: bool = False
+    post_cc_stage: bool = False
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -464,6 +465,15 @@ def run_benchmark_acquisition(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
             output_dir=output_dir / "spin_orbit")
 
+    post_ccsd_t = None
+    if electronic_ea is not None and settings.post_cc_stage:
+        from .post_ccsd_t_stage import PostCCSDTStagePolicy, run_post_ccsd_t_stage
+        post_ccsd_t = run_post_ccsd_t_stage(
+            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
+            point_records=point_result_records,
+            refinement_dir=output_dir / "electronic_ea" / "refinement_points", output_dir=output_dir / "post_ccsd_t",
+            policy=PostCCSDTStagePolicy(max_memory_mb=settings.cbs_memory_mb))
+
     nuclear = adiabatic = None
     if electronic_ea is not None and settings.zpe_stage:
         from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
@@ -472,7 +482,7 @@ def run_benchmark_acquisition(
             stage3_settings=stage3_settings, output_dir=output_dir / "nuclear_motion", point_backend=point_runner)
         adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, core_valence=core_valence,
                                           spin_orbit=spin_orbit, scalar_relativity=scalar_relativity,
-                                          output_dir=output_dir)
+                                          post_ccsd_t=post_ccsd_t, output_dir=output_dir)
 
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
     state = {
@@ -545,6 +555,9 @@ def run_benchmark_acquisition(
         "scalar_relativity": None if scalar_relativity is None else {
             k: scalar_relativity.get(k) for k in ("status", "reason", "delta_sr_ev", "delta_sr_bound_ev",
                                                   "highest_cardinal", "execution_error")},
+        "post_ccsd_t": None if post_ccsd_t is None else {
+            k: post_ccsd_t.get(k) for k in ("status", "reason", "delta_t_ev", "delta_t_bound_ev", "delta_q_ev",
+                                            "delta_q_bound_ev", "quadruples_basis", "delta_post_ev", "bound_ev")},
         "spin_orbit": None if spin_orbit is None else {
             k: spin_orbit.get(k) for k in ("status", "reason", "delta_ea_so_ev", "bound_ev")},
         "adiabatic_ea": adiabatic,
