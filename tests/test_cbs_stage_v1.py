@@ -22,9 +22,14 @@ def backend(req, settings):
     if FAIL_DAUG_FROM_TZ and req.job_id == "A" and req.basis.startswith("d-") and "__RESEED" not in req.request_id:
         return _empty_result(req, PointExecutionStatus.SCF_NOT_CONVERGED, reference_warnings=())
     key = req.job_id[0]
+    if "MRDIAG" in req.request_id:
+        t1 = MR_T1.get(key, 0.01)
+        return _empty_result(req, PointExecutionStatus.COMPLETED, ccsd_correlation_hartree=-0.4,
+                             triples_correction_hartree=-0.01, t1_diagnostic=t1, t1_diagnostic_definition="fake",
+                             max_abs_t2_amplitude=0.05, reference_warnings=())
     scf, corr, trip = CBS[key]
     x = 4 if "pvqz" in req.basis else 5
-    shift = -0.0005 if req.basis.startswith("d-") else 0.0  # diffuse lowers the anion only
+    shift = -DAUG_SHIFT if req.basis.startswith("d-") else 0.0  # diffuse lowers the anion only
     shift = shift if key == "A" else 0.0
     return _empty_result(req, PointExecutionStatus.COMPLETED,
                          scf_energy_hartree=scf + 0.01 * x ** -PRIMARY_EXPONENTS["scf"] + shift,
@@ -37,21 +42,24 @@ def backend(req, settings):
 
 
 FAIL_DAUG_FROM_TZ = False
+MR_T1: dict = {}
+DAUG_SHIFT = 0.0005
 
 
-def ea_record(competitor_gap_ev):
+def ea_record(competitor_gap_ev, sensitivity=0.0):
     cand = lambda job, e, r: {"job_id": job, "equilibrium_status": "RESOLVED", "energy_central_hartree": e,
                               "r_central_angstrom": r, "branch_of": None}
     return {"status": "ELECTRONIC_EA_EVALUATED", "selected_neutral_job": "N", "selected_anion_job": "A",
+            "reference_sensitivity_ev": sensitivity,
             "candidates": {"neutral": [cand("N", -75.4, 0.97), cand("C", -75.4 + competitor_gap_ev * H, 1.1)],
                            "anion": [cand("A", -75.48, 0.96)]}}
 
 
-def run(tmp_path, gap):
+def run(tmp_path, gap, sensitivity=0.0):
     reqs = [request("N", 0, 1), request("C", 0, 1), request("A", -1, 0)]
     recs = {f"{j}-{i}": {"job_id": j, "status": "COMPLETED", "r_angstrom": r, "high_level_checkpoint_path": f"/hl/{j}{r}"}
             for j in "NCA" for i, r in enumerate((0.9, 1.0))}
-    return run_cbs_stage(electronic_ea=ea_record(gap), requests=reqs, point_records=recs,
+    return run_cbs_stage(electronic_ea=ea_record(gap, sensitivity), requests=reqs, point_records=recs,
                          refinement_dir=tmp_path / "none", stage3_settings=Stage3ExecutionSettings(),
                          output_dir=tmp_path / "cbs", point_backend=backend)
 
@@ -114,3 +122,58 @@ def test_error_results_are_not_cached(tmp_path):
     assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
     assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
     assert len(calls) == 2
+
+
+def test_mr_diagnostic_recorded_and_clean(tmp_path):
+    res = run(tmp_path, gap=2.0)
+    assert res["binding_at_cbs"] == "BOUND" and res["multireference_exceeded"] == []
+    assert res["multireference_diagnostics"]["anion"]["t1"] == 0.01
+
+
+def test_open_shell_t1_above_threshold_is_multireference_suspect(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "MR_T1", {"N": 0.05})  # neutral is a doublet: limit 0.044
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "MULTIREFERENCE_SUSPECT"
+    assert res["multireference_exceeded"] == ["neutral:T1"]
+    assert res["ea_cbs_ev"] is not None  # number kept for audit, not cleared
+
+
+def test_closed_shell_t1_threshold_is_stricter(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "MR_T1", {"A": 0.03})
+    assert run(tmp_path, gap=2.0)["multireference_exceeded"] == ["anion:T1"]
+
+
+def test_diffuse_sensitive_negative_ea_is_unbound(tmp_path, monkeypatch):
+    # d-aug lowers the anion by 0.5 eV, as for N2-: the continuum, not a bound state.
+    monkeypatch.setattr(__import__(__name__), "DAUG_SHIFT", 0.5 * H)
+    monkeypatch.setitem(CBS, "A", (-74.9, -0.40, -0.010))
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "ANION_UNBOUND_AT_CBS" and res["binding_at_cbs"] == "UNBOUND"
+    assert res["ea_cbs_ev"] is None and res["ea_cbs_raw_ev"] < 0
+
+
+def test_diffuse_sensitive_positive_ea_is_undetermined(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "DAUG_SHIFT", 0.1 * H)
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "NEED_MORE_EVIDENCE_BINDING"
+    assert res["binding_reason"] == "DIFFUSE_CORRECTION_ABOVE_CONTINUUM_THRESHOLD"
+
+
+def test_reference_sensitivity_widens_cbs_interval(tmp_path):
+    base = run(tmp_path / "a", gap=2.0)
+    wide = run(tmp_path / "b", gap=2.0, sensitivity=0.06)
+    assert abs((base["ea_cbs_lower_ev"] - wide["ea_cbs_lower_ev"]) - 0.06) < 1e-12
+    assert abs((wide["ea_cbs_upper_ev"] - base["ea_cbs_upper_ev"]) - 0.06) < 1e-12
+    assert wide["reference_sensitivity_source"] == "SINGLE_BASIS_REFERENCE_BRANCH_OFFSET"
+
+
+def test_point_cache_signature_unchanged_by_interpretation_thresholds(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    seen = []
+    import openea_benchmark.cbs_stage as cbs_stage
+    monkeypatch.setattr(cbs_stage, "cached_point_runner", lambda d, sig, b: seen.append(sig) or b)
+    run(tmp_path, gap=2.0)
+    patch39 = {"low_cardinal": 4, "high_cardinal": 5, "diffuse_correction": True, "competitor_window_ev": 0.5,
+               "max_memory_mb": 48000, "model_spread_target_ev": 0.005}
+    assert seen == [hashlib.sha256(json.dumps(patch39, sort_keys=True).encode()).hexdigest()]

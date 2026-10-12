@@ -489,7 +489,9 @@ def run_benchmark_acquisition(
             for label, c in electronic_ea["high_level_competition"].items()}},
         "cbs": None if cbs is None else {
             k: cbs.get(k) for k in ("status", "reason", "ea_cbs_ev", "ea_cbs_lower_ev", "ea_cbs_upper_ev",
-                                    "fixed_basis_ea_ev", "competitor_ranking_at_cbs", "verdict")}
+                                    "fixed_basis_ea_ev", "competitor_ranking_at_cbs", "verdict",
+                                    "ea_cbs_raw_ev", "binding_at_cbs", "binding_reason",
+                                    "reference_sensitivity_ev", "multireference_exceeded")}
         | {"diffuse_correction_ev": (cbs.get("cbs") or {}).get("diffuse_correction_ev"),
            "model_sensitivity_ev": (cbs.get("cbs") or {}).get("cbs_model_sensitivity_bound_ev")},
         "ground_state_validated": False, "ea_computed": False,

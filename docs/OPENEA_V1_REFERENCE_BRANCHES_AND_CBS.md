@@ -63,3 +63,30 @@ CLI on by default in `symmetry-auto`, `--no-cbs`, `--cbs-memory-mb`; also
   Seen for the NO and O2 anions in d-aug-cc-pV5Z.
 - Not a production EA: no core-valence, scalar relativity, SOC, post-CCSD(T), ZPE,
   anion-binding layers; `verdict = NOT_ISSUED_NO_CV_SR_ZPE_BINDING_LAYERS`.
+
+## Patch 40 — binding, multireference screening and branch sensitivity at CBS
+
+Findings of the v2 rerun (2026-10-11): N2- came out `CLEARED` although d-aug moved its
+EA by 0.50 eV (all other systems <= 0.01 eV); SiC was 0.14 eV above experiment with
+no warning; the AlO reference-branch offset (0.06 eV) was not in the CBS interval.
+
+- **Branch sensitivity:** `reference_sensitivity_ev` of the electronic-EA record widens
+  `ea_cbs_lower/upper_ev` on both sides (`reference_sensitivity_source =
+  SINGLE_BASIS_REFERENCE_BRANCH_OFFSET`; the sibling branch is not recomputed at CBS).
+- **Binding:** interval > 0 -> BOUND, < 0 -> UNBOUND (`ANION_UNBOUND_AT_CBS`,
+  `ea_cbs_ev = None`, raw value kept as `ea_cbs_raw_ev`), else
+  `NEED_MORE_EVIDENCE_BINDING`.  A diffuse correction above 0.05 eV means the anion
+  follows the basis into the detachment continuum: negative EA -> UNBOUND, positive ->
+  `NEED_MORE_EVIDENCE_BINDING`.
+- **Multireference screening:** one extra frozen-core CCSD(T) point per selected
+  state at its def2-TZVPPD equilibrium (`<job>__CBS__MRDIAG_STAGE3_BASIS`) records
+  T1, D1 (closed shell only), max |T2| and the (T)/CCSD-correlation fraction.  Open
+  shell T1 = sqrt((|t1a|^2+|t1b|^2)/(2 N_corr)), identical to PySCF's closed-shell
+  value for a closed shell run as UHF.  Screening values (literature, not calibrated
+  here): T1 > 0.02 closed / 0.044 open shell, D1 > 0.05, max |T2| > 0.1 ->
+  `MULTIREFERENCE_SUSPECT`.  A missing diagnostic gives
+  `NEED_MORE_EVIDENCE_MR_DIAGNOSTIC_MISSING`.
+- Status precedence: state order > unbound > binding undetermined > multireference >
+  CBS model status (`cbs_model_status`).
+- The point-cache key keeps the Patch-39 policy fields only, so new thresholds do not
+  invalidate computed points.

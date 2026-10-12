@@ -241,6 +241,9 @@ class Stage3PointResult:
     rhf_external_uhf_lowering_hartree: float | None = None
     rhf_external_uhf_s2: float | None = None
     reference_warnings: tuple[str, ...] = ()
+    # Multireference diagnostics of the CCSD amplitudes (None in older records).
+    d1_diagnostic: float | None = None
+    max_abs_t2_amplitude: float | None = None
 
     def __post_init__(self) -> None:
         # JSON round-trips deliver lists; keep the record hashable/immutable.
@@ -658,16 +661,7 @@ def _run_stage3_point_pyscf(
     ccsd_converged = bool(mycc.converged)
     ccsd_total = float(mycc.e_tot) if mycc.e_tot is not None else None
 
-    t1_diagnostic = None
-    t1_definition = None
-    # PySCF's standard T1 diagnostic is a restricted closed-shell definition.
-    if request.scf_reference == "RHF" and hasattr(mycc, "get_t1_diagnostic"):
-        try:
-            t1_diagnostic = float(mycc.get_t1_diagnostic(t1))
-            t1_definition = "PYSCF_RCCSD_T1_NORMALIZED_BY_CORRELATED_ELECTRONS"
-        except Exception:
-            t1_diagnostic = None
-            t1_definition = None
+    t1_diagnostic, t1_definition, d1_diagnostic, max_t2 = _amplitude_diagnostics(mycc, t1, t2)
 
     common.update(
         cc_reference=cc_reference,
@@ -678,6 +672,8 @@ def _run_stage3_point_pyscf(
         ccsd_total_hartree=ccsd_total,
         t1_diagnostic=t1_diagnostic,
         t1_diagnostic_definition=t1_definition,
+        d1_diagnostic=d1_diagnostic,
+        max_abs_t2_amplitude=max_t2,
     )
 
     if not ccsd_converged:
@@ -695,6 +691,30 @@ def _run_stage3_point_pyscf(
         ccsd_t_total_hartree=ccsd_t_total,
     )
     return _empty_result(request, PointExecutionStatus.COMPLETED, **common)
+
+
+def _amplitude_diagnostics(mycc: Any, t1: Any, t2: Any) -> tuple[float | None, str | None, float | None, float | None]:
+    """(T1, T1 definition, D1, max |T2|) of converged CCSD amplitudes.
+
+    Closed shell: PySCF's T1 (norm over sqrt(2 n_occ)) and D1.  Open shell (UCCSD
+    on the semicanonical ROHF reference): the same normalization written for spin
+    blocks, sqrt((|t1a|^2 + |t1b|^2) / (2 N_corr)), which equals PySCF's value for
+    a closed shell treated as UHF; D1 is not defined there and stays None.
+    max |T2| runs over all spin blocks.  Diagnostics never change the result status.
+    """
+    import numpy
+    try:
+        if isinstance(t1, tuple):
+            t1a, t1b = t1
+            n_corr = t1a.shape[0] + t1b.shape[0]
+            t1_value = float(numpy.sqrt((numpy.linalg.norm(t1a) ** 2 + numpy.linalg.norm(t1b) ** 2) / (2 * n_corr)))
+            max_t2 = float(max(numpy.abs(block).max(initial=0.0) for block in t2))
+            return t1_value, "SPIN_BLOCK_T1_SQRT_SUM_NORM2_OVER_2_NCORR", None, max_t2
+        t1_value = float(mycc.get_t1_diagnostic(t1))
+        d1_value = float(mycc.get_d1_diagnostic(t1))
+        return t1_value, "PYSCF_RCCSD_T1_NORMALIZED_BY_CORRELATED_ELECTRONS", d1_value, float(numpy.abs(t2).max(initial=0.0))
+    except Exception:
+        return None, None, None, None
 
 
 def run_stage3_point(

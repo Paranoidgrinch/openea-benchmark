@@ -22,7 +22,20 @@ extrapolates SCF, CCSD correlation and (T) separately, adds the separate
 d-aug-minus-aug diffuse correction, and fails closed (NEED_MORE_EVIDENCE) when
 the model sensitivity exceeds its target.  Competitors are re-ranked at CBS:
 if any competitor's CBS energy is not above the selected state's, the layer is
-UNRESOLVED.  No experimental data is used; nothing here is a production EA
+UNRESOLVED.
+
+Further fail-closed rules on the result (Patch 40):
+
+* binding: the CBS interval (widened by the electronic-EA stage's reference-branch
+  sensitivity) decides BOUND / UNBOUND / UNDETERMINED; a diffuse correction above
+  ``diffuse_continuum_threshold_ev`` means the anion energy follows the basis into
+  the continuum, so a negative EA is reported as UNBOUND and a positive one as
+  undetermined -- never as a CBS number;
+* multireference screening: one CCSD point per selected state at its def2-TZVPPD
+  equilibrium gives T1, D1 (closed shell) and max |T2|; any value above its
+  threshold gives MULTIREFERENCE_SUSPECT (single-reference CCSD(T) not trusted).
+
+No experimental data is used; nothing here is a production EA
 (core-valence, scalar relativity, SOC, post-CCSD(T), ZPE still missing).
 """
 from __future__ import annotations
@@ -43,6 +56,7 @@ from .attachment.component_resolved_cbs import (
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner
 from .point_pool import run_parallel
 
+MR_DIAGNOSTIC_LABEL = "MRDIAG_STAGE3_BASIS"
 CARDINAL_LETTER = {2: "d", 3: "t", 4: "q", 5: "5", 6: "6"}
 TIGHT_D_ELEMENTS = frozenset({"Al", "Si", "P", "S", "Cl", "Ar"})
 
@@ -56,6 +70,15 @@ class CBSStagePolicy:
     competitor_window_ev: float = 0.5
     max_memory_mb: int = 48000
     model_spread_target_ev: float = 0.005  # component_resolved_cbs default
+    # An anion whose energy still moves this much from aug- to d-aug-cc-pV5Z is not
+    # converging to a bound state: the basis is discretizing the detachment continuum.
+    diffuse_continuum_threshold_ev: float = 0.05
+    # Multireference diagnostics (CCSD amplitudes at the def2-TZVPPD equilibrium;
+    # common literature screening values, not calibrated here).
+    t1_closed_shell_threshold: float = 0.02
+    t1_open_shell_threshold: float = 0.044
+    d1_threshold: float = 0.05
+    max_t2_threshold: float = 0.1
 
 
 def family_label(cardinal: int, *, daug: bool = False) -> str:
@@ -132,6 +155,34 @@ def _states_to_compute(ea: Mapping[str, Any], policy: CBSStagePolicy) -> list[di
     return states
 
 
+def _mr_diagnostic(res: Mapping[str, Any], policy: CBSStagePolicy) -> dict:
+    """Screening values of one CCSD point; exceeded thresholds are listed by name."""
+    out = {"status": res["status"], "basis": res["basis"], "r_angstrom": res["r_angstrom"],
+           "t1": res.get("t1_diagnostic"), "t1_definition": res.get("t1_diagnostic_definition"),
+           "d1": res.get("d1_diagnostic"), "max_abs_t2": res.get("max_abs_t2_amplitude"),
+           "triples_fraction": None}
+    if res.get("triples_correction_hartree") is not None and res.get("ccsd_correlation_hartree"):
+        out["triples_fraction"] = res["triples_correction_hartree"] / res["ccsd_correlation_hartree"]
+    t1_limit = policy.t1_closed_shell_threshold if res["spin_2s"] == 0 else policy.t1_open_shell_threshold
+    checks = (("T1", out["t1"], t1_limit), ("D1", out["d1"], policy.d1_threshold),
+              ("MAX_T2", out["max_abs_t2"], policy.max_t2_threshold))
+    out["exceeded"] = [name for name, value, limit in checks if value is not None and value > limit]
+    out["available"] = res["status"] == "COMPLETED" and out["t1"] is not None
+    return out
+
+
+def _binding(ea: float, lower: float, upper: float, diffuse_ev: float, policy: CBSStagePolicy) -> tuple[str, str]:
+    if abs(diffuse_ev) > policy.diffuse_continuum_threshold_ev:
+        if upper < 0.0:
+            return "UNBOUND", "NEGATIVE_EA_AND_DIFFUSE_SENSITIVE_ANION_CONTINUUM_DISCRETIZATION"
+        return "UNDETERMINED", "DIFFUSE_CORRECTION_ABOVE_CONTINUUM_THRESHOLD"
+    if lower > 0.0:
+        return "BOUND", "CBS_INTERVAL_POSITIVE"
+    if upper < 0.0:
+        return "UNBOUND", "CBS_INTERVAL_NEGATIVE"
+    return "UNDETERMINED", "CBS_INTERVAL_CONTAINS_ZERO"
+
+
 def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]]:
     """One state's basis series in order.  A point that fails from the projected TZ
     reference is retried once, seeded from the last completed larger-basis reference of
@@ -177,7 +228,12 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
 
     settings = replace(stage3_settings, frozen_core=True, checkpoint_project=True,
                        max_memory_mb=policy.max_memory_mb, artifact_dir=str(output_dir / "checkpoints"))
-    signature = sha256(json.dumps(asdict(policy), sort_keys=True).encode()).hexdigest()
+    # Point cache key: only the fields that existed when points were first cached
+    # (Patch 39); result-interpretation thresholds must not invalidate computed points.
+    computed_fields = ("low_cardinal", "high_cardinal", "diffuse_correction", "competitor_window_ev",
+                       "max_memory_mb", "model_spread_target_ev")
+    signature = sha256(json.dumps({k: asdict(policy)[k] for k in computed_fields},
+                                  sort_keys=True).encode()).hexdigest()
     runner = cached_point_runner(output_dir / "points", signature, point_backend)
     template = {}
     for req in requests:
@@ -188,6 +244,7 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         series.append((policy.high_cardinal, True))
     states = _states_to_compute(electronic_ea, policy)
     computed = []
+    diagnostics: dict[int, Any] = {}
     jobs: list[tuple[dict, str, dict, Stage3ExecutionRequest]] = []
     for state in states:
         src = template[state["job_id"]]
@@ -199,6 +256,13 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         seed = min(recs, key=lambda r: abs(float(r["r_angstrom"]) - state["r"]))
         state["seed_r_angstrom"] = seed["r_angstrom"]
         state["points"] = {}
+        if state["selected"]:
+            jobs.append((state, MR_DIAGNOSTIC_LABEL, {},
+                         replace(src, request_id=f"{src.job_id}__CBS__{MR_DIAGNOSTIC_LABEL}",
+                                 r_angstrom=float(state["r"]),
+                                 source_checkpoint_path=str(seed["high_level_checkpoint_path"]),
+                                 source_link_status="CBS_BASIS_CONTINUATION_FROM_HIGH_LEVEL_REFERENCE",
+                                 reference_branch=SEED_CONTINUOUS_BRANCH)))
         for cardinal, daug in (series if state["selected"] else series[:2]):
             label = family_label(cardinal, daug=daug)
             mapping, prov = {}, {}
@@ -226,6 +290,9 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
             results[i] = item
     for (state, label, prov, _), (result, reseed) in zip(jobs, results):
         res = result.to_dict()
+        if label == MR_DIAGNOSTIC_LABEL:
+            state["mr_diagnostic"] = _mr_diagnostic(res, policy)
+            continue
         state["points"][label] = {
             "status": res["status"], "basis_by_element": prov, "reseeded": reseed,
             "scf_energy_hartree": res["scf_energy_hartree"],
@@ -284,10 +351,35 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     cbs = resolve_cbs(points=points, daug_fixed_ea_ev=daug_ea, full_pec_aug5_ea_ev=None,
                       diffuse_residual_estimate_ev=None,
                       model_spread_target_ev=policy.model_spread_target_ev).to_dict()
+    # Two ROHF reference branches of one state: their single-basis offset is not
+    # recomputed at CBS and widens the interval on both sides (as in the EA stage).
+    sensitivity = float(electronic_ea.get("reference_sensitivity_ev") or 0.0)
+    ea_cbs = cbs["ea_cbs_plus_diffuse_primary_ev"]
+    lower, upper = cbs["lower_intermediate_ev"] - sensitivity, cbs["upper_intermediate_ev"] + sensitivity
+    binding, binding_reason = _binding(ea_cbs, lower, upper, cbs["diffuse_correction_ev"], policy)
+    mr = {role: s.get("mr_diagnostic") for role, s in selected.items()}
+    mr_exceeded = sorted(f"{role}:{name}" for role, d in mr.items() if d for name in d["exceeded"])
+    mr_missing = sorted(role for role, d in mr.items() if not (d and d["available"]))
+    if not order_ok:
+        status = "UNRESOLVED_STATE_ORDER_AT_CBS"
+    elif binding == "UNBOUND":
+        status = "ANION_UNBOUND_AT_CBS"
+    elif binding == "UNDETERMINED":
+        status = "NEED_MORE_EVIDENCE_BINDING"
+    elif mr_exceeded:
+        status = "MULTIREFERENCE_SUSPECT"
+    elif mr_missing:
+        status = "NEED_MORE_EVIDENCE_MR_DIAGNOSTIC_MISSING"
+    else:
+        status = cbs["status"]
     record.update(
-        status="UNRESOLVED_STATE_ORDER_AT_CBS" if not order_ok else cbs["status"],
-        cbs=cbs, ea_cbs_ev=cbs["ea_cbs_plus_diffuse_primary_ev"],
-        ea_cbs_lower_ev=cbs["lower_intermediate_ev"], ea_cbs_upper_ev=cbs["upper_intermediate_ev"],
+        status=status, cbs=cbs, cbs_model_status=cbs["status"],
+        ea_cbs_ev=ea_cbs if binding != "UNBOUND" else None, ea_cbs_raw_ev=ea_cbs,
+        ea_cbs_lower_ev=lower, ea_cbs_upper_ev=upper,
+        reference_sensitivity_ev=sensitivity,
+        reference_sensitivity_source="SINGLE_BASIS_REFERENCE_BRANCH_OFFSET" if sensitivity else None,
+        binding_at_cbs=binding, binding_reason=binding_reason,
+        multireference_diagnostics=mr, multireference_exceeded=mr_exceeded,
         selected_neutral_job=selected["neutral"]["job_id"], selected_anion_job=selected["anion"]["job_id"],
         verdict="NOT_ISSUED_NO_CV_SR_ZPE_BINDING_LAYERS",
         fixed_basis_ea_ev={label: (selected["neutral"]["points"][label]["ccsd_t_total_hartree"]
