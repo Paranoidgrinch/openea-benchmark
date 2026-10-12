@@ -135,6 +135,7 @@ class AcquisitionSettings:
     cbs_memory_mb: int = 48000
     zpe_stage: bool = False
     cv_stage: bool = False
+    soc_stage: bool = False
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -445,6 +446,13 @@ def run_benchmark_acquisition(
             stage3_settings=stage3_settings, output_dir=output_dir / "core_valence",
             policy=CoreValenceStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
+    spin_orbit = None
+    if electronic_ea is not None and settings.soc_stage:
+        from .spin_orbit_stage import run_spin_orbit_stage
+        spin_orbit = run_spin_orbit_stage(
+            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
+            output_dir=output_dir / "spin_orbit")
+
     nuclear = adiabatic = None
     if electronic_ea is not None and settings.zpe_stage:
         from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
@@ -452,7 +460,7 @@ def run_benchmark_acquisition(
             electronic_ea=electronic_ea, loops=ea_loops, atoms=tuple(manifest_system["atoms"]),
             stage3_settings=stage3_settings, output_dir=output_dir / "nuclear_motion", point_backend=point_runner)
         adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, core_valence=core_valence,
-                                          output_dir=output_dir)
+                                          spin_orbit=spin_orbit, output_dir=output_dir)
 
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
     state = {
@@ -522,6 +530,8 @@ def run_benchmark_acquisition(
         "core_valence": None if core_valence is None else {
             k: core_valence.get(k) for k in ("status", "reason", "delta_cv_ev", "delta_cv_bound_ev",
                                              "highest_cardinal", "execution_error")},
+        "spin_orbit": None if spin_orbit is None else {
+            k: spin_orbit.get(k) for k in ("status", "reason", "delta_ea_so_ev", "bound_ev")},
         "adiabatic_ea": adiabatic,
         "ground_state_validated": False, "ea_computed": False,
         "state_competition_cleared": False,
