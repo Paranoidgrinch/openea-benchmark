@@ -48,3 +48,38 @@ def test_stage3_batch_on_pool_matches_serial():
         point_pool.shutdown_point_pool()
     assert [r.ccsd_t_total_hartree for r in parallel[0]] == [r.ccsd_t_total_hartree for r in serial[0]]
     assert [a.request_id for a in parallel[1]] == [a.request_id for a in serial[1]]
+
+
+def test_memory_gate_waits_counts_reservations_and_clears(tmp_path, monkeypatch):
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=2,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    # another task on this host reserved 50 MB above its current RSS: only that unallocated part counts
+    import fcntl
+    rss = point_pool._rss_mb(os.getpid())
+    (slots / "slot002.lock").write_text(f"{point_pool._machine_id()} {os.getpid()} 10000\n")  # stale: not held
+    other = open(slots / "slot001.lock", "a+")
+    fcntl.flock(other, fcntl.LOCK_EX)
+    other.write(f"{point_pool._machine_id()} {os.getpid()} {int(rss) + 50}\n")
+    other.flush()
+    meminfo = iter([(1000.0, 100.0), (1000.0, 300.0)])  # used 900 -> wait; used 700 + ~50 + 100 > 800 -> wait
+    state = {"mem": next(meminfo)}
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        state["mem"] = next(meminfo, (1000.0, 400.0))  # then used 600 + ~50 + 100 <= 800 -> start
+
+    monkeypatch.setattr(point_pool, "meminfo_mb", lambda: state["mem"])
+    monkeypatch.setattr(point_pool.time, "sleep", fake_sleep)
+    try:
+        with point_pool.core_slot():
+            record = (slots / "slot000.lock").read_text().split()
+    finally:
+        other.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert len(sleeps) == 2
+    assert record == [point_pool._machine_id(), str(os.getpid()), "100"]
+    assert (slots / "slot002.lock").read_text() == ""  # stale record dropped
+    assert (slots / "slot000.lock").read_text() == ""  # reservation cleared on release

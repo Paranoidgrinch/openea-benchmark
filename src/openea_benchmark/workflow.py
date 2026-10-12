@@ -2111,6 +2111,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="lock directory of the shared core-slot budget",
     )
     parser.add_argument(
+        "--mem-limit-frac", type=float, default=0.0,
+        help="start a calculation only while machine memory in use plus reservations stays below "
+             "this fraction of RAM (needs --core-slots-dir; 0 disables)",
+    )
+    parser.add_argument(
+        "--mem-reserve-mb", type=int, default=None,
+        help="memory reserved per calculation by the memory gate (default: --cbs-memory-mb)",
+    )
+    parser.add_argument(
         "--no-open-pec-extension", action="store_true",
         help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
     )
@@ -2137,7 +2146,10 @@ def _run_symmetry_auto(args) -> int:
     from .point_pool import configure_point_pool
     set_compute_threads(args.threads)
     configure_point_pool(workers=args.point_workers, threads=args.threads,
-                         slot_dir=args.core_slots_dir, n_slots=args.core_slots)
+                         slot_dir=args.core_slots_dir, n_slots=args.core_slots,
+                         mem_limit_frac=args.mem_limit_frac,
+                         mem_reserve_mb=(args.cbs_memory_mb if args.mem_reserve_mb is None
+                                         else args.mem_reserve_mb))
     system_dir = args.output / f"{atom_a}{atom_b}"
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
     record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
