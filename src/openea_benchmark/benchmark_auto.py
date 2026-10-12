@@ -138,6 +138,7 @@ class AcquisitionSettings:
     soc_stage: bool = False
     sr_stage: bool = False
     post_cc_stage: bool = False
+    mr_competitor_stage: bool = False
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -474,6 +475,14 @@ def run_benchmark_acquisition(
             refinement_dir=output_dir / "electronic_ea" / "refinement_points", output_dir=output_dir / "post_ccsd_t",
             policy=PostCCSDTStagePolicy(max_memory_mb=settings.cbs_memory_mb))
 
+    mr_competitors = None
+    mr_labels = [f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())]
+    if electronic_ea is not None and settings.mr_competitor_stage and mr_labels:
+        from .mr_competitors import run_mr_competitor_stage
+        mr_competitors = run_mr_competitor_stage(
+            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
+            mr_only_labels=mr_labels, output_dir=output_dir / "mr_competitors")
+
     nuclear = adiabatic = None
     if electronic_ea is not None and settings.zpe_stage:
         from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
@@ -495,8 +504,14 @@ def run_benchmark_acquisition(
         "reference_branch_splits": {job: status for job, status in superseded.items()},
         # Wigner-Witmer labels that no single high-spin determinant represents
         # (e.g. 1Delta, open-shell singlets): not computed, an explicit gap.
-        "mr_only_candidates_not_computed": [
-            f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())],
+        "mr_only_candidates_not_computed": (
+            mr_labels if mr_competitors is None
+            else [label for b in mr_competitors.get("blocks", ()) if b["status"] != "EXCLUDED"
+                  for label in b["candidates"]] + list(mr_competitors.get("unclassified_labels", ()))),
+        "mr_competitors": None if mr_competitors is None else {
+            "status": mr_competitors.get("status"), "reason": mr_competitors.get("reason"),
+            "blocks": [{k: b[k] for k in ("charge", "mult", "irrep_c2v", "lower_bound_margin_ev", "status")}
+                       for b in mr_competitors.get("blocks", ())]},
         "charge_groups": open_state,
         "candidate_job_count": len(jobs),
         "stage3_pec_reviews": {key: v["status"] for key, v in pec_reviews.items()},
