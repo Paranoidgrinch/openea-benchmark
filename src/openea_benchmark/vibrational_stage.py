@@ -64,8 +64,10 @@ MASS_EVIDENCE = "PYSCF_DATA_COMMON_ISOTOPE_MASSES_MOST_ABUNDANT_ISOTOPE"
 @dataclass(frozen=True)
 class ZPEStagePolicy:
     """Explicit pilot policy, not a validated production threshold set."""
-    extension_step_angstrom: float = 0.04
-    max_pec_rounds: int = 16
+    # Stage-3 grid spacing: the continuity thresholds (occupied overlap >= 0.95) are
+    # calibrated for it.  0.04 A gave overlaps of 0.946 for NO (AMBIGUOUS).
+    extension_step_angstrom: float = 0.025
+    max_pec_rounds: int = 40
     max_grid_doublings: int = 2
     coarse_grid_points: int = 301
     fine_grid_points: int = 601
@@ -76,7 +78,9 @@ class ZPEStagePolicy:
     trim_fraction: float = 0.08
     comparison_basis: str = "def2-QZVPPD"
     # Cross-model identity checks (primary vs comparison basis, same geometries).
-    max_cross_model_re_shift_angstrom: float = 0.02
+    # Flat anion curves move their minimum with the basis: MgH- def2-TZVPPD 1.883 A,
+    # def2-QZVPPD 1.858 A (literature CBS 1.865 A) with a smooth 0.1 mEh offset.
+    max_cross_model_re_shift_angstrom: float = 0.05
     # Largest deviation of one comparison-minus-primary offset from the line through
     # its two neighbours: smooth basis-set curvature stays far below this, a jump to
     # another state or reference branch (mEh) does not.
@@ -162,6 +166,35 @@ def cross_model_identity_evidence(primary: NuclearPECStage3Context, comparison: 
             f"CROSS_MODEL_{role}_SMOOTH_ENERGY_OFFSET"), checks
 
 
+def _extension_failure_details(run, contexts, runner, settings, identity_thresholds, branch_thresholds,
+                               resolver) -> list[dict]:
+    """Why an extension batch failed: point statuses and the identity/continuity reviews."""
+    details = []
+    for batch in run.batches:
+        results = [runner(req, settings) for req in batch.requests]  # cached: no recomputation
+        entry = {"role": batch.role, "points": [
+            {"r_angstrom": req.r_angstrom, "status": res.status.value, "scf_energy_hartree": res.scf_energy_hartree,
+             "ccsd_t_total_hartree": res.ccsd_t_total_hartree, "error": res.error_message}
+            for req, res in zip(batch.requests, results)]}
+        if all(res.status.value == "COMPLETED" for res in results):
+            ctx = contexts[batch.role]
+            resolution = resolver(requests=tuple(ctx.requests) + tuple(batch.requests),
+                                  results=tuple(ctx.results) + tuple(results),
+                                  identity_thresholds=identity_thresholds, branch_thresholds=branch_thresholds,
+                                  audit_settings=None, duplicate_energy_tolerance_hartree=1.0e-7)
+            entry["initialization_review"] = {"status": resolution.initialization_review.status.value,
+                                              "rationale": resolution.initialization_review.rationale}
+            entry["continuity_review"] = {"status": resolution.geometry_continuity_review.status.value,
+                                          "rationale": resolution.geometry_continuity_review.rationale}
+            entry["continuity_comparisons"] = [
+                {k: v for k, v in asdict(c).items() if not isinstance(v, (tuple, list)) or len(v) < 8}
+                for c in resolution.continuity_comparisons
+                if any(abs(float(c.r_a_angstrom) - float(req.r_angstrom)) < 1e-6
+                       or abs(float(c.r_b_angstrom) - float(req.r_angstrom)) < 1e-6 for req in batch.requests)]
+        details.append(entry)
+    return details
+
+
 def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any], atoms,
                           stage3_settings: Stage3ExecutionSettings, output_dir: Path,
                           identity_thresholds: Any = None, branch_thresholds: Any = None,
@@ -201,7 +234,11 @@ def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[st
     channels = tuple(DissociationChannel(**c) for c in electronic_ea.get("anion_dissociation_channels") or ())
     settings = replace(stage3_settings, checkpoint_project=True,
                        artifact_dir=str(output_dir / "checkpoints"))
-    signature = sha256(json.dumps(asdict(policy), sort_keys=True).encode()).hexdigest()
+    # Point cache key: only what changes the computed points (geometries come from the
+    # step, the comparison level from the basis); tolerances and budgets do not.
+    signature = sha256(json.dumps({"extension_step_angstrom": policy.extension_step_angstrom,
+                                   "comparison_basis": policy.comparison_basis},
+                                  sort_keys=True).encode()).hexdigest()
     runner = cached_point_runner(output_dir / "points", signature, point_backend)
     retry = Stage3LoopRetrySettings(max_retries_per_request=1, cycle_multiplier=2.0)
     refinement = Stage3RefinementSettings(extension_step_angstrom=policy.extension_step_angstrom,
@@ -233,7 +270,10 @@ def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[st
                 identity_thresholds=identity_thresholds, branch_thresholds=branch_thresholds,
                 retry_settings=retry, point_runner=runner, resolver=resolver)
             if run.status is not NuclearPECRefinementRunStatus.COMPLETED:
-                record.update(status=f"PEC_EXTENSION_{run.status.value}", reason=run.rationale, rounds=rounds)
+                record.update(status=f"PEC_EXTENSION_{run.status.value}", reason=run.rationale, rounds=rounds,
+                              failed_extension=_extension_failure_details(run, contexts, runner, settings,
+                                                                          identity_thresholds, branch_thresholds,
+                                                                          resolver))
                 _save_json(output_dir / "nuclear_motion.json", record)
                 return record
             contexts = {"neutral": run.neutral_context, "anion": run.anion_context}

@@ -126,14 +126,19 @@ and `adiabatic_ea.json`:  EA_0 = EA_e(CBS) + ZPE(neutral) - ZPE(anion).
 - Diagnosis -> tool: the equilibrium search leaves only about +-0.05 A of curve;
   the solver reports insufficient boundary clearance / finite-domain sensitivity
   and the existing D12 orchestration (`run_nuclear_pec_refinement`) adds points
-  outward (0.04 A steps, seeded from the boundary checkpoint, re-reviewed for
-  identity/continuity) until the solve clears.  OH needed 9 rounds (0.56-1.38 A).
+  outward (0.025 A steps = Stage-3 grid spacing, seeded from the boundary
+  checkpoint, re-reviewed for identity/continuity) until the solve clears.  With
+  0.04 A steps OH needed 9 rounds (0.56-1.38 A), but NO/O2/ClO failed continuity
+  (minimum occupied overlap 0.946 < 0.95, AMBIGUOUS): the continuity thresholds are
+  calibrated for the grid spacing.  An extension failure records the point statuses
+  and the reviews in `failed_extension`.
   Because the domain check trims a fraction of the total span, both sides must
   grow; extending only the outer side was tried and does not converge.
 - Model sensitivity: the curve is recomputed at the same geometries in
   def2-QZVPPD (`run_nuclear_pec_model_convergence`).  The cross-model identity
   evidence D12 demands is generated from explicit checks: no instability
-  following, same equilibrium bond length (0.02 A), and no kink in the QZ-minus-TZ
+  following, equilibrium bond lengths within 0.05 A (MgH-: 1.883 vs 1.858 A, a
+  flat anion curve; 0.02 A rejected it), and no kink in the QZ-minus-TZ
   energy offset (each point within 0.5 mEh of the line through its neighbours; OH:
   0.16 mEh, while the offset itself varies by 6 mEh over the range).
 - Assembly: interval = CBS interval shifted by Delta_ZPE and widened by its bound;
