@@ -199,7 +199,7 @@ def test_matched_ae_fc_requests_preserve_state_and_basis_provenance():
         CoreValenceCorrelationSpace.FROZEN_CORE,
     }
     policies = {x.frozen_core_policy for x in result.evidence[0].calculations}
-    assert policies == {"ALL_ELECTRON_CCSD", "PYSCF_CCSD_SET_FROZEN_CHEMCORE"}
+    assert policies == {"ALL_ELECTRON_CCSD", "VALENCE_NOBLE_GAS_CORE"}
 
 
 def test_runner_computes_ae_minus_fc_and_adapts_to_x5():

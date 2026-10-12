@@ -9,7 +9,7 @@ For every cardinal X and both electron-attachment partners, exactly matched
 CCSD(T) calculations are performed in two correlation spaces:
 
     all-electron (AE)
-    frozen-core (FC; PySCF ``CCSD.set_frozen()`` chemical-core policy)
+    frozen-core (FC; valence noble-gas core, ``valence_frozen_core_orbitals``)
 
 The additive correction is then
 
@@ -318,7 +318,7 @@ def _checkpoint_signature(
         "correlation_space": space.value,
         "frozen_core": settings.frozen_core,
         "frozen_core_policy": (
-            "PYSCF_CCSD_SET_FROZEN_CHEMCORE"
+            "VALENCE_NOBLE_GAS_CORE"
             if settings.frozen_core
             else "ALL_ELECTRON_CCSD"
         ),
@@ -427,7 +427,7 @@ def _execute_subpoint(
             _save_subpoint_checkpoint(path, signature=signature, space=space, result=result)
 
     policy = (
-        "PYSCF_CCSD_SET_FROZEN_CHEMCORE"
+        "VALENCE_NOBLE_GAS_CORE"
         if space is CoreValenceCorrelationSpace.FROZEN_CORE
         else "ALL_ELECTRON_CCSD"
     )

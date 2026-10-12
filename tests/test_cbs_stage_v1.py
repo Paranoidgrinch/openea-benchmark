@@ -177,3 +177,21 @@ def test_point_cache_signature_unchanged_by_interpretation_thresholds(tmp_path, 
     patch39 = {"low_cardinal": 4, "high_cardinal": 5, "diffuse_correction": True, "competitor_window_ev": 0.5,
                "max_memory_mb": 48000, "model_spread_target_ev": 0.005}
     assert seen == [hashlib.sha256(json.dumps(patch39, sort_keys=True).encode()).hexdigest()]
+
+
+def test_valence_frozen_core_freezes_noble_gas_core():
+    from pyscf import gto
+    from openea_benchmark.adaptive.stage3_execution import valence_frozen_core_orbitals
+    mol = lambda a, b, spin: gto.M(atom=f"{a} 0 0 0; {b} 0 0 1.7", basis="sto-3g", spin=spin, verbose=0)
+    assert valence_frozen_core_orbitals(mol("Mg", "H", 1)) == 5    # PySCF set_frozen(): 1 (Mg 2s2p correlated)
+    assert valence_frozen_core_orbitals(mol("Na", "H", 0)) == 5
+    assert valence_frozen_core_orbitals(mol("Li", "H", 0)) == 1
+    assert valence_frozen_core_orbitals(mol("Al", "O", 1)) == 6    # unchanged where PySCF already agrees
+    assert valence_frozen_core_orbitals(mol("C", "N", 1)) == 2
+    assert valence_frozen_core_orbitals(mol("Ga", "H", 0)) == 14   # [Ar]3d10
+
+
+def test_frozen_core_rule_invalidates_only_affected_cbs_points():
+    from openea_benchmark.cbs_stage import _frozen_core_rule_changed
+    assert _frozen_core_rule_changed("Mg") and _frozen_core_rule_changed("Na")
+    assert not any(_frozen_core_rule_changed(el) for el in ("H", "C", "N", "O", "Al", "Si", "Cl"))

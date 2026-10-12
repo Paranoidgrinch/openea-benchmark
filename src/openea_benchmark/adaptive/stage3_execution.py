@@ -24,7 +24,8 @@ Scientific invariants
 * Scalar-relativistic execution is explicit through ``settings.scalar_relativistic``; v1 supports `NONE` and spin-free `SFX2C1E` and never conflates this with SOC.
 * The CC correlation space is explicit through ``settings.frozen_core``;
   legacy/default execution is all-electron, while frozen-core requests use
-  PySCF ``CCSD.set_frozen()``.
+  ``valence_frozen_core_orbitals`` (noble-gas core; differs from PySCF's
+  ``set_frozen()`` for Li/Be, Na/Mg, K/Ca and Ga-Kr).
 * A numerical result is not a production EA, not a ground-state assignment,
   and not permission to prune another state.
 * Internal SCF instabilities may be followed (``settings.stability_following_max_steps``):
@@ -646,10 +647,10 @@ def _run_stage3_point_pyscf(
 
     mycc = cc.CCSD(cc_mf)
     # Correlation space must be explicit. PySCF correlates all electrons
-    # when frozen is None. For a valence frozen-core calculation use
-    # PySCF's documented automatic chemical-core rule.
+    # when frozen is None; frozen-core uses the valence rule below, not
+    # PySCF's set_frozen() (which keeps the n-1 shell of Li-Ca correlated).
     if settings.frozen_core:
-        mycc.set_frozen()
+        mycc.frozen = valence_frozen_core_orbitals(mol)
     mycc.conv_tol = settings.cc_conv_tol
     mycc.conv_tol_normt = settings.cc_conv_tol_normt
     mycc.max_cycle = settings.cc_max_cycle
@@ -691,6 +692,42 @@ def _run_stage3_point_pyscf(
         ccsd_t_total_hartree=ccsd_t_total,
     )
     return _empty_result(request, PointExecutionStatus.COMPLETED, **common)
+
+
+def _valence_core_orbitals(z: int) -> int | None:
+    """Spatial core orbitals of the conventional valence frozen core, or None.
+
+    Previous noble-gas core for H-Ca and Ga-Kr, plus the filled 3d shell for
+    Ga-Kr (standard cc-pVxZ frozen core).  PySCF's chemcore table agrees from B
+    to Ar but freezes only the n-2 shell for Li/Be, Na/Mg and K/Ca, which leaves
+    e.g. Mg 2s2p correlated in a basis without core-correlating functions (the
+    MgH frozen-core CBS energies then jump erratically with the cardinal number).
+    Transition metals and heavier elements: None (PySCF's table is kept).
+    """
+    if z <= 2:
+        return 0
+    if z <= 10:
+        return 1
+    if z <= 18:
+        return 5
+    if z <= 20:
+        return 9
+    if 31 <= z <= 36:
+        return 14
+    return None
+
+
+def valence_frozen_core_orbitals(mol: Any) -> int:
+    """Number of frozen spatial orbitals for a valence frozen-core CC calculation."""
+    from pyscf.data import elements
+    core = 0
+    for atom in range(mol.natm):
+        z = int(elements.charge(mol.atom_symbol(atom)))
+        ncore_ecp = (z - int(mol.atom_charge(atom))) // 2
+        n = _valence_core_orbitals(z)
+        n = elements.chemcore_atm[z] if n is None else n
+        core += max(0, n - ncore_ecp)
+    return core
 
 
 def _amplitude_diagnostics(mycc: Any, t1: Any, t2: Any) -> tuple[float | None, str | None, float | None, float | None]:

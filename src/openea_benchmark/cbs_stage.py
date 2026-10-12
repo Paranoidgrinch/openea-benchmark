@@ -157,6 +157,14 @@ def _states_to_compute(ea: Mapping[str, Any], policy: CBSStagePolicy) -> list[di
     return states
 
 
+def _frozen_core_rule_changed(element: str) -> bool:
+    from pyscf.data import elements
+    from .adaptive.stage3_execution import _valence_core_orbitals
+    z = int(elements.charge(element))
+    n = _valence_core_orbitals(z)
+    return n is not None and n != elements.chemcore_atm[z]
+
+
 def _mr_diagnostic(res: Mapping[str, Any], policy: CBSStagePolicy) -> dict:
     """Screening values of one CCSD point; exceeded thresholds are listed by name."""
     out = {"status": res["status"], "basis": res["basis"], "r_angstrom": res["r_angstrom"],
@@ -234,8 +242,14 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     # (Patch 39); result-interpretation thresholds must not invalidate computed points.
     computed_fields = ("low_cardinal", "high_cardinal", "diffuse_correction", "competitor_window_ev",
                        "max_memory_mb", "model_spread_target_ev")
-    signature = sha256(json.dumps({k: asdict(policy)[k] for k in computed_fields},
-                                  sort_keys=True).encode()).hexdigest()
+    signature_payload: dict[str, Any] = {k: asdict(policy)[k] for k in computed_fields}
+    # Points cached before the valence frozen-core rule (Patch 41) used PySCF's
+    # set_frozen(); only where the two differ (e.g. Mg) must they be recomputed.
+    atoms = requests[0].atoms if requests else ()
+    changed = [el for el in dict.fromkeys(atoms) if _frozen_core_rule_changed(el)]
+    if changed:
+        signature_payload["frozen_core_rule"] = "VALENCE_NOBLE_GAS_CORE"
+    signature = sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
     runner = cached_point_runner(output_dir / "points", signature, point_backend)
     template = {}
     for req in requests:

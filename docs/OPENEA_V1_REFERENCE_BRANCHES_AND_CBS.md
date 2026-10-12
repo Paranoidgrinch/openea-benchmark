@@ -95,3 +95,20 @@ no warning; the AlO reference-branch offset (0.06 eV) was not in the CBS interva
   (`cbs_model_status`).
 - The point-cache key keeps the Patch-39 policy fields only, so new thresholds do not
   invalidate computed points.
+
+## Patch 41 — valence frozen core (MgH)
+
+PySCF's `CCSD.set_frozen()` freezes only the n-2 shell for Li/Be, Na/Mg and K/Ca
+(Mg: 1s only).  The "frozen-core" CBS points of MgH therefore correlated Mg 2s2p in
+aug-cc-pVxZ, which has no core-correlating functions: the Mg-atom correlation
+energy went -0.053 / -0.065 / -0.097 Eh for T/Q/5Z, the MgH valence correlation
+jumped by 40 mEh from QZ to 5Z, and EA_CBS came out 0.744 eV (MRCI+Q/CV-5Z 0.88 eV
+incl. ZPE, experiment 0.90 +- 0.05 eV, Buytendyk et al. 2014).  With the Mg 2s2p
+shell frozen the Mg correlation is -0.03375 / -0.03393 / -0.03399 Eh.
+
+`valence_frozen_core_orbitals` (stage3_execution) freezes the previous noble-gas core
+(plus 3d for Ga-Kr); identical to PySCF for B-Ar, so only systems with Li/Be, Na/Mg,
+K/Ca or Ga-Kr change, and only their CBS point cache key gets the
+`frozen_core_rule` entry.  Transition metals keep PySCF's table.
+Separate check (aug-cc-pCVxZ on Mg): correlating Mg 2s2p properly changes the MgH
+EA by only +0.000 (TZ) / +0.001 eV (QZ).
