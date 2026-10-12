@@ -195,3 +195,24 @@ def test_frozen_core_rule_invalidates_only_affected_cbs_points():
     from openea_benchmark.cbs_stage import _frozen_core_rule_changed
     assert _frozen_core_rule_changed("Mg") and _frozen_core_rule_changed("Na")
     assert not any(_frozen_core_rule_changed(el) for el in ("H", "C", "N", "O", "Al", "Si", "Cl"))
+
+
+def test_scf_failures_from_older_rescue_policy_are_recomputed_once(tmp_path):
+    import json
+    from openea_benchmark.electronic_ea_stage import cached_point_runner
+    calls = []
+
+    def backend(req, settings):
+        calls.append(req.request_id)
+        status = PointExecutionStatus.SCF_UNSTABLE if len(calls) == 1 else PointExecutionStatus.COMPLETED
+        return _empty_result(req, status, reference_warnings=())
+
+    runner = cached_point_runner(tmp_path, "sig", backend)
+    req = request("A", -1, 0)
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.SCF_UNSTABLE
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.SCF_UNSTABLE  # current policy: cached
+    (path,) = tmp_path.glob("*.json")
+    record = json.loads(path.read_text())
+    path.write_text(json.dumps({**record, "scf_rescue_policy": "SOSCF_V1"}))
+    assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
+    assert len(calls) == 2

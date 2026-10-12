@@ -64,7 +64,8 @@ RHF_EXTERNAL_INSTABILITY_WARNING = "RHF_EXTERNAL_INSTABILITY_RECORDED"
 STABILITY_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_FOLLOWED"
 SCF_SOSCF_RESCUE_WARNING = "SCF_CONVERGED_BY_SOSCF_RESCUE"
 # Version tag of the SCF rescue; cached SCF failures without it are retried.
-SCF_RESCUE_POLICY = "SOSCF_V1"
+# V2: the rescue also runs in every internal-stability following step.
+SCF_RESCUE_POLICY = "SOSCF_V2"
 # Orbital-gradient threshold of the rescue only.  Second-order SCF can stall at
 # a numerical gradient floor (~1e-6 with diffuse bases) while the energy is
 # stationary to 1e-13; the energy error is quadratic in the gradient (~1e-12 Eh).
@@ -472,6 +473,27 @@ def _broken_symmetry_uhf_probe(
     return float(rhf.e_tot) - float(uhf.e_tot), float(uhf.spin_square()[0])
 
 
+def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings) -> bool:
+    """Run the SCF from dm0; return True when the SOSCF rescue converged it.
+
+    SCF rescue: a stalled DIIS run is continued by second-order SCF (same
+    occupations and symmetry block) from its last orbitals.  PySCF returns
+    canonicalized orbitals, which are copied back onto the DIIS object.
+    """
+    mf.kernel(dm0=dm0)
+    if mf.converged:
+        return False
+    soscf = mf.newton()
+    soscf.max_cycle = settings.scf_max_cycle
+    soscf.conv_tol_grad = max(settings.scf_conv_tol_grad, SCF_RESCUE_CONV_TOL_GRAD)
+    soscf.kernel(mf.mo_coeff, mf.mo_occ)
+    if not soscf.converged:
+        return False
+    mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
+    mf.e_tot, mf.converged = soscf.e_tot, True
+    return True
+
+
 def _run_stage3_point_pyscf(
     request: Stage3ExecutionRequest,
     settings: Stage3ExecutionSettings,
@@ -549,20 +571,7 @@ def _run_stage3_point_pyscf(
     mf.conv_tol_grad = settings.scf_conv_tol_grad
     mf.max_cycle = settings.scf_max_cycle
     mf.max_memory = settings.max_memory_mb
-    mf.kernel(dm0=dm0)
-    # SCF rescue: a stalled DIIS run is continued by second-order SCF (same
-    # occupations and symmetry block) from its last orbitals.  PySCF returns
-    # canonicalized orbitals, which are copied back onto the DIIS object.
-    scf_rescued = False
-    if not mf.converged:
-        soscf = mf.newton()
-        soscf.max_cycle = settings.scf_max_cycle
-        soscf.conv_tol_grad = max(settings.scf_conv_tol_grad, SCF_RESCUE_CONV_TOL_GRAD)
-        soscf.kernel(mf.mo_coeff, mf.mo_occ)
-        if soscf.converged:
-            mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
-            mf.e_tot, mf.converged = soscf.e_tot, True
-            scf_rescued = True
+    scf_rescued = _scf_kernel_with_rescue(mf, dm0, settings)
     start_energy = float(mf.e_tot) if mf.e_tot is not None else None
 
     # D02: optionally follow internal instabilities within the same reference
@@ -579,7 +588,12 @@ def _run_stage3_point_pyscf(
             following_steps < max_following
             and not (internal_stable and mf.converged)
         ):
-            mf.kernel(dm0=mf.make_rdm1(mo_i, mf.mo_occ))
+            # Each following step gets the same rescue: plain DIIS from the
+            # rotated orbitals can wander off in diffuse bases (NO- 3Sigma-
+            # def2-QZVPPD ended 40 mEh above the stable solution).
+            scf_rescued = _scf_kernel_with_rescue(
+                mf, mf.make_rdm1(mo_i, mf.mo_occ), settings
+            ) or scf_rescued
             following_steps += 1
             mo_i, _, stable_i, _ = mf.stability(internal=True, external=False, return_status=True)
             internal_stable = bool(stable_i)

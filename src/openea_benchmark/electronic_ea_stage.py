@@ -117,6 +117,10 @@ def _result_from_record(record: Mapping[str, Any]) -> Stage3PointResult:
     return Stage3PointResult(**{**record, "status": PointExecutionStatus(record["status"])})
 
 
+_RESCUABLE_SCF_STATUSES = frozenset({PointExecutionStatus.SCF_NOT_CONVERGED.value,
+                                     PointExecutionStatus.SCF_UNSTABLE.value})
+
+
 class CachedPointRunner:
     """Stage-3 runner that persists every refinement point (resume without recompute).
 
@@ -137,8 +141,8 @@ class CachedPointRunner:
         path = self.cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
         if path.exists():
             cached = json.loads(path.read_text())
-            # SCF failures cached before the SCF rescue existed are recomputed once.
-            if not (cached["result"]["status"] == PointExecutionStatus.SCF_NOT_CONVERGED.value
+            # SCF failures cached under an older SCF rescue policy are recomputed once.
+            if not (cached["result"]["status"] in _RESCUABLE_SCF_STATUSES
                     and cached.get("scf_rescue_policy") != SCF_RESCUE_POLICY):
                 return _result_from_record(cached["result"])
         from .point_pool import core_slot

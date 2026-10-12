@@ -173,3 +173,14 @@ and `adiabatic_ea.json`:  EA_0 = EA_e(CBS) + ZPE(neutral) - ZPE(anion).
   continuity reviews decide whether it is on the same branch.  Cached
   SCF_NOT_CONVERGED points without the rescue tag are recomputed once.
   AlO X2Sigma+ (refS) at 1.7075 A: DIIS stalls at -316.7537, SOSCF -316.7712 Eh.
+
+## Patch 44: SCF rescue inside stability following
+
+- The SOSCF rescue (Patch 43) now also runs after every internal-stability
+  following step, not only after the first SCF.  Plain DIIS from the rotated
+  orbitals wandered in diffuse bases: NO- 3Sigma- def2-QZVPPD (ZPE comparison
+  curve) ended SCF_NOT_CONVERGED at 1.095 A and SCF_UNSTABLE at 1.12 A, 30-50 mEh
+  above the stable solution (-129.24442 / -129.25693 Eh), which SOSCF reaches
+  reproducibly in the same symmetry block.
+- `SCF_RESCUE_POLICY = "SOSCF_V2"`; cached SCF_NOT_CONVERGED *and* SCF_UNSTABLE
+  points with an older policy tag are recomputed once.
