@@ -83,10 +83,15 @@ no warning; the AlO reference-branch offset (0.06 eV) was not in the CBS interva
   T1, D1 (closed shell only), max |T2| and the (T)/CCSD-correlation fraction.  Open
   shell T1 = sqrt((|t1a|^2+|t1b|^2)/(2 N_corr)), identical to PySCF's closed-shell
   value for a closed shell run as UHF.  Screening values (literature, not calibrated
-  here): T1 > 0.02 closed / 0.044 open shell, D1 > 0.05, max |T2| > 0.1 ->
-  `MULTIREFERENCE_SUSPECT`.  A missing diagnostic gives
-  `NEED_MORE_EVIDENCE_MR_DIAGNOSTIC_MISSING`.
-- Status precedence: state order > unbound > binding undetermined > multireference >
-  CBS model status (`cbs_model_status`).
+  here): T1 > 0.02 closed / 0.044 open shell, D1 > 0.05, max |T2| > 0.1.
+  Reported as `multireference_screening` / `multireference_exceeded`, **not** a
+  status: on the v2 set (2026-10-12) they fire for CN (open-shell T1 0.057), ClO
+  (0.047), NO (max T2 0.102) and AlO- (T1 0.030, D1 0.061), whose CBS EAs agree with
+  experiment within 0.04 eV, while SiC (+0.14 eV; T1 0.056/0.051) is not separated
+  from them.  The (T)/CCSD fraction is the only value that separates SiC (0.065
+  neutral, 0.081 anion vs <= 0.061 elsewhere); one case is no basis for a threshold.
+  A real multireference check (e.g. CASSCF natural occupations) is still missing.
+- Status precedence: state order > unbound > binding undetermined > CBS model status
+  (`cbs_model_status`).
 - The point-cache key keeps the Patch-39 policy fields only, so new thresholds do not
   invalidate computed points.

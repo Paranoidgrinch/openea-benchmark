@@ -32,8 +32,10 @@ Further fail-closed rules on the result (Patch 40):
   the continuum, so a negative EA is reported as UNBOUND and a positive one as
   undetermined -- never as a CBS number;
 * multireference screening: one CCSD point per selected state at its def2-TZVPPD
-  equilibrium gives T1, D1 (closed shell) and max |T2|; any value above its
-  threshold gives MULTIREFERENCE_SUSPECT (single-reference CCSD(T) not trusted).
+  equilibrium gives T1, D1 (closed shell) and max |T2|.  Values above the
+  literature screening thresholds are reported as a warning, not as a status: on the
+  reference set they fire for CN, ClO, NO and AlO, which agree with experiment to
+  0.04 eV, and do not single out SiC (+0.14 eV), so they cannot gate a result.
 
 No experimental data is used; nothing here is a production EA
 (core-valence, scalar relativity, SOC, post-CCSD(T), ZPE still missing).
@@ -73,8 +75,8 @@ class CBSStagePolicy:
     # An anion whose energy still moves this much from aug- to d-aug-cc-pV5Z is not
     # converging to a bound state: the basis is discretizing the detachment continuum.
     diffuse_continuum_threshold_ev: float = 0.05
-    # Multireference diagnostics (CCSD amplitudes at the def2-TZVPPD equilibrium;
-    # common literature screening values, not calibrated here).
+    # Multireference screening (CCSD amplitudes at the def2-TZVPPD equilibrium;
+    # common literature values, reported as warnings only -- see module docstring).
     t1_closed_shell_threshold: float = 0.02
     t1_open_shell_threshold: float = 0.044
     d1_threshold: float = 0.05
@@ -366,10 +368,6 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         status = "ANION_UNBOUND_AT_CBS"
     elif binding == "UNDETERMINED":
         status = "NEED_MORE_EVIDENCE_BINDING"
-    elif mr_exceeded:
-        status = "MULTIREFERENCE_SUSPECT"
-    elif mr_missing:
-        status = "NEED_MORE_EVIDENCE_MR_DIAGNOSTIC_MISSING"
     else:
         status = cbs["status"]
     record.update(
@@ -380,6 +378,8 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         reference_sensitivity_source="SINGLE_BASIS_REFERENCE_BRANCH_OFFSET" if sensitivity else None,
         binding_at_cbs=binding, binding_reason=binding_reason,
         multireference_diagnostics=mr, multireference_exceeded=mr_exceeded,
+        multireference_screening=("MISSING" if mr_missing else
+                                  "ABOVE_SCREENING_VALUES_WARNING" if mr_exceeded else "BELOW_SCREENING_VALUES"),
         selected_neutral_job=selected["neutral"]["job_id"], selected_anion_job=selected["anion"]["job_id"],
         verdict="NOT_ISSUED_NO_CV_SR_ZPE_BINDING_LAYERS",
         fixed_basis_ea_ev={label: (selected["neutral"]["points"][label]["ccsd_t_total_hartree"]

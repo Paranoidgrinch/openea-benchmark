@@ -130,12 +130,12 @@ def test_mr_diagnostic_recorded_and_clean(tmp_path):
     assert res["multireference_diagnostics"]["anion"]["t1"] == 0.01
 
 
-def test_open_shell_t1_above_threshold_is_multireference_suspect(tmp_path, monkeypatch):
+def test_open_shell_t1_above_threshold_is_a_warning_only(tmp_path, monkeypatch):
     monkeypatch.setattr(__import__(__name__), "MR_T1", {"N": 0.05})  # neutral is a doublet: limit 0.044
     res = run(tmp_path, gap=2.0)
-    assert res["status"] == "MULTIREFERENCE_SUSPECT"
+    assert res["status"] == "CLEARED"
+    assert res["multireference_screening"] == "ABOVE_SCREENING_VALUES_WARNING"
     assert res["multireference_exceeded"] == ["neutral:T1"]
-    assert res["ea_cbs_ev"] is not None  # number kept for audit, not cleared
 
 
 def test_closed_shell_t1_threshold_is_stricter(tmp_path, monkeypatch):
