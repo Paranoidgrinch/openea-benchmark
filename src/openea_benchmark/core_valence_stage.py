@@ -59,13 +59,15 @@ class CoreValenceStagePolicy:
     max_memory_mb: int = 48000
 
 
-def basis_specs_for(atoms: Sequence[str], policy: CoreValenceStagePolicy
-                    ) -> tuple[tuple[CoreValenceBasisSpec, ...], dict] | None:
+def basis_specs_for(atoms: Sequence[str], policy: Any, *, element_series=cv_element_series,
+                    rule_id: str = BASIS_RULE_ID, make_spec=None
+                    ) -> tuple[tuple[Any, ...], dict] | None:
     """Basis specs for every cardinal up to the highest one all elements share."""
+    make_spec = make_spec or (lambda **kw: CoreValenceBasisSpec(**kw))
     elements = list(dict.fromkeys(atoms))
     cardinals = tuple(range(policy.initial_cardinals[0], policy.maximum_cardinal + 1))
     while len(cardinals) >= len(policy.initial_cardinals):
-        series = {el: cv_element_series(el, cardinals) for el in elements}
+        series = {el: element_series(el, cardinals) for el in elements}
         if all(series.values()):
             break
         cardinals = cardinals[:-1]
@@ -79,15 +81,15 @@ def basis_specs_for(atoms: Sequence[str], policy: CoreValenceStagePolicy
         mapping = {el: series[el][x][0] for el in elements}
         prov = {el: series[el][x][1] for el in elements}
         provenance[x] = prov
-        specs.append(CoreValenceBasisSpec(cardinal=x, family_id=f"{BASIS_RULE_ID}:{family}",
-                                          label=f"CV-X{x}[" + ";".join(f"{el}={p}" for el, p in prov.items()) + "]",
-                                          basis_by_element=mapping))
+        specs.append(make_spec(cardinal=x, family_id=f"{rule_id}:{family}",
+                               label=f"X{x}[" + ";".join(f"{el}={p}" for el, p in prov.items()) + "]",
+                               basis_by_element=mapping))
     return tuple(specs), provenance
 
 
 def _state_spec(role: str, job_id: str, r: float, template: Stage3ExecutionRequest,
-                seed: Mapping[str, Any]) -> CoreValenceStateSpec:
-    return CoreValenceStateSpec(
+                seed: Mapping[str, Any], spec_cls: type = CoreValenceStateSpec) -> Any:
+    return spec_cls(
         role=role, system=template.system, atoms=tuple(template.atoms), charge=template.charge,
         spin_2s=template.spin_2s, state_id=job_id, r_angstrom=float(r),
         source_root_id=str(seed.get("request_id") or job_id),
@@ -95,6 +97,27 @@ def _state_spec(role: str, job_id: str, r: float, template: Stage3ExecutionReque
         state_identity_validated=True, point_group=template.point_group,
         irrep_nelec=None if template.irrep_nelec is None else dict(template.irrep_nelec),
         reference_branch=SEED_CONTINUOUS_BRANCH)
+
+
+def selected_state_specs(electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
+                         point_records: Mapping[str, Mapping[str, Any]], refinement_dir: Path,
+                         spec_cls: type = CoreValenceStateSpec) -> dict | str:
+    """Selected neutral/anion at their TZ equilibrium, seeded from the nearest
+    high-level checkpoint; a reason string when a seed is missing."""
+    template: dict[str, Stage3ExecutionRequest] = {}
+    for req in requests:
+        template.setdefault(req.job_id, req)
+    states = {}
+    for role in ("neutral", "anion"):
+        job_id = electronic_ea[f"selected_{role}_job"]
+        cand = next(c for c in electronic_ea["candidates"][role] if c["job_id"] == job_id)
+        recs = _job_point_records(job_id, point_records, Path(refinement_dir))
+        if job_id not in template or not recs:
+            return f"{role}: no seed reference for {job_id}"
+        r = float(cand["r_central_angstrom"])
+        seed = min(recs, key=lambda rec: abs(float(rec["r_angstrom"]) - r))
+        states[role] = _state_spec(role, job_id, r, template[job_id], seed, spec_cls)
+    return states
 
 
 def run_core_valence_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
@@ -113,19 +136,9 @@ def run_core_valence_stage(*, electronic_ea: Mapping[str, Any], requests: Sequen
 
     if electronic_ea.get("status") != "ELECTRONIC_EA_EVALUATED":
         return done(status="NOT_ATTEMPTED", reason="single-basis electronic EA not evaluated")
-    template: dict[str, Stage3ExecutionRequest] = {}
-    for req in requests:
-        template.setdefault(req.job_id, req)
-    states = {}
-    for role in ("neutral", "anion"):
-        job_id = electronic_ea[f"selected_{role}_job"]
-        cand = next(c for c in electronic_ea["candidates"][role] if c["job_id"] == job_id)
-        recs = _job_point_records(job_id, point_records, Path(refinement_dir))
-        if job_id not in template or not recs:
-            return done(status="NOT_ATTEMPTED", reason=f"{role}: no seed reference for {job_id}")
-        r = float(cand["r_central_angstrom"])
-        seed = min(recs, key=lambda rec: abs(float(rec["r_angstrom"]) - r))
-        states[role] = _state_spec(role, job_id, r, template[job_id], seed)
+    states = selected_state_specs(electronic_ea, requests, point_records, refinement_dir)
+    if isinstance(states, str):
+        return done(status="NOT_ATTEMPTED", reason=states)
     record["states"] = {role: {k: v for k, v in asdict(s).items() if k != "irrep_nelec"}
                         for role, s in states.items()}
 

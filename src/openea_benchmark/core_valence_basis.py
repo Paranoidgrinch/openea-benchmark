@@ -95,17 +95,33 @@ def _family_basis(family: str, element: str, cardinal: int) -> tuple[Any, str] |
     return list(shells) + diffuse, provenance + f"+DIFFUSE_FROM_aug-cc-pV{x}Z"
 
 
-def cv_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
-    """One basis family for all requested cardinals: {X: (PySCF spec, provenance)}.
+def element_series(element: str, cardinals: tuple[int, ...], families: tuple[str, ...]
+                   ) -> dict[int, tuple[Any, str]] | None:
+    """First family available at every requested X: {X: (PySCF spec, provenance)}.
 
-    The first family (in ``CV_FAMILIES`` order) available at every requested X
-    is used, so the cardinal series of one element never mixes families.
+    The cardinal series of one element never mixes families.  A family whose
+    name does not start with "aug-" gets the aug-cc-pVXZ diffuse primitives.
     """
-    families = ("aug-cc-pV{x}Z",) if core_orbital_count(element) == 0 else CV_FAMILIES
     for family in families:
         series = {x: _family_basis(family, element, x) for x in cardinals}
         if all(v is not None for v in series.values()):
-            if core_orbital_count(element) == 0:
-                series = {x: (spec, prov + " NO_CORE_ELECTRONS") for x, (spec, prov) in series.items()}
             return series
     return None
+
+
+def cv_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
+    """Core-valence series of one element (rule in the module docstring)."""
+    if core_orbital_count(element) == 0:
+        series = element_series(element, cardinals, ("aug-cc-pV{x}Z",))
+        return None if series is None else {x: (spec, prov + " NO_CORE_ELECTRONS")
+                                            for x, (spec, prov) in series.items()}
+    return element_series(element, cardinals, CV_FAMILIES)
+
+
+# Scalar relativity (Patch 48): Douglas-Kroll recontracted valence families; the
+# AE NR/SFX2C1E pair shares the basis, so only the recontraction matters.
+SR_FAMILIES = ("aug-cc-pV{x}Z-DK", "cc-pV{x}Z-DK")
+
+
+def sr_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
+    return element_series(element, cardinals, SR_FAMILIES)

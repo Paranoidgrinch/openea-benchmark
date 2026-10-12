@@ -74,6 +74,10 @@ class ScalarRelativityStateSpec:
     source_root_id: str
     source_checkpoint_path: str
     state_identity_validated: bool
+    # Symmetry block and reference branch of the validated state (Patch 48).
+    point_group: str | None = None
+    irrep_nelec: Mapping[str, Any] | None = None
+    reference_branch: str | None = None
 
     def __post_init__(self) -> None:
         if self.role not in {"neutral", "anion"}:
@@ -332,6 +336,9 @@ def _request_for(
         requires_independent_state_identity_validation=True,
         basis_by_element=dict(basis.basis_by_element),
         authorizes_pruning=False,
+        point_group=state.point_group,
+        irrep_nelec=None if state.irrep_nelec is None else dict(state.irrep_nelec),
+        reference_branch=state.reference_branch,
     )
 
 
