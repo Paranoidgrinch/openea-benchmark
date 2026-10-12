@@ -62,3 +62,26 @@ basis policies.  It preserves neutral/anion state provenance, supports
 subpoint checkpoint/resume, and feeds the resulting cardinal points into the
 existing `assess_core_valence()` convergence policy.  See
 `OPENEA_V1_GENERIC_CORE_VALENCE_RUNNER.md`.
+
+## Patch 46: automated core-valence layer
+
+`core_valence_stage.py` runs Delta_CV in every automated run after the CBS layer
+(`--no-cv` skips it):
+
+- States: the selected neutral and anion, at their def2-TZVPPD equilibrium, seeded
+  from the nearest high-level checkpoint; symmetry block (point group, irrep
+  occupation) and the seed-continuous reference branch carried as in the CBS layer.
+- Basis rule (`core_valence_basis.py`, per element, molecule-independent): no core
+  electrons (H, He) -> aug-cc-pVXZ; otherwise the first family available at every
+  needed cardinal among aug-cc-pwCVXZ, cc-pwCVXZ, aug-cc-pCVXZ, cc-pCVXZ (PySCF
+  library, then the local Basis Set Exchange package); a non-aug family gets the
+  diffuse primitives that aug-cc-pVXZ adds to cc-pVXZ.  Coverage today: H-Cl,
+  Ga-Br (via cc-pCVXZ + diffuse); K and Ca have none -> `POLICY_BLOCKED_NO_CV_BASIS`.
+- "Core" = the noble-gas core of `valence_frozen_core_orbitals`, i.e. exactly what
+  the frozen-core CBS left uncorrelated.
+- Convergence: `assess_core_valence` (T,Q first; X=5 if the T->Q change exceeds
+  2 meV and a 5Z basis exists for all elements; central = highest X, bound = last
+  change; no extrapolation).
+- Assembly: EA_0 = EA_CBS(FC) + Delta_ZPE + Delta_CV only when the layer is
+  `CORE_VALENCE_CLEARED`; the bound widens the interval.  Otherwise the CV status is
+  recorded and the value stays frozen-core (`includes_core_valence: false`).
