@@ -32,6 +32,8 @@ from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 from .point_pool import run_parallel
 
 METHODS = ("CCSD(T)", "CCSDT", "CCSDTQ")
+# File tokens; "CCSD(T)" without parentheses would collide with "CCSDT".
+METHOD_TOKEN = {"CCSD(T)": "CCSD_pT", "CCSDT": "CCSDT", "CCSDTQ": "CCSDTQ"}
 
 
 @dataclass(frozen=True)
@@ -162,7 +164,7 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
         for basis, method in tasks:
             print(f"[POST-CC] {spec.system} {role} {basis} {method}", flush=True)
             jobs.append((spec, basis, method, policy,
-                         str(output_dir / "points" / f"{role}__{basis}__{method.replace('(', '').replace(')', '')}.json")))
+                         str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json")))
     results = run_parallel(fn, jobs)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]

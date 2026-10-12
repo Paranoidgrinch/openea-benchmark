@@ -55,3 +55,8 @@ def test_no_affordable_quadruples_applies_nothing(tmp_path, monkeypatch):
 def test_storage_estimate_grows_with_basis():
     spec = SimpleNamespace(atoms=("O", "H"), r_angstrom=0.97, charge=-1, spin_2s=0)
     assert quadruples_storage_mb(spec, "aug-cc-pvdz") > quadruples_storage_mb(spec, "cc-pvdz") > 0
+
+
+def test_point_files_are_distinct_per_method():
+    from openea_benchmark.post_ccsd_t_stage import METHOD_TOKEN, METHODS
+    assert len({METHOD_TOKEN[m] for m in METHODS}) == len(METHODS)
