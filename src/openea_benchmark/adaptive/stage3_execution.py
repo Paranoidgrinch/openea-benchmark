@@ -62,6 +62,13 @@ class PointExecutionStatus(str, Enum):
 _EXTERNAL_INSTABILITY_POLICIES = frozenset({"FAIL", "RECORD_AND_CONTINUE"})
 RHF_EXTERNAL_INSTABILITY_WARNING = "RHF_EXTERNAL_INSTABILITY_RECORDED"
 STABILITY_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_FOLLOWED"
+SCF_SOSCF_RESCUE_WARNING = "SCF_CONVERGED_BY_SOSCF_RESCUE"
+# Version tag of the SCF rescue; cached SCF failures without it are retried.
+SCF_RESCUE_POLICY = "SOSCF_V1"
+# Orbital-gradient threshold of the rescue only.  Second-order SCF can stall at
+# a numerical gradient floor (~1e-6 with diffuse bases) while the energy is
+# stationary to 1e-13; the energy error is quadratic in the gradient (~1e-12 Eh).
+SCF_RESCUE_CONV_TOL_GRAD = 1.0e-5
 
 
 @dataclass(frozen=True)
@@ -543,6 +550,19 @@ def _run_stage3_point_pyscf(
     mf.max_cycle = settings.scf_max_cycle
     mf.max_memory = settings.max_memory_mb
     mf.kernel(dm0=dm0)
+    # SCF rescue: a stalled DIIS run is continued by second-order SCF (same
+    # occupations and symmetry block) from its last orbitals.  PySCF returns
+    # canonicalized orbitals, which are copied back onto the DIIS object.
+    scf_rescued = False
+    if not mf.converged:
+        soscf = mf.newton()
+        soscf.max_cycle = settings.scf_max_cycle
+        soscf.conv_tol_grad = max(settings.scf_conv_tol_grad, SCF_RESCUE_CONV_TOL_GRAD)
+        soscf.kernel(mf.mo_coeff, mf.mo_occ)
+        if soscf.converged:
+            mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
+            mf.e_tot, mf.converged = soscf.e_tot, True
+            scf_rescued = True
     start_energy = float(mf.e_tot) if mf.e_tot is not None else None
 
     # D02: optionally follow internal instabilities within the same reference
@@ -573,6 +593,8 @@ def _run_stage3_point_pyscf(
 
     warnings: list[str] = []
     following_lowering = None
+    if scf_rescued:
+        warnings.append(SCF_SOSCF_RESCUE_WARNING)
     if following_steps:
         if start_energy is not None and mf.e_tot is not None:
             following_lowering = start_energy - float(mf.e_tot)

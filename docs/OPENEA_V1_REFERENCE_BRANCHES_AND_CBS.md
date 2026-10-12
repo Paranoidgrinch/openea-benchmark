@@ -146,3 +146,30 @@ and `adiabatic_ea.json`:  EA_0 = EA_e(CBS) + ZPE(neutral) - ZPE(anion).
   dissociation channels; an anion unbound at CBS is not ZPE-corrected.
 - OH (2026-10-12): ZPE 0.2289 / 0.2290 eV, Delta_ZPE -0.0001 +- 0.0007 eV,
   EA_0 = 1.836 [1.832, 1.840] eV, CLEARED.
+- Binding check at the comparison level uses fragment asymptotes computed in the
+  comparison basis (`comparison_fragments/`).  Before, the QZ curve was compared
+  with TZ asymptotes; the basis shift of the total energy then looked like a
+  model uncertainty of the binding margin (ClO: anion binding UNRESOLVED although
+  the anion lies 1.3 eV below Cl- + O).
+
+## Patch 43: single-reference collapse, SCF rescue
+
+- Collapse detector (electronic-EA stage): a CCSD(T) point with max|T2| >= 1 (the
+  reference determinant no longer dominates) or |(T)| >= 0.25 |E_corr(CCSD)| is not
+  an energy of the labelled state.  Reference set: healthy states <= 0.34 / 0.14;
+  C2 second 1Sigmag+ (3sigma_g^2 instead of 2sigma_u^2) 1.5-1.8 / 0.35-0.44, its
+  CCSD(T) energy 5.8 eV *below* the true X state.
+  Such a candidate gets `SINGLE_REFERENCE_COLLAPSED` and no energy floor.  It is
+  excluded from the competition only if its reference determinant (lowest SCF
+  energy) lies > 3 eV above that of the lowest candidate
+  (`multireference_only_excluded`); otherwise it blocks with
+  `MULTIREFERENCE_METHOD_REQUIRED`.  The thresholds only classify points and are
+  not part of the point-cache signature.
+- SCF rescue: a DIIS SCF that does not converge is continued by second-order SCF
+  (`mf.newton()`, same occupations and symmetry block) from its last orbitals,
+  accepted at orbital gradient 1e-5 (SOSCF stalls at a numerical floor ~1e-6 with
+  diffuse bases while the energy is stationary to 1e-13; energy error ~ gradient^2).
+  The point carries the warning `SCF_CONVERGED_BY_SOSCF_RESCUE`; identity and
+  continuity reviews decide whether it is on the same branch.  Cached
+  SCF_NOT_CONVERGED points without the rescue tag are recomputed once.
+  AlO X2Sigma+ (refS) at 1.7075 A: DIIS stalls at -316.7537, SOSCF -316.7712 Eh.

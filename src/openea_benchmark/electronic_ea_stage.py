@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive.stage3_execution import (
-    PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult, run_stage3_point,
+    SCF_RESCUE_POLICY, PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult,
+    run_stage3_point,
 )
 from .adaptive.stage3_axial_symmetry import AxialSymmetryPolicy
 from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
@@ -70,6 +71,17 @@ class ElectronicEAStagePolicy:
     max_atomic_2s: int = 6
     dissociation_safety_margin_hartree: float = 0.0
     target_half_width_ev: float | None = None
+    # Single-reference collapse (Patch 43): a CCSD(T) point whose largest T2
+    # amplitude reaches 1 (the reference determinant no longer dominates) or
+    # whose (T) correction is this large a fraction of the CCSD correlation
+    # energy is not an energy of the labelled state.  Healthy states of the
+    # reference set stay below 0.35 / 0.14; collapsed C2 1Sigmag+ is 1.5 / 0.35.
+    collapse_max_t2_amplitude: float = 1.0
+    collapse_triples_fraction: float = 0.25
+    # A collapsed candidate whose reference determinant (SCF) lies this far
+    # above the lowest candidate's is not a ground-state competitor; closer
+    # ones block D04 until a multireference treatment exists.
+    collapsed_reference_scf_margin_ev: float = 3.0
 
     def refinement(self) -> Stage3RefinementSettings:
         return Stage3RefinementSettings(
@@ -124,7 +136,11 @@ class CachedPointRunner:
                              .encode()).hexdigest()
         path = self.cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
         if path.exists():
-            return _result_from_record(json.loads(path.read_text())["result"])
+            cached = json.loads(path.read_text())
+            # SCF failures cached before the SCF rescue existed are recomputed once.
+            if not (cached["result"]["status"] == PointExecutionStatus.SCF_NOT_CONVERGED.value
+                    and cached.get("scf_rescue_policy") != SCF_RESCUE_POLICY):
+                return _result_from_record(cached["result"])
         from .point_pool import core_slot
         with core_slot():
             result = run_stage3_point(request, settings=settings, runner=self.backend)
@@ -133,6 +149,7 @@ class CachedPointRunner:
             # the point: never cached, so a resumed run recomputes them.
             return result
         _save_json(path, {"request_id": request.request_id, "fingerprint": fingerprint,
+                          "scf_rescue_policy": SCF_RESCUE_POLICY,
                           "request": request.to_dict(), "result": result.to_dict()})
         return result
 
@@ -198,7 +215,30 @@ def anion_dissociation_channels(atoms: Sequence[str], fragments: Mapping[str, Ma
     return tuple(channels)
 
 
-def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
+# Policy fields that only classify existing points; kept out of the
+# refinement-point cache signature so adding them does not recompute points.
+_CLASSIFICATION_ONLY_FIELDS = ("collapse_max_t2_amplitude", "collapse_triples_fraction",
+                               "collapsed_reference_scf_margin_ev")
+
+
+def reference_collapse_evidence(record: Mapping[str, Any], policy: "ElectronicEAStagePolicy") -> dict | None:
+    """Return evidence if this CCSD(T) point is a single-reference collapse, else None."""
+    t2 = record.get("max_abs_t2_amplitude")
+    triples, corr = record.get("triples_correction_hartree"), record.get("ccsd_correlation_hartree")
+    fraction = abs(triples / corr) if triples is not None and corr else None
+    reasons = []
+    if t2 is not None and t2 >= policy.collapse_max_t2_amplitude:
+        reasons.append("MAX_T2_AMPLITUDE")
+    if fraction is not None and fraction >= policy.collapse_triples_fraction:
+        reasons.append("TRIPLES_FRACTION")
+    if not reasons:
+        return None
+    return {"request_id": record.get("request_id"), "r_angstrom": record.get("r_angstrom"),
+            "max_abs_t2_amplitude": t2, "triples_fraction": fraction, "reasons": reasons}
+
+
+def _competition(label: str, entries: list[dict], margin_ev: float,
+                 collapsed_scf_margin_ev: float = 3.0) -> dict:
     """Automated high-level D04 review for one charge group."""
     resolved = [e for e in entries if e["equilibrium_status"] == "RESOLVED"]
     if not resolved:
@@ -206,9 +246,21 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
                 "reason": f"no {label} candidate has a resolved equilibrium interval"}
     lowest = min(resolved, key=lambda e: e["energy_central_hartree"])
     upper = lowest["energy_upper_hartree"]
-    blocking, excluded, siblings = [], [], []
+    blocking, excluded, siblings, multireference_only = [], [], [], []
     for e in entries:
         if e is lowest:
+            continue
+        if e["equilibrium_status"] == "SINGLE_REFERENCE_COLLAPSED":
+            # Its CCSD(T) energies are not energies of this state (no floor).
+            # Only the reference determinant energy can separate it.
+            ref, low_ref = e.get("scf_lowest_hartree"), lowest.get("scf_lowest_hartree")
+            scf_gap_ev = None if ref is None or low_ref is None else (ref - low_ref) * HARTREE_TO_EV
+            item = {"job_id": e["job_id"], "scf_gap_ev": scf_gap_ev,
+                    "status": "MULTIREFERENCE_METHOD_REQUIRED"}
+            if scf_gap_ev is not None and scf_gap_ev > collapsed_scf_margin_ev:
+                multireference_only.append({**item, "basis": "REFERENCE_DETERMINANT_SCF_GAP"})
+            else:
+                blocking.append(item)
             continue
         floor = e["energy_lower_hartree"] if e["equilibrium_status"] == "RESOLVED" else e["lowest_sampled_hartree"]
         if floor is None:
@@ -232,7 +284,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float) -> dict:
     return {"status": "CLEARED" if not blocking else "UNRESOLVED",
             "selected_job_id": lowest["job_id"] if not blocking else None,
             "lowest_job_id": lowest["job_id"], "blocking": blocking, "excluded_by_margin": excluded,
-            "reference_branch_siblings": siblings,
+            "reference_branch_siblings": siblings, "multireference_only_excluded": multireference_only,
             "reference_sensitivity_ev": max((abs(x["offset_ev"]) for x in siblings), default=0.0),
             "rule": "AUTOMATED_HIGH_LEVEL_D04: lowest resolved equilibrium interval must lie below every "
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}
@@ -262,7 +314,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         from .workflow import WEEKEND_BRANCH_THRESHOLDS, WEEKEND_IDENTITY_THRESHOLDS
         identity_thresholds = identity_thresholds or WEEKEND_IDENTITY_THRESHOLDS
         branch_thresholds = branch_thresholds or WEEKEND_BRANCH_THRESHOLDS
-    signature = sha256(json.dumps(asdict(policy), sort_keys=True).encode()).hexdigest()
+    signature_fields = {k: v for k, v in asdict(policy).items() if k not in _CLASSIFICATION_ONLY_FIELDS}
+    signature = sha256(json.dumps(signature_fields, sort_keys=True).encode()).hexdigest()
     runner = cached_point_runner(output_dir / "refinement_points", signature, point_backend)
     # Same identity semantics as the acquisition review: axial (SO(2)) orbit
     # equivalence of Pi/Delta initializations is admitted, nothing else.
@@ -321,8 +374,17 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                  "energy_central_hartree": None, "energy_lower_hartree": None, "energy_upper_hartree": None,
                  "r_central_angstrom": None, "branch_of": branch_parent(job_id),
                  "reference_branch": job_reqs[0].reference_branch}
+        scf = [point_records[r.request_id]["scf_energy_hartree"] for r in done
+               if point_records[r.request_id].get("scf_energy_hartree") is not None]
+        entry["scf_lowest_hartree"] = min(scf) if scf else None
         label = "neutral" if entry["charge"] == 0 else "anion"
         entries[label].append(entry)
+        collapsed = [c for c in (reference_collapse_evidence(point_records[r.request_id], policy) for r in done) if c]
+        if collapsed:
+            entry.update(equilibrium_status="SINGLE_REFERENCE_COLLAPSED", lowest_sampled_hartree=None,
+                         reference_collapse={"n_points": len(collapsed), "n_sampled": len(done),
+                                             "points": collapsed})
+            continue
         # An unbracketed high-level curve (minimum at the grid edge, e.g. because
         # the DFT and CCSD(T) minima differ) is extended by the refinement loop
         # rather than left as an unresolved D04 competitor.
@@ -345,7 +407,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
 
     if loops_out is not None:
         loops_out.update(loops)
-    competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev)
+    competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev,
+                                      policy.collapsed_reference_scf_margin_ev)
                    for label, items in entries.items()}
     basis = requests[0].basis if requests else None
     fragments = scan_atomic_fragments(atoms=atoms, basis=basis, settings=stage3_settings, policy=policy,

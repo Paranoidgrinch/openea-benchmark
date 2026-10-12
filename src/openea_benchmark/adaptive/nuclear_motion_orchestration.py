@@ -651,6 +651,7 @@ def run_nuclear_pec_model_convergence(
     retry_settings: Stage3LoopRetrySettings | None = None,
     audit_settings: Any = None,
     duplicate_energy_tolerance_hartree: float = 1.0e-7,
+    comparison_anion_dissociation_channels: Sequence[Any] | None = None,
     cross_model_identity_evidence_ids: tuple[str, ...] = (),
     existing_comparison_neutral_context: NuclearPECStage3Context | None = None,
     existing_comparison_anion_context: NuclearPECStage3Context | None = None,
@@ -760,12 +761,15 @@ def run_nuclear_pec_model_convergence(
         state_id=anion_cmp.state_id,
         evidence_ids=model.authorization_evidence_ids,
     )
+    # Asymptotes must be at the comparison level too: a basis shift of the
+    # total energy would otherwise appear as a binding-margin model difference.
     comparison_assessment = run_diatomic_nuclear_motion(
         neutral_pec=neutral_nuc,
         anion_pec=anion_nuc,
         masses=masses,
         settings=nuclear_settings,
-        anion_dissociation_channels=anion_dissociation_channels,
+        anion_dissociation_channels=(anion_dissociation_channels if comparison_anion_dissociation_channels is None
+                                     else comparison_anion_dissociation_channels),
         dissociation_safety_margin_hartree=dissociation_safety_margin_hartree,
         model_evidence=None,
     )

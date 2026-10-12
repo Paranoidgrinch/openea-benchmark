@@ -82,3 +82,24 @@ def test_single_basis_interval_reports_sign_not_verdict():
     lower, upper, central, sign = single_basis_ea_interval(n, a)
     assert central == pytest.approx(-0.007, abs=1e-6)
     assert sign == "NEGATIVE"   # a near-threshold negative value is only a sign at this level
+
+
+def test_reference_collapse_evidence_flags_large_t2_or_triples():
+    from openea_benchmark.electronic_ea_stage import reference_collapse_evidence
+    pol = ElectronicEAStagePolicy()
+    healthy = {"max_abs_t2_amplitude": 0.34, "triples_correction_hartree": -0.04, "ccsd_correlation_hartree": -0.4}
+    assert reference_collapse_evidence(healthy, pol) is None
+    c2 = {"max_abs_t2_amplitude": 1.77, "triples_correction_hartree": -0.26, "ccsd_correlation_hartree": -0.6}
+    assert reference_collapse_evidence(c2, pol)["reasons"] == ["MAX_T2_AMPLITUDE", "TRIPLES_FRACTION"]
+    assert reference_collapse_evidence({"max_abs_t2_amplitude": None}, pol) is None
+
+
+def test_collapsed_candidate_excluded_only_by_reference_gap():
+    low = {**entry("x", center=-1.0, lo=-1.0001, hi=-0.9999), "scf_lowest_hartree": -0.6}
+    far = {**entry("c", status="SINGLE_REFERENCE_COLLAPSED"), "scf_lowest_hartree": -0.6 + 6.0 * H}
+    res = _competition("neutral", [low, far], 1.0, 3.0)
+    assert res["status"] == "CLEARED" and res["multireference_only_excluded"][0]["job_id"] == "c"
+    near = {**far, "scf_lowest_hartree": -0.6 + 1.0 * H}
+    res = _competition("neutral", [low, near], 1.0, 3.0)
+    assert res["status"] == "UNRESOLVED" and res["blocking"][0]["status"] == "MULTIREFERENCE_METHOD_REQUIRED"
+    assert _competition("neutral", [low, {**far, "scf_lowest_hartree": None}], 1.0, 3.0)["status"] == "UNRESOLVED"

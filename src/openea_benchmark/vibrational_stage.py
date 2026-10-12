@@ -56,7 +56,9 @@ from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
 from .adaptive.stage3_loop import Stage3LoopRetrySettings
 from .adaptive.stage3_refinement import Stage3RefinementSettings
 from .attachment.asymptote import DissociationChannel
-from .electronic_ea_stage import _save_json, cached_point_runner
+from .electronic_ea_stage import (
+    ElectronicEAStagePolicy, _save_json, anion_dissociation_channels, cached_point_runner, scan_atomic_fragments,
+)
 
 MASS_EVIDENCE = "PYSCF_DATA_COMMON_ISOTOPE_MASSES_MOST_ABUNDANT_ISOTOPE"
 
@@ -301,11 +303,20 @@ def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[st
         basis_by_element=None, methods=("CCSD", "CCSD(T)"),
         authorization_evidence_ids=("OPENEA_ZPE_STAGE_POLICY_COMPARISON_BASIS",),
         rationale="Delta_ZPE basis sensitivity: primary Stage-3 basis vs a larger basis at the same geometries.")
+    # Fragment asymptotes at the comparison basis (binding-margin model check).
+    comparison_channels = channels
+    if channels:
+        cmp_fragments = scan_atomic_fragments(atoms=atoms, basis=policy.comparison_basis, settings=stage3_settings,
+                                              policy=ElectronicEAStagePolicy(),
+                                              cache_dir=output_dir / "comparison_fragments")
+        comparison_channels = anion_dissociation_channels(atoms, cmp_fragments)
+        record["comparison_dissociation_channels"] = [asdict(c) for c in comparison_channels]
     common = dict(primary_assessment=assessment, primary_neutral_context=contexts["neutral"],
                   primary_anion_context=contexts["anion"], model=model, masses=masses,
                   nuclear_settings=nuclear_settings, execution_settings=settings,
                   identity_thresholds=identity_thresholds, branch_thresholds=branch_thresholds,
-                  anion_dissociation_channels=channels, retry_settings=retry, point_runner=runner,
+                  anion_dissociation_channels=channels, comparison_anion_dissociation_channels=comparison_channels,
+                  retry_settings=retry, point_runner=runner,
                   resolver=resolver)
     model_run = run_nuclear_pec_model_convergence(**common)
     if model_run.status is NuclearPECModelRunStatus.CROSS_MODEL_IDENTITY_REVIEW_REQUIRED:
