@@ -2091,6 +2091,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the frozen-core aug-cc-pV{Q,5}Z (+d-aug) CBS layer after the electronic EA",
     )
     parser.add_argument(
+        "--no-zpe", action="store_true",
+        help="Skip the zero-point (v=0) nuclear-motion layer and the adiabatic-EA assembly",
+    )
+    parser.add_argument(
         "--cbs-memory-mb", type=int, default=48000,
         help="PySCF memory for the CBS-layer CCSD(T) points",
     )
@@ -2160,6 +2164,7 @@ def _run_symmetry_auto(args) -> int:
             assemble_electronic_ea=not args.no_electronic_ea,
             cbs_stage=not args.no_cbs and not args.no_electronic_ea,
             cbs_memory_mb=args.cbs_memory_mb,
+            zpe_stage=not args.no_zpe and not args.no_electronic_ea,
         ),
     )
     print("[SYMMETRY AUTO] " + json.dumps({
@@ -2168,6 +2173,7 @@ def _run_symmetry_auto(args) -> int:
         "mr_only_candidates": len(summary["mr_only_candidates"]),
         "electronic_ea": state.get("electronic_ea"),
         "cbs": state.get("cbs"),
+        "adiabatic_ea": state.get("adiabatic_ea"),
     }, default=str), flush=True)
     return 0
 

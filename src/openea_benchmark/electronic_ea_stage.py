@@ -253,7 +253,10 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                             policy: ElectronicEAStagePolicy = ElectronicEAStagePolicy(),
                             point_backend: Callable[..., Stage3PointResult] | None = None,
                             fragment_runner: Callable[..., Any] | None = None,
-                            identity_thresholds: Any = None, branch_thresholds: Any = None) -> dict:
+                            identity_thresholds: Any = None, branch_thresholds: Any = None,
+                            loops_out: dict | None = None) -> dict:
+    """``loops_out`` (optional) receives the refinement loop result per job id, for
+    downstream layers that need the identity-cleared curves (nuclear motion)."""
     output_dir = Path(output_dir)
     if identity_thresholds is None or branch_thresholds is None:
         from .workflow import WEEKEND_BRANCH_THRESHOLDS, WEEKEND_IDENTITY_THRESHOLDS
@@ -340,6 +343,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         for _ in executor.map(lambda item: refine(*item), work):
             pass
 
+    if loops_out is not None:
+        loops_out.update(loops)
     competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev)
                    for label, items in entries.items()}
     basis = requests[0].basis if requests else None

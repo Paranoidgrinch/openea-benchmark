@@ -112,3 +112,32 @@ K/Ca or Ga-Kr change, and only their CBS point cache key gets the
 `frozen_core_rule` entry.  Transition metals keep PySCF's table.
 Separate check (aug-cc-pCVxZ on Mg): correlating Mg 2s2p properly changes the MgH
 EA by only +0.000 (TZ) / +0.001 eV (QZ).
+
+## Patch 42 — automated zero-point layer and adiabatic EA
+
+`vibrational_stage.py`, run after the CBS layer (`AcquisitionSettings.zpe_stage`; CLI
+on by default in `symmetry-auto`, `--no-zpe`).  Writes `nuclear_motion/nuclear_motion.json`
+and `adiabatic_ea.json`:  EA_0 = EA_e(CBS) + ZPE(neutral) - ZPE(anion).
+
+- Tool: the existing J=0 radial solver (`adaptive/nuclear_motion.py`) on the
+  identity-cleared def2-TZVPPD CCSD(T) curves of the selected states (refinement
+  loops handed over by the electronic-EA stage via `loops_out`).  Masses: most
+  abundant isotopes (PySCF table).
+- Diagnosis -> tool: the equilibrium search leaves only about +-0.05 A of curve;
+  the solver reports insufficient boundary clearance / finite-domain sensitivity
+  and the existing D12 orchestration (`run_nuclear_pec_refinement`) adds points
+  outward (0.04 A steps, seeded from the boundary checkpoint, re-reviewed for
+  identity/continuity) until the solve clears.  OH needed 9 rounds (0.56-1.38 A).
+  Because the domain check trims a fraction of the total span, both sides must
+  grow; extending only the outer side was tried and does not converge.
+- Model sensitivity: the curve is recomputed at the same geometries in
+  def2-QZVPPD (`run_nuclear_pec_model_convergence`).  The cross-model identity
+  evidence D12 demands is generated from explicit checks: no instability
+  following, same equilibrium bond length (0.02 A), and no kink in the QZ-minus-TZ
+  energy offset (each point within 0.5 mEh of the line through its neighbours; OH:
+  0.16 mEh, while the offset itself varies by 6 mEh over the range).
+- Assembly: interval = CBS interval shifted by Delta_ZPE and widened by its bound;
+  BOUND only if the whole interval is positive and the anion v=0 lies below its
+  dissociation channels; an anion unbound at CBS is not ZPE-corrected.
+- OH (2026-10-12): ZPE 0.2289 / 0.2290 eV, Delta_ZPE -0.0001 +- 0.0007 eV,
+  EA_0 = 1.836 [1.832, 1.840] eV, CLEARED.

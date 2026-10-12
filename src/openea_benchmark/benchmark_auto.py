@@ -133,6 +133,7 @@ class AcquisitionSettings:
     # Patch 39: frozen-core aug-cc-pV{Q,5}Z (+d-aug) CBS after the electronic EA.
     cbs_stage: bool = False
     cbs_memory_mb: int = 48000
+    zpe_stage: bool = False
 
     def __post_init__(self) -> None:
         if self.max_points < 0 or self.threads < 1 or self.memory_mb < 1:
@@ -411,6 +412,7 @@ def run_benchmark_acquisition(
     _save(output_dir / "stage3_pec_reviews.json", pec_reviews)
 
     electronic_ea = None
+    ea_loops: dict = {}
     if settings.assemble_electronic_ea and settings.compute_points and not pending:
         from .electronic_ea_stage import run_electronic_ea_stage
         electronic_ea = run_electronic_ea_stage(
@@ -418,7 +420,7 @@ def run_benchmark_acquisition(
             requests=[r for r in requests if r.job_id not in superseded],
             point_records=point_result_records, pec_reviews=pec_reviews,
             stage3_settings=stage3_settings, output_dir=output_dir / "electronic_ea",
-            point_backend=point_runner,
+            point_backend=point_runner, loops_out=ea_loops,
         )
         electronic_ea["stage3_purpose"] = stage3_purpose
 
@@ -431,6 +433,14 @@ def run_benchmark_acquisition(
             refinement_dir=output_dir / "electronic_ea" / "refinement_points",
             stage3_settings=stage3_settings, output_dir=output_dir / "cbs",
             policy=CBSStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
+
+    nuclear = adiabatic = None
+    if electronic_ea is not None and settings.zpe_stage:
+        from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
+        nuclear = run_vibrational_stage(
+            electronic_ea=electronic_ea, loops=ea_loops, atoms=tuple(manifest_system["atoms"]),
+            stage3_settings=stage3_settings, output_dir=output_dir / "nuclear_motion", point_backend=point_runner)
+        adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, output_dir=output_dir)
 
     outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
     state = {
@@ -494,6 +504,10 @@ def run_benchmark_acquisition(
                                     "reference_sensitivity_ev", "multireference_exceeded")}
         | {"diffuse_correction_ev": (cbs.get("cbs") or {}).get("diffuse_correction_ev"),
            "model_sensitivity_ev": (cbs.get("cbs") or {}).get("cbs_model_sensitivity_bound_ev")},
+        "nuclear_motion": None if nuclear is None else {
+            k: nuclear.get(k) for k in ("status", "reason", "delta_zpe_ev", "delta_zpe_half_width_ev",
+                                        "zpe_neutral_ev", "zpe_anion_ev", "anion_vibrational_binding")},
+        "adiabatic_ea": adiabatic,
         "ground_state_validated": False, "ea_computed": False,
         "state_competition_cleared": False,
         "automatic_pruning_performed": False,
