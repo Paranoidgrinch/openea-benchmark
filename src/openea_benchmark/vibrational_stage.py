@@ -243,6 +243,31 @@ def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[st
     record = _run_vibrational_stage(**common, jobs={"neutral": n_id, "anion": a_id})
     if not str(record.get("status", "")).startswith("PEC_EXTENSION_"):
         return record
+    record = _branch_fallback(record, common, electronic_ea, loops, n_id, a_id, output_dir)
+    if str(record.get("status", "")).startswith("PEC_EXTENSION_"):
+        record = _mr_fallback(record, electronic_ea, loops, atoms, policy, output_dir)
+    return record
+
+
+def _mr_fallback(record: dict, electronic_ea, loops, atoms, policy: ZPEStagePolicy, output_dir) -> dict:
+    """No single-reference curve covers the v=0 range: Delta_ZPE from MR curves (Patch 50)."""
+    from .mr_nuclear_curve import mr_zpe_fallback
+    print(f"[ZPE] {electronic_ea.get('system')} single-reference curves failed; multireference curves", flush=True)
+    channels = tuple(DissociationChannel(**c) for c in electronic_ea.get("anion_dissociation_channels") or ())
+    mr = mr_zpe_fallback(electronic_ea=electronic_ea, loops=loops, masses=main_isotopologue_masses(atoms),
+                         channels=channels, nuclear_settings=policy.nuclear_settings(), output_dir=Path(output_dir))
+    out = dict(record)
+    out["multireference_fallback"] = mr
+    if mr.get("status") == "CLEARED":
+        out.update(status="CLEARED", reason="Delta_ZPE from multireference (SC-NEVPT2) curves",
+                   delta_zpe_ev=mr["delta_zpe_ev"], delta_zpe_half_width_ev=mr["delta_zpe_half_width_ev"],
+                   zpe_neutral_ev=mr["zpe_neutral_ev"], zpe_anion_ev=mr["zpe_anion_ev"],
+                   anion_vibrational_binding=mr["anion_vibrational_binding"], zpe_curve_method="MULTIREFERENCE")
+    _save_json(Path(output_dir) / "nuclear_motion.json", out)
+    return out
+
+
+def _branch_fallback(record: dict, common: dict, electronic_ea, loops, n_id, a_id, output_dir) -> dict:
     # The failure details list every extended curve; only the ones that failed count.
     failed_roles = {entry["role"] for entry in record.get("failed_extension") or ()
                     if any(p.get("status") != "COMPLETED" for p in entry.get("points") or ())

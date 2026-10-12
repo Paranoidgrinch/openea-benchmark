@@ -32,6 +32,8 @@ def run(monkeypatch, tmp_path, loops, first_status="PEC_EXTENSION_EXECUTION_INCO
                 "zpe_neutral_ev": 0.06, "zpe_anion_ev": 0.05}
 
     monkeypatch.setattr(vibrational_stage, "_run_vibrational_stage", fake)
+    monkeypatch.setattr(vibrational_stage, "_mr_fallback",
+                        lambda record, *a, **k: {**record, "multireference_fallback": {"status": "MR_FAKE"}})
     ea = {"selected_neutral_job": "X__refS", "selected_anion_job": "Y", "system": "XY"}
     res = run_vibrational_stage(electronic_ea=ea, loops=loops, atoms=("X", "Y"), stage3_settings=None,
                                 output_dir=tmp_path)
@@ -54,6 +56,7 @@ def test_no_sibling_branch_keeps_the_failure(monkeypatch, tmp_path):
     loops = {"X__refS": SimpleNamespace(final_pec=pec(1.14)), "Y": SimpleNamespace(final_pec=pec(0.8))}
     res, calls = run(monkeypatch, tmp_path, loops)
     assert len(calls) == 1 and res["status"] == "PEC_EXTENSION_EXECUTION_INCOMPLETE"
+    assert res["multireference_fallback"]["status"] == "MR_FAKE"  # MR curves are tried next
 
 
 def test_other_failures_do_not_switch_branch(monkeypatch, tmp_path):
