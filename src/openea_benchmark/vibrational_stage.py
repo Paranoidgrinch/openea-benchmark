@@ -56,6 +56,7 @@ from .adaptive.stage3_identity import resolve_high_level_identity_and_pec
 from .adaptive.stage3_loop import Stage3LoopRetrySettings
 from .adaptive.stage3_refinement import Stage3RefinementSettings
 from .attachment.asymptote import DissociationChannel
+from .reference_branches import FOLLOWED_SUFFIX, SEED_SUFFIX
 from .electronic_ea_stage import (
     ElectronicEAStagePolicy, _save_json, anion_dissociation_channels, cached_point_runner, scan_atomic_fragments,
 )
@@ -197,16 +198,92 @@ def _extension_failure_details(run, contexts, runner, settings, identity_thresho
     return details
 
 
+def harmonic_curvature(pec: Any, half_window_angstrom: float = 0.03) -> float | None:
+    """Second derivative (Eh/A^2) of a quadratic fit around the lowest sampled point."""
+    pts = sorted((float(p.r_angstrom), float(p.energy_hartree)) for p in pec.points)
+    if not pts:
+        return None
+    r0 = min(pts, key=lambda p: p[1])[0]
+    near = [p for p in pts if abs(p[0] - r0) <= half_window_angstrom + 1e-9]
+    if len(near) < 3:
+        return None
+    r, e = np.array(near).T
+    k = 2.0 * float(np.polyfit(r - r0, e, 2)[0])
+    return k if k > 0.0 else None
+
+
+def _followed_sibling(job_id: str | None, loops: Mapping[str, Any]) -> str | None:
+    """The STABILITY_FOLLOWED branch of a seed-continuous branch job, if it was refined."""
+    if not job_id or not job_id.endswith(SEED_SUFFIX):
+        return None
+    sibling = job_id[: -len(SEED_SUFFIX)] + FOLLOWED_SUFFIX
+    loop = loops.get(sibling)
+    return sibling if loop is not None and getattr(loop, "final_pec", None) is not None else None
+
+
 def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any], atoms,
                           stage3_settings: Stage3ExecutionSettings, output_dir: Path,
                           identity_thresholds: Any = None, branch_thresholds: Any = None,
                           policy: ZPEStagePolicy = ZPEStagePolicy(),
                           point_backend: Callable[..., Stage3PointResult] | None = None) -> dict:
-    output_dir = Path(output_dir)
+    """Zero-point layer on the selected curves, with a reference-branch fallback.
+
+    A seed-continuous ROHF branch (``__refS``) can end inside the range the v=0
+    wavefunction needs: the internal-saddle SCF solution disappears and the
+    extension points do not converge.  The curve *shape* is then taken from the
+    stability-followed sibling branch of the same symmetry-labelled state, which
+    exists at all R.  The electronic EA keeps the selected branch; the relative
+    difference of the two branches' harmonic frequencies at their minima,
+    applied to that role's ZPE, is added to the Delta_ZPE half-width.
+    """
+    common = dict(electronic_ea=electronic_ea, loops=loops, atoms=atoms, stage3_settings=stage3_settings,
+                  output_dir=Path(output_dir), identity_thresholds=identity_thresholds,
+                  branch_thresholds=branch_thresholds, policy=policy, point_backend=point_backend)
+    n_id, a_id = electronic_ea.get("selected_neutral_job"), electronic_ea.get("selected_anion_job")
+    record = _run_vibrational_stage(**common, jobs={"neutral": n_id, "anion": a_id})
+    if not str(record.get("status", "")).startswith("PEC_EXTENSION_"):
+        return record
+    failed_roles = {entry["role"] for entry in record.get("failed_extension") or ()}
+    jobs = {"neutral": n_id, "anion": a_id}
+    substitution = {}
+    for role in sorted(failed_roles):
+        sibling = _followed_sibling(jobs[role], loops)
+        if sibling is None:
+            return record
+        k_sel = harmonic_curvature(loops[jobs[role]].final_pec)
+        k_sib = harmonic_curvature(loops[sibling].final_pec)
+        if k_sel is None or k_sib is None:
+            return record
+        substitution[role] = {"selected_job": jobs[role], "shape_job": sibling,
+                              "curvature_selected_hartree_per_angstrom2": k_sel,
+                              "curvature_shape_hartree_per_angstrom2": k_sib,
+                              "relative_frequency_difference": abs(float(np.sqrt(k_sib / k_sel)) - 1.0)}
+        jobs[role] = sibling
+    print(f"[ZPE] {electronic_ea.get('system')} seed branch ended; curve shape from "
+          f"{', '.join(v['shape_job'] for v in substitution.values())}", flush=True)
+    fallback = _run_vibrational_stage(**common, jobs=jobs)
+    fallback["reference_branch_shape_substitution"] = {
+        "reason": "SEED_CONTINUOUS_BRANCH_EXTENSION_FAILED",
+        "selected_branch_attempt": {k: record.get(k) for k in ("status", "reason", "failed_extension")},
+        "roles": substitution}
+    if fallback.get("delta_zpe_half_width_ev") is not None:
+        widening = sum(float(fallback.get(f"zpe_{role}_ev") or 0.0) * item["relative_frequency_difference"]
+                       for role, item in substitution.items())
+        fallback["reference_branch_shape_substitution"]["half_width_added_ev"] = widening
+        fallback["delta_zpe_half_width_ev"] = float(fallback["delta_zpe_half_width_ev"]) + widening
+    _save_json(Path(output_dir) / "nuclear_motion.json", fallback)
+    return fallback
+
+
+def _run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any], atoms,
+                           stage3_settings: Stage3ExecutionSettings, output_dir: Path,
+                           identity_thresholds: Any, branch_thresholds: Any, policy: ZPEStagePolicy,
+                           point_backend: Callable[..., Stage3PointResult] | None,
+                           jobs: Mapping[str, str | None]) -> dict:
     record: dict[str, Any] = {"stage": "NUCLEAR_MOTION_ZPE", "policy": asdict(policy),
                               "includes_rotation": False, "includes_dboc": False,
                               "validation_metadata_used_in_computation": False}
-    n_id, a_id = electronic_ea.get("selected_neutral_job"), electronic_ea.get("selected_anion_job")
+    n_id, a_id = jobs["neutral"], jobs["anion"]
     if electronic_ea.get("status") != "ELECTRONIC_EA_EVALUATED" or n_id not in loops or a_id not in loops:
         record.update(status="NOT_ATTEMPTED", reason="no evaluated electronic EA with refinement loops")
         _save_json(output_dir / "nuclear_motion.json", record)

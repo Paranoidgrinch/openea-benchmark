@@ -184,3 +184,21 @@ and `adiabatic_ea.json`:  EA_0 = EA_e(CBS) + ZPE(neutral) - ZPE(anion).
   reproducibly in the same symmetry block.
 - `SCF_RESCUE_POLICY = "SOSCF_V2"`; cached SCF_NOT_CONVERGED *and* SCF_UNSTABLE
   points with an older policy tag are recomputed once.
+
+## Patch 45: seed branches are never rescued; ZPE shape from the followed branch
+
+- A seed-continuous (`__refS`) reference is often an internal saddle point of
+  the ROHF energy.  The SOSCF rescue is a minimizer and leaves it: AlO X2Sigma+
+  refS at 1.7075 A was "rescued" 14 mEh lower onto the followed branch, and the
+  continuity review rejected the extended curve.  Seed-branch points now get no
+  rescue; DIIS failure means the branch ends there (AlO refS: converges up to
+  1.69 A, not beyond, also with damping, level shift or 400 cycles).
+  `SCF_RESCUE_POLICY = "SOSCF_V3"`; cached seed-branch points carrying
+  `SCF_CONVERGED_BY_SOSCF_RESCUE` are recomputed.
+- ZPE layer: when the extension of a seed-branch curve fails and the job has a
+  refined `__refF` sibling (same symmetry-labelled state), the nuclear problem
+  is solved on the sibling's curve shape.  The electronic EA keeps the selected
+  branch.  The relative harmonic-frequency difference of the two branches
+  (quadratic fit +-0.03 A around each lowest point) times that role's ZPE is
+  added to the Delta_ZPE half-width.  Recorded as
+  `reference_branch_shape_substitution`.  Any other failure stays fail closed.

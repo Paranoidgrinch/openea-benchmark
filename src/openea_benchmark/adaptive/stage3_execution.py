@@ -65,7 +65,8 @@ STABILITY_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_FOLLOWED"
 SCF_SOSCF_RESCUE_WARNING = "SCF_CONVERGED_BY_SOSCF_RESCUE"
 # Version tag of the SCF rescue; cached SCF failures without it are retried.
 # V2: the rescue also runs in every internal-stability following step.
-SCF_RESCUE_POLICY = "SOSCF_V2"
+# V3: no rescue on seed-continuous reference branches.
+SCF_RESCUE_POLICY = "SOSCF_V3"
 # Orbital-gradient threshold of the rescue only.  Second-order SCF can stall at
 # a numerical gradient floor (~1e-6 with diffuse bases) while the energy is
 # stationary to 1e-13; the energy error is quadratic in the gradient (~1e-12 Eh).
@@ -473,7 +474,8 @@ def _broken_symmetry_uhf_probe(
     return float(rhf.e_tot) - float(uhf.e_tot), float(uhf.spin_square()[0])
 
 
-def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings) -> bool:
+def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings,
+                            allow_rescue: bool = True) -> bool:
     """Run the SCF from dm0; return True when the SOSCF rescue converged it.
 
     SCF rescue: a stalled DIIS run is continued by second-order SCF (same
@@ -481,7 +483,7 @@ def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings
     canonicalized orbitals, which are copied back onto the DIIS object.
     """
     mf.kernel(dm0=dm0)
-    if mf.converged:
+    if mf.converged or not allow_rescue:
         return False
     soscf = mf.newton()
     soscf.max_cycle = settings.scf_max_cycle
@@ -571,7 +573,12 @@ def _run_stage3_point_pyscf(
     mf.conv_tol_grad = settings.scf_conv_tol_grad
     mf.max_cycle = settings.scf_max_cycle
     mf.max_memory = settings.max_memory_mb
-    scf_rescued = _scf_kernel_with_rescue(mf, dm0, settings)
+    seed_branch = request.reference_branch == SEED_CONTINUOUS_BRANCH
+    # A seed-continuous reference is kept even when it is an internal saddle
+    # point; a second-order minimizer would leave it for the lower branch
+    # (AlO X2Sigma+ refS beyond 1.69 A: SOSCF landed 14 mEh lower, on refF).
+    # Such a point stays SCF_NOT_CONVERGED: the branch has ended there.
+    scf_rescued = _scf_kernel_with_rescue(mf, dm0, settings, allow_rescue=not seed_branch)
     start_energy = float(mf.e_tot) if mf.e_tot is not None else None
 
     # D02: optionally follow internal instabilities within the same reference
@@ -579,7 +586,6 @@ def _run_stage3_point_pyscf(
     # because a saddle point frequently stalls DIIS.
     following_steps = 0
     internal_stable: bool | None = None
-    seed_branch = request.reference_branch == SEED_CONTINUOUS_BRANCH
     max_following = 0 if seed_branch else settings.stability_following_max_steps
     if mf.converged or max_following > 0:
         mo_i, _, stable_i, _ = mf.stability(internal=True, external=False, return_status=True)

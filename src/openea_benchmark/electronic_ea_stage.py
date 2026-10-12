@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive.stage3_execution import (
-    SCF_RESCUE_POLICY, PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult,
+    SCF_RESCUE_POLICY, SCF_SOSCF_RESCUE_WARNING, SEED_CONTINUOUS_BRANCH, PointExecutionStatus,
+    Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult,
     run_stage3_point,
 )
 from .adaptive.stage3_axial_symmetry import AxialSymmetryPolicy
@@ -121,6 +122,16 @@ _RESCUABLE_SCF_STATUSES = frozenset({PointExecutionStatus.SCF_NOT_CONVERGED.valu
                                      PointExecutionStatus.SCF_UNSTABLE.value})
 
 
+def _rescue_policy_affects(cached: Mapping[str, Any]) -> bool:
+    """A cached point whose outcome a newer SCF rescue policy can change."""
+    result = cached["result"]
+    if result["status"] in _RESCUABLE_SCF_STATUSES:
+        return True
+    # SOSCF_V1/V2 rescued seed-continuous points onto the other reference branch.
+    return (cached["request"].get("reference_branch") == SEED_CONTINUOUS_BRANCH
+            and SCF_SOSCF_RESCUE_WARNING in (result.get("reference_warnings") or ()))
+
+
 class CachedPointRunner:
     """Stage-3 runner that persists every refinement point (resume without recompute).
 
@@ -142,8 +153,8 @@ class CachedPointRunner:
         if path.exists():
             cached = json.loads(path.read_text())
             # SCF failures cached under an older SCF rescue policy are recomputed once.
-            if not (cached["result"]["status"] in _RESCUABLE_SCF_STATUSES
-                    and cached.get("scf_rescue_policy") != SCF_RESCUE_POLICY):
+            if not (cached.get("scf_rescue_policy") != SCF_RESCUE_POLICY
+                    and _rescue_policy_affects(cached)):
                 return _result_from_record(cached["result"])
         from .point_pool import core_slot
         with core_slot():

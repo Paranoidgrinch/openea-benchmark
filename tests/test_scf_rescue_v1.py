@@ -58,3 +58,9 @@ def test_following_step_on_real_molecule_uses_rescue_path():
             break
         _scf_kernel_with_rescue(mf, mf.make_rdm1(mo, mf.mo_occ), settings)
     assert mf.converged and stable
+
+
+def test_seed_branch_is_never_rescued_onto_another_branch():
+    mf = FakeSCF(False, True)
+    assert _scf_kernel_with_rescue(mf, None, Stage3ExecutionSettings(), allow_rescue=False) is False
+    assert mf.soscf_starts == [] and not mf.converged

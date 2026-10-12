@@ -216,3 +216,25 @@ def test_scf_failures_from_older_rescue_policy_are_recomputed_once(tmp_path):
     path.write_text(json.dumps({**record, "scf_rescue_policy": "SOSCF_V1"}))
     assert runner(req, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
     assert len(calls) == 2
+
+
+def test_seed_branch_points_rescued_by_older_policy_are_recomputed(tmp_path):
+    import json
+    from dataclasses import replace as dc_replace
+    from openea_benchmark.adaptive.stage3_execution import SCF_SOSCF_RESCUE_WARNING, SEED_CONTINUOUS_BRANCH
+    from openea_benchmark.electronic_ea_stage import cached_point_runner
+    calls = []
+
+    def backend(req, settings):
+        calls.append(req.request_id)
+        return _empty_result(req, PointExecutionStatus.COMPLETED, reference_warnings=(SCF_SOSCF_RESCUE_WARNING,))
+
+    runner = cached_point_runner(tmp_path, "sig", backend)
+    for branch, expected_calls in ((SEED_CONTINUOUS_BRANCH, 2), (None, 1)):
+        calls.clear()
+        req = dc_replace(request("A", -1, 0), reference_branch=branch, request_id=f"A_{branch}")
+        runner(req, Stage3ExecutionSettings())
+        path = next(p for p in tmp_path.glob("*.json") if json.loads(p.read_text())["request_id"] == req.request_id)
+        path.write_text(json.dumps({**json.loads(path.read_text()), "scf_rescue_policy": "SOSCF_V2"}))
+        runner(req, Stage3ExecutionSettings())
+        assert len(calls) == expected_calls
