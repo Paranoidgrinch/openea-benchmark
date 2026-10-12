@@ -25,7 +25,9 @@ def run(monkeypatch, tmp_path, loops, first_status="PEC_EXTENSION_EXECUTION_INCO
         calls.append(dict(kw["jobs"]))
         if len(calls) == 1:
             return {"status": first_status, "reason": "seed branch ended",
-                    "failed_extension": [{"role": "neutral"}]}
+                    "failed_extension": [{"role": "neutral", "points": [{"status": "SCF_NOT_CONVERGED"}]},
+                                         {"role": "anion", "points": [{"status": "COMPLETED"}],
+                                          "continuity_review": {"status": "CLEARED"}}]}
         return {"status": "CLEARED", "delta_zpe_ev": 0.001, "delta_zpe_half_width_ev": 0.0005,
                 "zpe_neutral_ev": 0.06, "zpe_anion_ev": 0.05}
 

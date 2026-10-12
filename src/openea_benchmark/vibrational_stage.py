@@ -243,7 +243,13 @@ def run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[st
     record = _run_vibrational_stage(**common, jobs={"neutral": n_id, "anion": a_id})
     if not str(record.get("status", "")).startswith("PEC_EXTENSION_"):
         return record
-    failed_roles = {entry["role"] for entry in record.get("failed_extension") or ()}
+    # The failure details list every extended curve; only the ones that failed count.
+    failed_roles = {entry["role"] for entry in record.get("failed_extension") or ()
+                    if any(p.get("status") != "COMPLETED" for p in entry.get("points") or ())
+                    or (entry.get("continuity_review") or {}).get("status") not in (None, "CLEARED")
+                    or (entry.get("initialization_review") or {}).get("status") not in (None, "CLEARED")}
+    if not failed_roles:
+        return record
     jobs = {"neutral": n_id, "anion": a_id}
     substitution = {}
     for role in sorted(failed_roles):
