@@ -43,3 +43,12 @@ gap in every run.  Now:
   on the SCF orbitals + NEVPT2 is used; that has no lower-bound property, so such a
   block needs > 1.0 eV.
 - The run state lists only the candidates that remain open.
+
+## Patch 52: final verdict (`final_resolver.py`)
+
+`outcome` of every run is now one of `EA` (EA_0 with interval), `UNBOUND`, or
+`UNRESOLVED` with the full list of blocking reasons (`final_verdict.blocking`).
+`EA` requires: state competition cleared for neutral and anion, MR-only states
+excluded, CBS cleared, adiabatic assembly cleared with CV, SR, SOC and
+post-CCSD(T) all included.  MR screening values above thresholds are warnings.
+`UNBOUND` requires the CBS continuum/binding rule and a closed state question.

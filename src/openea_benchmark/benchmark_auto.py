@@ -493,9 +493,12 @@ def run_benchmark_acquisition(
                                           spin_orbit=spin_orbit, scalar_relativity=scalar_relativity,
                                           post_ccsd_t=post_ccsd_t, output_dir=output_dir)
 
-    outcome = "UNRESOLVED"  # no complete adiabatic-EA assembler here yet
+    from .final_resolver import resolve_final_verdict
+    final_verdict = resolve_final_verdict(electronic_ea=electronic_ea, cbs=cbs, adiabatic=adiabatic,
+                                          mr_competitors=mr_competitors, mr_only_labels=mr_labels)
+    outcome = final_verdict["outcome"]
     state = {
-        "system": system, **identity, "outcome": outcome,
+        "system": system, **identity, "outcome": outcome, "final_verdict": final_verdict,
         "run_stage": "STAGE3_POINT_EVIDENCE_ACQUISITION",
         "stage3_purpose": stage3_purpose,
         "stage3_release": bridge.release_status.value,

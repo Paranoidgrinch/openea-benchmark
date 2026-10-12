@@ -2215,6 +2215,7 @@ def _run_symmetry_auto(args) -> int:
         "scalar_relativity": state.get("scalar_relativity"),
         "post_ccsd_t": state.get("post_ccsd_t"),
         "mr_competitors": state.get("mr_competitors"),
+        "final_verdict": state.get("final_verdict"),
         "adiabatic_ea": state.get("adiabatic_ea"),
     }, default=str), flush=True)
     return 0
