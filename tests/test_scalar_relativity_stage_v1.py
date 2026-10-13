@@ -49,7 +49,7 @@ def test_nr_member_uses_the_nonrelativistic_partner_basis():
     assert "-DK" in pairs[1].split("|")[0] and "NR aug-cc-pVTZ(" in pairs[1]
     spec = _sr_spec(cardinal=3, family_id="f", label="X3", basis_by_element={"O": ("dk", "nr"), "H": ("dkh", "nrh")})
     state = SimpleNamespace(state_id="S", system="OH", role="neutral", atoms=("O", "H"), charge=0, spin_2s=1,
-                            r_angstrom=0.97, source_root_id="r", source_checkpoint_path="/c", point_group="C2v",
+                            r_angstrom=0.97, source_root_id="r", source_checkpoint_path="/c", point_group=None,
                             irrep_nelec=None, reference_branch=None)
     assert _request_for(state, spec, ScalarRelativityHamiltonian.NONRELATIVISTIC).basis_by_element == {"O": "nr", "H": "nrh"}
     assert _request_for(state, spec, ScalarRelativityHamiltonian.SFX2C1E).basis_by_element == {"O": "dk", "H": "dkh"}
