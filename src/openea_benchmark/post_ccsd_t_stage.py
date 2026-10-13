@@ -9,7 +9,8 @@ the ROHF/RHF reference is first converged in the state's symmetry block (point
 group, irrep occupation, seeded from its high-level checkpoint), then carried
 into C1 (CCpy needs C1 metadata) and must keep its energy there.
 
-Central values: Delta_T(aug-cc-pVTZ), bound |Delta_T(TZ) - Delta_T(DZ)|;
+Central values: Delta_T(aug-cc-pVTZ), bound |Delta_T(TZ) - Delta_T(DZ)| (only the
+aDZ value when aTZ CCSDT exceeds the memory limit: bound 50 % of it);
 Delta_Q(first affordable of aug-cc-pVDZ, cc-pVDZ), bound 50 % of |Delta_Q| (pilot; DZ quadruples are basis-
 incomplete).  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
 showed its DZ->TZ transfer disagreeing with exact CCSDTQ by 0.1 eV.
@@ -44,6 +45,8 @@ class PostCCSDTStagePolicy:
     # increment) when aug-cc-pVDZ CCSDTQ exceeds the storage limit.
     quadruples_bases: tuple[str, ...] = ("aug-cc-pvdz", "cc-pvdz")
     quadruples_relative_bound: float = 0.5
+    # Per-point memory limit (also the reservation in the point-pool memory gate);
+    # ~21 % of the 565 GB host, so a few such points can run next to other work.
     q_memory_limit_mb: int = 120000
     max_memory_mb: int = 48000
     scf_conv_tol: float = 1.0e-10
@@ -82,18 +85,27 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     return mf1
 
 
-def quadruples_storage_mb(spec: Any, basis: str) -> float:
-    """Rough CCSDTQ amplitude + residual storage: 3 x 8 bytes x sum over spin blocks of (o v)^4."""
-    from pyscf import gto
+# CCpy keeps diis_size (6) amplitude and residual vectors in core, plus the
+# amplitudes, the residual and intermediates: ~16 copies of the highest-rank
+# amplitude array.  2026-10-13: CCSDTQ/cc-pVDZ of NO, ClO and N2 together with
+# CCSDT/aug-cc-pVTZ points took ~450 GB; the earlier 3-copy estimate was 5x low.
+AMPLITUDE_COPIES = 2 * 6 + 4
+
+
+def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
+    """Memory estimate of a CCpy CCSDT or CCSDTQ point: copies x 8 bytes x sum over spin blocks of (o v)^n."""
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
+    rank = {"CCSD(T)": 2, "CCSDT": 3, "CCSDTQ": 4}[method]
     mol = _mol(spec, basis, False, 1000)
     nfz = valence_frozen_core_orbitals(mol)
     na, nb = mol.nelec
     nmo = mol.nao_nr()
-    oa, ob = na - nfz, nb - nfz
-    va, vb = nmo - na, nmo - nb
-    x, y = oa * va, ob * vb
-    return 3 * 8 * sum(x ** (4 - k) * y ** k for k in range(5)) / 1.0e6
+    x, y = (na - nfz) * (nmo - na), (nb - nfz) * (nmo - nb)
+    return AMPLITUDE_COPIES * 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
+
+
+def quadruples_storage_mb(spec: Any, basis: str) -> float:
+    return cc_storage_mb(spec, basis, "CCSDTQ")
 
 
 def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy, path: str) -> dict:
@@ -148,24 +160,34 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     states = selected_state_specs(electronic_ea, requests, point_records, refinement_dir)
     if isinstance(states, str):
         return done(status="NOT_ATTEMPTED", reason=states)
-    estimates = {b: max(quadruples_storage_mb(s, b) for s in states.values()) for b in policy.quadruples_bases}
+    def need(basis, method):
+        return max(cc_storage_mb(s, basis, method) for s in states.values())
+
+    estimates = {b: need(b, "CCSDTQ") for b in policy.quadruples_bases}
     record["quadruples_storage_estimate_mb"] = estimates
     q_basis = next((b for b in policy.quadruples_bases if estimates[b] <= policy.q_memory_limit_mb), None)
     run_q = q_basis is not None
     record["quadruples_basis"] = q_basis
-    tasks = [(basis, method) for basis in policy.triples_bases for method in ("CCSD(T)", "CCSDT")]
+    t_bases = tuple(b for b in policy.triples_bases if need(b, "CCSDT") <= policy.q_memory_limit_mb)
+    record["triples_bases_affordable"] = list(t_bases)
+    if not t_bases:
+        return done(status="TRIPLES_NOT_AFFORDABLE", delta_post_ev=None, bound_ev=None,
+                    reason=f"CCSDT exceeds {policy.q_memory_limit_mb} MB in every triples basis")
+    tasks = [(basis, method) for basis in t_bases for method in ("CCSD(T)", "CCSDT")]
     if run_q:
-        if q_basis not in policy.triples_bases:
+        if q_basis not in t_bases:
+            tasks.append((q_basis, "CCSD(T)"))
             tasks.append((q_basis, "CCSDT"))
         tasks.append((q_basis, "CCSDTQ"))
     fn = point_fn or _run_point
-    jobs = []
+    jobs, reserves = [], []
     for role, spec in states.items():
         for basis, method in tasks:
+            reserves.append(cc_storage_mb(spec, basis, method))
             print(f"[POST-CC] {spec.system} {role} {basis} {method}", flush=True)
             jobs.append((spec, basis, method, policy,
                          str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json")))
-    results = run_parallel(fn, jobs)
+    results = run_parallel(fn, jobs, reserve_mb=reserves)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]
     failed = [r for r in results if r.get("status") != "COMPLETED"]
@@ -177,9 +199,11 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
         return (energies[("neutral", basis, method)]["total_hartree"]
                 - energies[("anion", basis, method)]["total_hartree"]) * HARTREE_TO_EV
 
-    delta_t = {b: ea(b, "CCSDT") - ea(b, "CCSD(T)") for b in policy.triples_bases}
-    t_central = delta_t[policy.triples_bases[-1]]
-    t_bound = abs(delta_t[policy.triples_bases[-1]] - delta_t[policy.triples_bases[0]])
+    delta_t = {b: ea(b, "CCSDT") - ea(b, "CCSD(T)") for b in t_bases}
+    t_central = delta_t[t_bases[-1]]
+    # Two bases: the last basis change; one basis only: 50 % of the increment.
+    t_bound = (abs(delta_t[t_bases[-1]] - delta_t[t_bases[0]]) if len(t_bases) > 1
+               else 0.5 * abs(t_central))
     record.update(delta_t_by_basis_ev=delta_t, delta_t_ev=t_central, delta_t_bound_ev=t_bound)
     if not run_q:
         return done(status="QUADRUPLES_NOT_AFFORDABLE", delta_post_ev=None, bound_ev=None,

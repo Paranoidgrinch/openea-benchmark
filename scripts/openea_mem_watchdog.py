@@ -3,14 +3,21 @@
 Polls /proc/meminfo and acts only on this user's OpenEA processes (workflow
 processes and their spawned pool workers, recognised by cwd in this repository):
 
-* used >= --pause-frac (default 0.80): pause (SIGSTOP) the youngest running
+* used >= --pause-frac (default 0.70): pause (SIGSTOP) the youngest running
   OpenEA process, one more every --pause-every seconds while it stays high.
   A paused calculation keeps its memory but stops growing.
-* used <  --resume-frac (default 0.75): resume (SIGCONT) paused processes,
+* used <  --resume-frac (default 0.65): resume (SIGCONT) paused processes,
   the longest paused first, one per --resume-every seconds.
-* used >= --kill-frac (default 0.90): kill (SIGKILL) the OpenEA process with the
+* used >= --kill-frac (default 0.80): kill (SIGKILL) the OpenEA process with the
   largest resident memory.  Its run fails and is resumed from the point cache
   (ERROR results are not cached) by the batch launcher.
+* used >= --pause-frac continuously for --stall-kill-after seconds (default 300):
+  pausing alone does not free memory (2026-10-13: 90 processes paused at 89 % for
+  three hours, the server crawled); the largest OpenEA process is killed, one per
+  --kill-every seconds, until memory falls below the pause threshold.
+
+Thresholds were lowered by 10 points on 2026-10-13: a machine above ~80 % used
+is already slow for every user.
 
 used = 1 - MemAvailable / MemTotal.  The memory gate in point_pool.py keeps new
 calculations from starting above the limit; this watchdog handles calculations
@@ -76,9 +83,10 @@ def log(fh, message: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--pause-frac", type=float, default=0.80)
-    parser.add_argument("--resume-frac", type=float, default=0.75)
-    parser.add_argument("--kill-frac", type=float, default=0.90)
+    parser.add_argument("--pause-frac", type=float, default=0.70)
+    parser.add_argument("--resume-frac", type=float, default=0.65)
+    parser.add_argument("--kill-frac", type=float, default=0.80)
+    parser.add_argument("--stall-kill-after", type=float, default=300.0)
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--pause-every", type=float, default=20.0)
     parser.add_argument("--resume-every", type=float, default=30.0)
@@ -95,6 +103,7 @@ def main() -> int:
 
     paused: list[int] = []  # in pause order
     last = {"pause": 0.0, "resume": 0.0, "kill": 0.0, "status": 0.0}
+    high_since: float | None = None  # start of the current stretch above the pause threshold
     args.log.parent.mkdir(parents=True, exist_ok=True)
     with open(args.log, "a") as fh:
         log(fh, f"watchdog pid {os.getpid()} on {os.uname().nodename}: pause>={args.pause_frac:.0%} "
@@ -126,11 +135,16 @@ def main() -> int:
                         f"{ours:.0f} GB, paused {len(paused)}")
                 last["status"] = now
 
-            if used >= args.kill_frac and procs and now - last["kill"] >= args.kill_every:
+            high_since = (high_since or now) if used >= args.pause_frac else None
+            stalled = high_since is not None and now - high_since >= args.stall_kill_after
+            if (used >= args.kill_frac or stalled) and procs and now - last["kill"] >= args.kill_every:
                 victim = max(procs, key=lambda p: (p["worker"], p["rss_mb"]))
                 os.kill(victim["pid"], signal.SIGKILL)
-                log(fh, f"KILL pid {victim['pid']} rss {victim['rss_mb'] / 1024:.1f} GB "
-                        f"(used {used:.1%} >= {args.kill_frac:.0%})")
+                if victim["pid"] in paused:
+                    paused.remove(victim["pid"])
+                reason = (f"used {used:.1%} >= {args.kill_frac:.0%}" if used >= args.kill_frac else
+                          f"used >= {args.pause_frac:.0%} for {now - high_since:.0f} s despite pausing")
+                log(fh, f"KILL pid {victim['pid']} rss {victim['rss_mb'] / 1024:.1f} GB ({reason})")
                 last["kill"] = now
             elif used >= args.pause_frac and running and now - last["pause"] >= args.pause_every:
                 victim = max(running, key=lambda p: (p["worker"], p["start"]))

@@ -22,8 +22,9 @@ def fake_point(spec, basis, method, policy, path):
 
 
 def run(tmp_path, monkeypatch, limit):
-    monkeypatch.setattr(post_ccsd_t_stage, "quadruples_storage_mb",
-                        lambda spec, basis: 50000.0 if basis == "aug-cc-pvdz" else 10000.0)
+    monkeypatch.setattr(post_ccsd_t_stage, "cc_storage_mb",
+                        lambda spec, basis, method: (50000.0 if basis == "aug-cc-pvdz" else 10000.0)
+                        if method == "CCSDTQ" else 1000.0)
     reqs = [request("N", 0, 1), request("A", -1, 0)]
     recs = {f"{j}-{i}": {"job_id": j, "request_id": f"{j}-{i}", "status": "COMPLETED", "r_angstrom": r,
                          "high_level_checkpoint_path": f"/hl/{j}{r}"} for j in "NA" for i, r in enumerate((0.9, 1.0))}
@@ -60,3 +61,15 @@ def test_storage_estimate_grows_with_basis():
 def test_point_files_are_distinct_per_method():
     from openea_benchmark.post_ccsd_t_stage import METHOD_TOKEN, METHODS
     assert len({METHOD_TOKEN[m] for m in METHODS}) == len(METHODS)
+
+
+def test_reservations_follow_the_estimates(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_parallel(fn, jobs, reserve_mb=None):
+        seen["reserves"] = list(reserve_mb)
+        return [fn(*job) for job in jobs]
+
+    monkeypatch.setattr(post_ccsd_t_stage, "run_parallel", fake_parallel)
+    run(tmp_path, monkeypatch, limit=60000)
+    assert 50000.0 in seen["reserves"] and 1000.0 in seen["reserves"]

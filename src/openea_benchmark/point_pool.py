@@ -138,20 +138,24 @@ def _outstanding_reservations_mb(own_path: str) -> float:
     return total
 
 
-def _wait_for_memory(handle) -> None:
-    """Block until this task's reservation fits under the memory limit, then record it."""
+def _wait_for_memory(handle, reserve_mb: float | None = None) -> None:
+    """Block until this task's reservation fits under the memory limit, then record it.
+
+    ``reserve_mb`` (per task, e.g. a CCSDTQ storage estimate) replaces the run-wide
+    default when it is larger."""
     if _MEM_LIMIT_FRAC <= 0.0:
         return
+    reserve = max(float(_MEM_RESERVE_MB), float(reserve_mb or 0.0))
     announced = False
     while True:
         with open(os.path.join(_SLOT_DIR, "memgate.lock"), "a+") as gate:
             fcntl.flock(gate, fcntl.LOCK_EX)  # serialise admissions: no two tasks pass on the same free memory
             total, available = meminfo_mb()
-            projected = (total - available) + _outstanding_reservations_mb(handle.name) + _MEM_RESERVE_MB
+            projected = (total - available) + _outstanding_reservations_mb(handle.name) + reserve
             if projected <= _MEM_LIMIT_FRAC * total:
                 handle.seek(0)
                 handle.truncate()
-                handle.write(f"{_machine_id()} {os.getpid()} {_MEM_RESERVE_MB}\n")
+                handle.write(f"{_machine_id()} {os.getpid()} {reserve:.0f}\n")
                 handle.flush()
                 return
         if not announced:
@@ -166,7 +170,7 @@ def pool_workers() -> int:
 
 
 @contextmanager
-def core_slot():
+def core_slot(reserve_mb: float | None = None):
     """Hold one machine-wide core slot (no-op without a slot budget; re-entrant per thread)."""
     if not _SLOT_DIR or getattr(_LOCAL, "held", False):
         yield
@@ -186,7 +190,7 @@ def core_slot():
             time.sleep(2.0)
     _LOCAL.held = True
     try:
-        _wait_for_memory(handle)
+        _wait_for_memory(handle, reserve_mb)
         yield
     finally:
         _LOCAL.held = False
@@ -196,29 +200,32 @@ def core_slot():
         handle.close()
 
 
-def _slotted_call(fn: Callable[..., Any], args: tuple) -> Any:
-    with core_slot():
+def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:
+    with core_slot(reserve_mb):
         return fn(*args)
 
 
 def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
-                 on_result: Callable[[int, Any], None] | None = None) -> list[Any]:
+                 on_result: Callable[[int, Any], None] | None = None,
+                 reserve_mb: Sequence[float | None] | None = None) -> list[Any]:
     """``[fn(*args) for args in arg_tuples]`` on the pool; results in input order.
 
     ``fn`` and its arguments must be picklable when a pool is configured.
     ``on_result(index, result)`` is called in the calling process as each task
     finishes (used to persist results immediately, so a kill loses only running tasks).
     The first task exception is re-raised after the remaining tasks have finished.
+    ``reserve_mb[i]`` is task i's memory reservation for the gate (default: run-wide).
     """
     items: Sequence[tuple] = list(arg_tuples)
+    reserves = list(reserve_mb) if reserve_mb is not None else [None] * len(items)
     results: list[Any] = [None] * len(items)
     if _POOL is None or len(items) < 2:
         for index, args in enumerate(items):
-            results[index] = _slotted_call(fn, args)
+            results[index] = _slotted_call(fn, args, reserves[index])
             if on_result is not None:
                 on_result(index, results[index])
         return results
-    futures = {_POOL.submit(_slotted_call, fn, args): index for index, args in enumerate(items)}
+    futures = {_POOL.submit(_slotted_call, fn, args, reserves[index]): index for index, args in enumerate(items)}
     error: BaseException | None = None
     pending = set(futures)
     while pending:
