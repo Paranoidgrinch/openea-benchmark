@@ -142,7 +142,32 @@ def _outstanding_reservations_mb(own_path: str) -> float:
     return total
 
 
-def _wait_for_memory(handle, reserve_mb: float | None = None) -> None:
+def _pending_big_reservation_mb() -> float:
+    """Reservation of a large task that holds bigmem.lock but has not been admitted yet.
+
+    Other tasks count it, so the memory it waits for drains instead of being taken
+    by smaller tasks again and again (2026-10-13: the ClO CCSDTQ point starved)."""
+    path = os.path.join(_SLOT_DIR, "bigmem.lock")
+    if not os.path.exists(path):
+        return 0.0
+    try:
+        with open(path, "a+") as fh:
+            try:  # free lock: nobody is waiting, any content is stale
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                return 0.0
+            except BlockingIOError:
+                pass
+            fh.seek(0)
+            fields = fh.read().split()
+    except OSError:
+        return 0.0
+    if len(fields) != 4 or fields[3] != "PENDING":
+        return 0.0
+    return float(fields[2])
+
+
+def _wait_for_memory(handle, reserve_mb: float | None = None, big=None) -> None:
     """Block until this task's reservation fits under the memory limit, then record it.
 
     ``reserve_mb`` (per task, e.g. a CCSDTQ storage estimate) replaces the run-wide
@@ -150,13 +175,25 @@ def _wait_for_memory(handle, reserve_mb: float | None = None) -> None:
     if _MEM_LIMIT_FRAC <= 0.0:
         return
     reserve = max(float(_MEM_RESERVE_MB), float(reserve_mb or 0.0))
+    if big is not None:  # announce the pending large reservation to everyone else
+        big.seek(0)
+        big.truncate()
+        big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} PENDING\n")
+        big.flush()
     announced = False
     while True:
         with open(os.path.join(_SLOT_DIR, "memgate.lock"), "a+") as gate:
             fcntl.flock(gate, fcntl.LOCK_EX)  # serialise admissions: no two tasks pass on the same free memory
             total, available = meminfo_mb()
             projected = (total - available) + _outstanding_reservations_mb(handle.name) + reserve
+            if big is None:
+                projected += _pending_big_reservation_mb()
             if projected <= _MEM_LIMIT_FRAC * total:
+                if big is not None:
+                    big.seek(0)
+                    big.truncate()
+                    big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} ADMITTED\n")
+                    big.flush()
                 handle.seek(0)
                 handle.truncate()
                 handle.write(f"{_machine_id()} {os.getpid()} {reserve:.0f}\n")
@@ -200,7 +237,7 @@ def core_slot(reserve_mb: float | None = None):
             time.sleep(2.0)
     _LOCAL.held = True
     try:
-        _wait_for_memory(handle, reserve_mb)
+        _wait_for_memory(handle, reserve_mb, big)
         yield
     finally:
         _LOCAL.held = False
@@ -209,6 +246,8 @@ def core_slot(reserve_mb: float | None = None):
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()
         if big is not None:
+            big.seek(0)
+            big.truncate()
             fcntl.flock(big, fcntl.LOCK_UN)
             big.close()
 

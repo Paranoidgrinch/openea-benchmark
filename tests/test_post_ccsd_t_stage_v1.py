@@ -97,3 +97,20 @@ def test_large_tasks_run_one_at_a_time(tmp_path, monkeypatch):
     for t in threads:
         t.join()
     assert peak[0] == 1
+
+
+def test_pending_large_reservation_is_counted_by_others(tmp_path, monkeypatch):
+    import fcntl
+    import os
+    from openea_benchmark import point_pool
+    monkeypatch.setattr(point_pool, "_SLOT_DIR", str(tmp_path))
+    assert point_pool._pending_big_reservation_mb() == 0.0
+    fh = open(os.path.join(tmp_path, "bigmem.lock"), "a+")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    fh.write("host/ns 1 150000 PENDING\n")
+    fh.flush()
+    assert point_pool._pending_big_reservation_mb() == 150000.0
+    fh.seek(0); fh.truncate(); fh.write("host/ns 1 150000 ADMITTED\n"); fh.flush()
+    assert point_pool._pending_big_reservation_mb() == 0.0  # admitted: counted via its slot instead
+    fcntl.flock(fh, fcntl.LOCK_UN)
+    fh.close()
