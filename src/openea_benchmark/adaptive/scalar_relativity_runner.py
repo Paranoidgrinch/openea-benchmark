@@ -111,6 +111,11 @@ class ScalarRelativityBasisSpec:
     basis_by_element: Mapping[str, str]
     scalar_relativistically_recontracted: bool
     electron_model: str = "ALL_ELECTRON"
+    # Optional basis for the nonrelativistic member (Patch 48b): the NR partner of a
+    # Douglas-Kroll recontracted family (cc-pVXZ for cc-pVXZ-DK; same primitives,
+    # contracted for the NR Hamiltonian).  Using the DK contraction for NR gave NR
+    # energies that rose with X (MgH SCF TZ/QZ/5Z) and a spurious 5Z jump (ClO).
+    nonrelativistic_basis_by_element: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.cardinal < 2:
@@ -133,6 +138,8 @@ class ScalarRelativityBasisSpec:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["basis_by_element"] = dict(self.basis_by_element)
+        if self.nonrelativistic_basis_by_element is not None:
+            data["nonrelativistic_basis_by_element"] = dict(self.nonrelativistic_basis_by_element)
         return data
 
 
@@ -334,7 +341,12 @@ def _request_for(
         dft_center_r_angstrom=float(state.r_angstrom),
         dft_center_energy_hartree=0.0,
         requires_independent_state_identity_validation=True,
-        basis_by_element=dict(basis.basis_by_element),
+        basis_by_element=dict(
+            basis.nonrelativistic_basis_by_element
+            if hamiltonian is ScalarRelativityHamiltonian.NONRELATIVISTIC
+            and basis.nonrelativistic_basis_by_element is not None
+            else basis.basis_by_element
+        ),
         authorizes_pruning=False,
         point_group=state.point_group,
         irrep_nelec=None if state.irrep_nelec is None else dict(state.irrep_nelec),

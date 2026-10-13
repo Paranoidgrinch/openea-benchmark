@@ -39,3 +39,17 @@ def test_stage_and_assembly(tmp_path):
     nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
     out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, scalar_relativity=res)
     assert out["includes_scalar_relativity"] and abs(out["ea0_ev"] - (1.0 + res["delta_sr_ev"])) < 1e-12
+
+
+def test_nr_member_uses_the_nonrelativistic_partner_basis():
+    from openea_benchmark.adaptive.scalar_relativity_runner import ScalarRelativityHamiltonian, _request_for
+    from openea_benchmark.scalar_relativity_stage import _sr_spec
+    from types import SimpleNamespace
+    pairs = sr_element_series("O", (3,))[3]
+    assert "-DK" in pairs[1].split("|")[0] and "NR aug-cc-pVTZ(" in pairs[1]
+    spec = _sr_spec(cardinal=3, family_id="f", label="X3", basis_by_element={"O": ("dk", "nr"), "H": ("dkh", "nrh")})
+    state = SimpleNamespace(state_id="S", system="OH", role="neutral", atoms=("O", "H"), charge=0, spin_2s=1,
+                            r_angstrom=0.97, source_root_id="r", source_checkpoint_path="/c", point_group="C2v",
+                            irrep_nelec=None, reference_branch=None)
+    assert _request_for(state, spec, ScalarRelativityHamiltonian.NONRELATIVISTIC).basis_by_element == {"O": "nr", "H": "nrh"}
+    assert _request_for(state, spec, ScalarRelativityHamiltonian.SFX2C1E).basis_by_element == {"O": "dk", "H": "dkh"}

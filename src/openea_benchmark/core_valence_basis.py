@@ -118,10 +118,17 @@ def cv_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tup
     return element_series(element, cardinals, CV_FAMILIES)
 
 
-# Scalar relativity (Patch 48): Douglas-Kroll recontracted valence families; the
-# AE NR/SFX2C1E pair shares the basis, so only the recontraction matters.
+# Scalar relativity (Patch 48/48b): the SFX2C1E member uses a Douglas-Kroll
+# recontracted family, the NR member its nonrelativistic partner (same name without
+# "-DK"); both families must exist at every cardinal.
 SR_FAMILIES = ("aug-cc-pV{x}Z-DK", "cc-pV{x}Z-DK")
 
 
 def sr_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
-    return element_series(element, cardinals, SR_FAMILIES)
+    """{X: ((DK spec, NR spec), provenance)} for the first family pair available at every X."""
+    for family in SR_FAMILIES:
+        rel = element_series(element, cardinals, (family,))
+        nr = element_series(element, cardinals, (family.replace("-DK", ""),))
+        if rel is not None and nr is not None:
+            return {x: ((rel[x][0], nr[x][0]), f"{rel[x][1]} | NR {nr[x][1]}") for x in cardinals}
+    return None

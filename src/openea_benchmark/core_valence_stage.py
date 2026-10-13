@@ -78,7 +78,7 @@ def basis_specs_for(atoms: Sequence[str], policy: Any, *, element_series=cv_elem
     family = ",".join(f"{el}:" + re.sub(r"V[DTQ56]Z", "VXZ", series[el][cardinals[0]][1]) for el in elements)
     specs, provenance = [], {}
     for x in cardinals:
-        mapping = {el: series[el][x][0] for el in elements}
+        mapping = {el: series[el][x][0] for el in elements}  # (DK, NR) pairs for the SR rule
         prov = {el: series[el][x][1] for el in elements}
         provenance[x] = prov
         specs.append(make_spec(cardinal=x, family_id=f"{rule_id}:{family}",

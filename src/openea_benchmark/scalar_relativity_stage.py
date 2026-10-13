@@ -7,9 +7,11 @@ members of a pair differ only in the one-electron Hamiltonian (spin-free X2C).
 Execution reuses ``adaptive.scalar_relativity_runner`` (X=T,Q first, X=5 when
 the change exceeds 0.5 meV; highest X central, last change the bound).
 
-Basis rule (per element, ``core_valence_basis.sr_element_series``): the
-Douglas-Kroll recontracted aug-cc-pVXZ-DK, else cc-pVXZ-DK with the diffuse
-primitives of aug-cc-pVXZ.  States carry their symmetry block and the
+Basis rule (per element, ``core_valence_basis.sr_element_series``): SFX2C1E in
+the Douglas-Kroll recontracted aug-cc-pVXZ-DK, NR in aug-cc-pVXZ (same primitives,
+NR contraction); else the cc-pVXZ-DK / cc-pVXZ pair with the diffuse primitives
+of aug-cc-pVXZ.  A DK contraction used for the NR member gave NR energies rising
+with X (MgH) and a 0.02 eV spurious 5Z change (ClO).  States carry their symmetry block and the
 seed-continuous reference branch, as in the CBS and CV layers.
 
 The result is the one-electron spin-free X2C correction only; spin-orbit is a
@@ -33,7 +35,7 @@ from .core_valence_stage import _run_point, basis_specs_for, selected_state_spec
 from .electronic_ea_stage import _save_json, cached_point_runner
 from .point_pool import run_parallel
 
-BASIS_RULE_ID = "OPENEA_SR_BASIS_RULE_V1"
+BASIS_RULE_ID = "OPENEA_SR_BASIS_RULE_V2"  # V2: NR member in the nonrelativistic partner family
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,14 @@ class ScalarRelativityStagePolicy:
     maximum_cardinal: int = 5
     target_change_ev: float = 0.0005
     max_memory_mb: int = 48000
+
+
+def _sr_spec(*, cardinal, family_id, label, basis_by_element):
+    """Split the (DK, NR) element pairs into the two members' basis mappings."""
+    return ScalarRelativityBasisSpec(
+        cardinal=cardinal, family_id=family_id, label=label, scalar_relativistically_recontracted=True,
+        basis_by_element={el: pair[0] for el, pair in basis_by_element.items()},
+        nonrelativistic_basis_by_element={el: pair[1] for el, pair in basis_by_element.items()})
 
 
 def run_scalar_relativity_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
@@ -71,8 +81,7 @@ def run_scalar_relativity_stage(*, electronic_ea: Mapping[str, Any], requests: S
                         for role, s in states.items()}
     built = basis_specs_for(states["neutral"].atoms, policy, element_series=sr_element_series,
                             rule_id=BASIS_RULE_ID,
-                            make_spec=lambda **kw: ScalarRelativityBasisSpec(
-                                **kw, scalar_relativistically_recontracted=True))
+                            make_spec=_sr_spec)
     if built is None:
         return done(status="POLICY_BLOCKED_NO_SR_BASIS",
                     reason=f"no DK-recontracted basis series {policy.initial_cardinals} for all atoms")

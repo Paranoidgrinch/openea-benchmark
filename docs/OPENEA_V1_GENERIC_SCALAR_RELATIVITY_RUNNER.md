@@ -76,3 +76,13 @@ or otherwise resolved before G3d can close when it is physically relevant.
 The historical `scripts/openea_oh_scalar_relativity.py` remains an OH
 validation driver.  Its O/H basis choices are validation evidence, not a
 universal element-to-basis rule.
+
+## Patch 48b: NR member in the nonrelativistic partner basis
+
+Using the Douglas-Kroll recontracted basis for the NR member was wrong: its
+contraction is made for the relativistic Hamiltonian.  MgH NR SCF in cc-pVXZ-DK
+rose with X (-200.0963 / -200.0944 / -200.0926 Eh, 60 mEh above the cc-pVXZ
+value) and ClO's Delta_SR jumped by 0.024 eV from QZ to 5Z.  Now SFX2C1E uses
+aug-cc-pVXZ-DK and NR its partner aug-cc-pVXZ (same primitives, NR contraction),
+the usual practice; MgH NR SCF now falls with X (-200.1552 / -200.1565 / -200.1571).
+`OPENEA_SR_BASIS_RULE_V2`; earlier SR points are recomputed.
