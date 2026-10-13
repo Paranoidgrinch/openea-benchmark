@@ -38,6 +38,10 @@ _N_SLOTS = 0
 _THREADS = 1
 _MEM_LIMIT_FRAC = 0.0
 _MEM_RESERVE_MB = 0
+# Tasks reserving more than this run one at a time machine-wide (bigmem.lock in the
+# slot directory): the memory gate alone would admit two 150-200 GB points side by
+# side, which leaves the shared server no headroom.
+BIG_TASK_MB = 100000
 _LOCAL = threading.local()
 
 
@@ -175,6 +179,12 @@ def core_slot(reserve_mb: float | None = None):
     if not _SLOT_DIR or getattr(_LOCAL, "held", False):
         yield
         return
+    big = None
+    if reserve_mb is not None and float(reserve_mb) > BIG_TASK_MB:
+        big = open(os.path.join(_SLOT_DIR, "bigmem.lock"), "a+")
+        print(f"[MEMORY GATE] pid {os.getpid()} large task ({float(reserve_mb) / 1024:.0f} GB): "
+              f"waiting for the one-at-a-time slot", flush=True)
+        fcntl.flock(big, fcntl.LOCK_EX)
     handle = None
     while handle is None:
         for index in range(_N_SLOTS):
@@ -198,6 +208,9 @@ def core_slot(reserve_mb: float | None = None):
         handle.truncate()
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()
+        if big is not None:
+            fcntl.flock(big, fcntl.LOCK_UN)
+            big.close()
 
 
 def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:

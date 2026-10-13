@@ -45,9 +45,11 @@ class PostCCSDTStagePolicy:
     # increment) when aug-cc-pVDZ CCSDTQ exceeds the storage limit.
     quadruples_bases: tuple[str, ...] = ("aug-cc-pvdz", "cc-pvdz")
     quadruples_relative_bound: float = 0.5
-    # Per-point memory limit (also the reservation in the point-pool memory gate);
-    # ~21 % of the 565 GB host, so a few such points can run next to other work.
-    q_memory_limit_mb: int = 120000
+    # Per-point memory limit; every point reserves its estimate in the point-pool
+    # memory gate, and points above point_pool.BIG_TASK_MB (100 GB) run one at a
+    # time machine-wide (user decision 2026-10-13: NO, O2, ClO CCSDTQ/cc-pVDZ need
+    # 130-200 GB; run them one after the other).
+    q_memory_limit_mb: int = 210000
     max_memory_mb: int = 48000
     scf_conv_tol: float = 1.0e-10
     cc_convergence: float = 1.0e-8

@@ -73,3 +73,27 @@ def test_reservations_follow_the_estimates(tmp_path, monkeypatch):
     monkeypatch.setattr(post_ccsd_t_stage, "run_parallel", fake_parallel)
     run(tmp_path, monkeypatch, limit=60000)
     assert 50000.0 in seen["reserves"] and 1000.0 in seen["reserves"]
+
+
+def test_large_tasks_run_one_at_a_time(tmp_path, monkeypatch):
+    import threading
+    import time
+    from openea_benchmark import point_pool
+    monkeypatch.setattr(point_pool, "_SLOT_DIR", str(tmp_path))
+    monkeypatch.setattr(point_pool, "_N_SLOTS", 4)
+    monkeypatch.setattr(point_pool, "_MEM_LIMIT_FRAC", 0.0)
+    active, peak = [0], [0]
+
+    def task():
+        with point_pool.core_slot(reserve_mb=150000):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            time.sleep(0.2)
+            active[0] -= 1
+
+    threads = [threading.Thread(target=task) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] == 1
