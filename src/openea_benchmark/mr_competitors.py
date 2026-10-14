@@ -18,6 +18,16 @@ as an explicit gap.  This layer closes the gap conservatively:
   selected state excludes all its MR-only candidates (``EXCLUDED``); otherwise
   ``UNRESOLVED_MR_COMPETITOR`` keeps the ground-state assignment open.
 
+Lambda resolution (Patch 53): a C2v block mixes Lambda values (B1 holds Pi and
+Phi, A2 holds Sigma- and Delta), so its lowest root can be a state Stage 3
+already computes (C2 a3Piu below the 3Phi candidates).  Each root's <Lz^2> over
+the active space assigns Lambda = round(sqrt(<Lz^2>)); a candidate's bound is
+the lowest root of its Lambda (or of unassigned Lambda).  If none of the
+``classify_roots`` lowest CASCI roots carries it, the candidate lies above all
+of them and the highest computed root is its bound.  For like atoms the g/u
+parity of each root (product of the D2h orbital parities over the CI vector)
+is matched as well (C2 3Pig/3Piu share the C2v B1 block).
+
 Only lower bounds are used, so an exclusion is never optimistic; a block that
 cannot be computed stays unresolved.
 """
@@ -34,6 +44,9 @@ from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
 from .spin_orbit_stage import D2H_TO_C2V, full_valence_space
 
+# Version of the per-root Lambda / g-u classification; older block caches are recomputed.
+ROOT_CLASSIFICATION = 2
+LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
 
 
@@ -47,7 +60,79 @@ class MRCompetitorPolicy:
     # lower-bound property, so a wider margin is required.
     casci_only_exclusion_margin_ev: float = 1.0
     nroots: int = 2
+    # CASCI roots classified by Lambda (0 = no classification, old behaviour).
+    classify_roots: int = 6
+    lambda_tolerance: float = 0.25
     max_memory_mb: int = 16000
+
+
+def candidate_lambda(label: str) -> int | None:
+    import re
+    m = re.search(r"(Sigma|Pi|Delta|Phi|Gamma)", label)
+    return None if m is None else LAMBDA_OF[m.group(1)]
+
+
+def candidate_parity(label: str) -> int | None:
+    """+1 for g, -1 for u, None for unlike atoms."""
+    import re
+    m = re.search(r"(Sigma|Pi|Delta|Phi|Gamma)([gu])", label)
+    return None if m is None else (1 if m.group(2) == "g" else -1)
+
+
+def active_orbital_parities(atoms, r, basis, mo_active) -> list[int] | None:
+    """Inversion parity of each active orbital from its D2h label; None if not pure."""
+    from pyscf import gto, symm
+    if atoms[0] != atoms[1]:
+        return None
+    mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=basis, unit="Angstrom",
+                symmetry="D2h", verbose=0)
+    try:
+        labels = symm.label_orb_symm(mol, mol.irrep_name, mol.symm_orb, mo_active)
+    except ValueError:
+        return None
+    return [1 if str(x).endswith("g") else -1 for x in labels]
+
+
+def root_parity(civec, ncas, nelecas, orbital_parity, tolerance: float = 0.1) -> int | None:
+    """<inversion> of a CI root (closed inactive shells are gerade)."""
+    from pyscf.fci import cistring
+    na, nb = nelecas if isinstance(nelecas, (tuple, list)) else ((nelecas + 1) // 2, nelecas // 2)
+    par = np.asarray(orbital_parity)
+
+    def string_parity(n):
+        strings = cistring.make_strings(range(ncas), n)
+        return np.array([np.prod(par[[i for i in range(ncas) if s >> i & 1]]) if n else 1.0 for s in strings])
+    c = np.asarray(civec).reshape(len(string_parity(na)), len(string_parity(nb)))
+    val = float(np.einsum("ab,a,b->", c * c, string_parity(na), string_parity(nb)) / np.sum(c * c))
+    return 1 if val > 1 - tolerance else (-1 if val < -1 + tolerance else None)
+
+
+def active_lz2(mol, mo_coeff, ncore, ncas, fcisolver, civec, nelecas) -> float:
+    """<Lz^2> of one CI root over the active orbitals (molecule on the z axis).
+
+    The closed inactive shells carry no net Lz; core-active couplings of Lz are
+    neglected (they vanish for orbitals of pure Lambda)."""
+    with mol.with_common_orig((0, 0, 0)):
+        d = mol.intor("int1e_cg_irxp", comp=3)[2]  # matrix of the real antisymmetric operator x d/dy - y d/dx
+    c = mo_coeff[:, ncore:ncore + ncas]
+    d = c.T @ d @ c
+    dm1, dm2 = fcisolver.make_rdm12(civec, ncas, nelecas)
+    val = float(np.einsum("pq,rs,pqrs", d, d, dm2) + np.einsum("pq,qs,ps", d, d, dm1))
+    return abs(val)  # Lz = -i D: <Lz^2> = -<D^2>; sign convention of the integral not relied on
+
+
+def root_lambda(lz2: float, tolerance: float, irrep: str | None = None) -> int | None:
+    """Lambda of a root, None if <Lz^2> is not near a square allowed in its C2v block.
+
+    A1/A2 hold even Lambda, B1/B2 odd: a Pi/Phi mixture with <Lz^2> near 4 in B1
+    is not a Delta state and must stay unassigned (it may be either)."""
+    x = float(np.sqrt(max(lz2, 0.0)))
+    lam = int(round(x))
+    if abs(x - lam) > tolerance:
+        return None
+    if irrep is not None and lam % 2 != (0 if irrep in ("A1", "A2") else 1):
+        return None
+    return lam
 
 
 def candidate_block(label: str) -> tuple[int, int, str] | None:
@@ -74,7 +159,10 @@ def selected_block(label: str) -> tuple[int, str] | None:
 def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, cache: Path) -> dict:
     """Two-root SA-CASSCF/SC-NEVPT2 energies of one (charge, spin, irrep) block at one R."""
     if cache.is_file():
-        return json.loads(cache.read_text())
+        cached = json.loads(cache.read_text())
+        if (not policy.classify_roots or cached.get("status") != "COMPLETED"
+                or cached.get("root_classification") == ROOT_CLASSIFICATION):
+            return cached
     from pyscf import gto, mcscf, mrpt, scf
     space = full_valence_space(atoms, charge)
     if space is None:
@@ -109,13 +197,32 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
             mc = None  # orbital optimization diverges: CASCI on the SCF orbitals (weaker evidence)
         record["averaged_roots"] = None if mc is None else n_avg
         record["casci_only"] = mc is None
-        ci = mcscf.CASCI(mf, ncas, nelecas)
-        ci.fcisolver.wfnsym = irrep
-        ci.fcisolver.nroots = policy.nroots
-        ci.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
-        e_casci = np.atleast_1d(ci.kernel(mo if mc is None else mc.mo_coeff)[0])
-        totals = [float(e_casci[i]) + float(mrpt.NEVPT(ci, root=i).kernel()) for i in range(len(e_casci))]
-        record.update(status="COMPLETED", energies_hartree=sorted(totals))
+        orbitals = mo if mc is None else mc.mo_coeff
+        for n_ci in sorted({max(policy.nroots, policy.classify_roots), policy.nroots}, reverse=True):
+            ci = mcscf.CASCI(mf, ncas, nelecas)
+            ci.fcisolver.wfnsym = irrep
+            ci.fcisolver.nroots = n_ci
+            ci.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
+            try:
+                e_casci = np.atleast_1d(ci.kernel(orbitals)[0])
+                break
+            except (ValueError, IndexError):  # fewer states in the block than requested roots
+                continue
+        # Classify every root before NEVPT2: it rotates the active orbitals and CI
+        # vectors of the CASCI object to a semicanonical, reordered basis.
+        civecs = [np.array(v) for v in (ci.ci if len(e_casci) > 1 else [ci.ci])]
+        mo_ci = np.array(ci.mo_coeff)
+        orb_par = active_orbital_parities(atoms, r, policy.basis, mo_ci[:, ci.ncore:ci.ncore + ncas])
+        roots = []
+        for i in range(len(e_casci)):
+            lz2 = active_lz2(mol, mo_ci, ci.ncore, ncas, ci.fcisolver, civecs[i], ci.nelecas)
+            roots.append({"casci_index": i, "lz2": lz2, "lambda": root_lambda(lz2, policy.lambda_tolerance, irrep),
+                          "parity": None if orb_par is None else root_parity(civecs[i], ncas, ci.nelecas, orb_par)})
+        for i, root in enumerate(roots):
+            root["e_hartree"] = float(e_casci[i]) + float(mrpt.NEVPT(ci, root=i).kernel())
+        roots.sort(key=lambda x: x["e_hartree"])
+        record.update(status="COMPLETED", energies_hartree=[x["e_hartree"] for x in roots], roots=roots,
+                      root_classification=ROOT_CLASSIFICATION)
     except Exception as exc:  # noqa: BLE001 - recorded, the block stays unresolved
         record.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
     _save_json(cache, record)
@@ -190,6 +297,25 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
             vals.append(energies[root] if root < len(energies) else float("inf"))
         return min(vals) if vals else None
 
+    def lambda_bound(key, lam, parity, skip_selected):
+        """Lowest energy over the R window of a root that can be a Lambda=lam (g/u) state."""
+        vals = []
+        for r in per_block[key]:
+            if r.get("status") != "COMPLETED" or "roots" not in r:
+                return None
+            roots = list(r["roots"])
+            if skip_selected and roots:
+                roots = roots[1:]  # the selected state itself
+            match = [x["e_hartree"] for x in roots if (x["lambda"] is None or x["lambda"] == lam)
+                     and (parity is None or x.get("parity") is None or x["parity"] == parity)]
+            if match:
+                vals.append(min(match))
+            elif roots:  # above every computed root of this block
+                vals.append(max(x["e_hartree"] for x in roots))
+            else:
+                vals.append(float("inf"))
+        return min(vals) if vals else None
+
     verdicts, open_blocks = [], []
     for q, sel in selected.items():
         e_sel = lowest((q, sel["mult"], sel["irrep"]), 0)
@@ -199,6 +325,12 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
                 continue
             same = key == (q, sel["mult"], sel["irrep"])
             e_bound = lowest(key, 1 if same else 0)
+            kinds = {(candidate_lambda(label), candidate_parity(label)) for label in labels}
+            lambda_resolved = False
+            if policy.classify_roots and all(lam is not None for lam, _ in kinds):
+                bounds = [lambda_bound(key, lam, par, same) for lam, par in kinds]
+                if all(b is not None for b in bounds):
+                    e_bound, lambda_resolved = min(bounds), True
             casci_only = any(r.get("casci_only") for r in per_block[key])
             threshold = policy.casci_only_exclusion_margin_ev if casci_only else policy.exclusion_margin_ev
             if e_sel is None or e_bound is None:
@@ -208,7 +340,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
                 status = "EXCLUDED" if margin > threshold else "UNRESOLVED_MR_COMPETITOR"
             verdicts.append({"charge": q, "mult": key[1], "irrep_c2v": key[2], "candidates": labels,
                              "lower_bound_margin_ev": margin, "status": status, "casci_only": casci_only,
-                             "bound_root": "second" if same else "lowest"})
+                             "bound_root": "second" if same else "lowest", "lambda_resolved": lambda_resolved})
             if status != "EXCLUDED":
                 open_blocks.append(verdicts[-1])
     record.update(selected={str(q): s for q, s in selected.items()}, blocks=verdicts,

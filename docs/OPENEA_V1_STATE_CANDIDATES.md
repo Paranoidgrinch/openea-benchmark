@@ -82,3 +82,26 @@ candidates. Fixes: (1) the scout bisects coarse brackets to one fine step; (2) t
 electronic-EA stage also refines curves whose high-level minimum is not bracketed
 (NO_BRACKETED_MINIMUM) - the canonical loop extends towards the lower energy - with
 `max_refinement_rounds` 12.
+
+## Redesign step 4 — Lambda and g/u of multireference roots (Patch 53)
+
+`mr_competitors.py` bounds MR-only Wigner-Witmer candidates by SA-CASSCF/SC-NEVPT2 roots
+of their (charge, spin, C2v irrep) block. A C2v block mixes Lambda values (B1: Pi, Phi;
+A2: Sigma-, Delta, Gamma) and, for like atoms, g and u. The lowest root can therefore be a
+state Stage 3 already computes: C2 X1Sigma_g+ had its 3Phi candidates blocked by a3Pi_u
+(0.17 eV < 0.3 eV margin), final verdict UNRESOLVED.
+
+Each of the 6 lowest CASCI roots is now classified before NEVPT2 (which rotates the
+CASCI object to a reordered semicanonical basis):
+- Lambda = round(sqrt(<Lz^2>)) over the active orbitals (`int1e_cg_irxp`), accepted only
+  within 0.25 and only if allowed in the block (A1/A2 even, B1/B2 odd; a Pi/Phi mixture
+  with <Lz^2> near 4 in B1 stays unassigned);
+- like atoms: g/u = <inversion> of the CI vector from the D2h labels of the active
+  orbitals (accepted within 0.1 of +-1).
+A candidate's bound is the lowest root of its Lambda (and parity), unassigned roots
+included; if none of the computed roots qualifies, the highest computed root. Caches carry
+`root_classification` and older block caches are recomputed (~10 s per point).
+
+C2 (def2-TZVPPD): 3B1 roots a3Pi_u, d3Pi_g (2.4 eV), first possible 3Phi root 5.9 eV
+above X -> excluded. C2 cc-pVDZ checks: X1Sigma_g+ (A1: Lambda 0, g), B1Delta_g (A1 and A2:
+Lambda 2, g), C2- A2Pi_u (B1: Lambda 1, u).
