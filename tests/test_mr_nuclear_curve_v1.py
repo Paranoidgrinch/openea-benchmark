@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from openea_benchmark.vibrational_stage import ZPEStagePolicy
-from openea_benchmark.mr_nuclear_curve import MRCurvePolicy, continuity_problems, mr_zpe_fallback, target_c2v_irrep
+from openea_benchmark.mr_nuclear_curve import (MRCurvePolicy, continuity_problems, mr_vibrational_binding,
+                                              mr_zpe_fallback, target_c2v_irrep)
 from openea_benchmark.vibrational_stage import main_isotopologue_masses
 
 
@@ -55,6 +56,21 @@ def test_fallback_assembles_delta_zpe_with_model_term(tmp_path):
     assert res["status"] == "CLEARED", res
     assert res["delta_zpe_ev"] > 0  # stiffer neutral
     assert res["model_terms_relative_frequency"]["neutral"] > res["model_terms_relative_frequency"]["anion"]
+    assert res["anion_vibrational_binding"] == "UNRESOLVED"  # no electronic margin supplied
+    ea["anion_binding"] = {"status": "BOUND", "margin_hartree": 0.232}
+    res = mr_zpe_fallback(electronic_ea=ea, loops=loops, masses=main_isotopologue_masses(("Al", "O")), channels=(),
+                          nuclear_settings=ZPEStagePolicy().nuclear_settings(), output_dir=tmp_path, curve_fn=curve_fn)
+    assert res["anion_vibrational_binding"] == "BOUND", res["vibrational_binding"]
+
+
+def test_vibrational_binding_from_electronic_margin():
+    # AlO-: 0.232 Eh electronic margin, ZPE 0.059 eV -> deep well, bound
+    assert mr_vibrational_binding({"status": "BOUND", "margin_hartree": 0.232}, 0.059, 1e-4)["status"] == "BOUND"
+    # margin smaller than 2 ZPE -> not decidable from these inputs
+    weak = mr_vibrational_binding({"status": "BOUND", "margin_hartree": 0.003}, 0.05, 1e-4)
+    assert weak["status"] == "UNRESOLVED" and weak["v0_margin_lower_ev"] < 0
+    assert mr_vibrational_binding({"status": "UNBOUND"}, 0.05, 1e-4)["status"] == "UNBOUND"
+    assert mr_vibrational_binding(None, 0.05, 1e-4)["status"] == "UNRESOLVED"
 
 
 def _fake_point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space, basis, mo_guess, mol_guess, chk, policy,

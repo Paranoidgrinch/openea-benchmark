@@ -22,6 +22,9 @@ Model uncertainty: the relative harmonic-frequency difference between the MR
 curve and the selected CCSD(T) curve (quadratic fits around their minima) times
 that role's ZPE, added to the Delta_ZPE half-width.  The electronic EA stays the
 CCSD(T)/CBS value; only Delta_ZPE comes from this curve.
+
+Vibrational binding of the anion (``mr_vibrational_binding``): CCSD(T) electronic
+dissociation margin minus twice the MR anion ZPE must stay positive.
 """
 from __future__ import annotations
 
@@ -243,6 +246,28 @@ def _harmonic_k(r, e, half_window: float = 0.08) -> float | None:
     return k if k > 0 else None
 
 
+def mr_vibrational_binding(anion_binding: Mapping[str, Any] | None, zpe_anion_ev: float,
+                           numerical_bound_ev: float) -> dict:
+    """Anion v=0 below the lowest dissociation channel, from the electronic margin and the MR ZPE.
+
+    The MR curve (NEVPT2) and the atomic asymptotes (CCSD(T)) are different methods,
+    so their absolute energies are not compared.  Instead: the conservative CCSD(T)
+    electronic margin (lowest channel minus anion minimum, same basis) minus the anion
+    ZPE, with the whole ZPE again as model uncertainty (the v=0 level lies at most
+    2 ZPE above the electronic minimum).  Deep wells clear this easily; shallow ones
+    stay UNRESOLVED.
+    """
+    status = None if not anion_binding else anion_binding.get("status")
+    margin = None if not anion_binding else anion_binding.get("margin_hartree")
+    if status == "UNBOUND":
+        return {"status": "UNBOUND", "rule": "ELECTRONIC_MINIMUM_NOT_BELOW_CHANNEL"}
+    if status != "BOUND" or margin is None:
+        return {"status": "UNRESOLVED", "rule": "NO_ELECTRONIC_BINDING_MARGIN"}
+    lower_ev = float(margin) * HARTREE_TO_EV - 2.0 * float(zpe_anion_ev) - float(numerical_bound_ev)
+    return {"status": "BOUND" if lower_ev > 0.0 else "UNRESOLVED", "rule": "ELECTRONIC_MARGIN_MINUS_2ZPE",
+            "electronic_margin_ev": float(margin) * HARTREE_TO_EV, "v0_margin_lower_ev": lower_ev}
+
+
 def mr_zpe_fallback(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any], masses, channels,
                     nuclear_settings, output_dir: Path, policy: MRCurvePolicy = MRCurvePolicy(),
                     curve_fn=None) -> dict:
@@ -314,7 +339,12 @@ def mr_zpe_fallback(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any
     zpe = {"neutral": float(assessment.neutral.zpe_ev), "anion": float(assessment.anion.zpe_ev)}
     half = (float(assessment.neutral.numerical_bound_ev) + float(assessment.anion.numerical_bound_ev)
             + sum(zpe[role] * model_terms[role] for role in zpe))
+    # The solver compares absolute NEVPT2 levels with CCSD(T) asymptotes and has no
+    # model bound, so it can only say UNRESOLVED; decide from the electronic margin.
+    binding = mr_vibrational_binding(electronic_ea.get("anion_binding"), zpe["anion"],
+                                     float(assessment.anion.numerical_bound_ev))
     return {**record, "status": "CLEARED", "delta_zpe_ev": float(assessment.correction_ev),
             "delta_zpe_half_width_ev": half, "zpe_neutral_ev": zpe["neutral"], "zpe_anion_ev": zpe["anion"],
             "model_terms_relative_frequency": model_terms,
-            "anion_vibrational_binding": assessment.anion_vibrational_binding.status.value}
+            "anion_vibrational_binding": binding["status"], "vibrational_binding": binding,
+            "solver_vibrational_binding": assessment.anion_vibrational_binding.status.value}
