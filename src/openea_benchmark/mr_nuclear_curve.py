@@ -49,6 +49,8 @@ class MRCurvePolicy:
     max_kink_hartree: float = 5.0e-4
     max_occupation_jump: float = 0.1
     max_memory_mb: int = 16000
+    # Larger clearances tried in turn while the nuclear solver asks for a wider curve.
+    extension_clearances_ev: tuple[float, ...] = (0.9, 1.2, 1.5)
 
 
 def target_c2v_irrep(label: str) -> str | None:
@@ -112,22 +114,45 @@ def _point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space, basis, mo_gues
 
 
 def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk, policy: MRCurvePolicy,
-                   cache: Path) -> dict:
-    """Walk outward from r_center; returns {"r": [...], "e": [...]} or a failure record."""
+                   cache: Path, clearance_ev: float | None = None) -> dict:
+    """Walk outward from r_center; returns {"r": [...], "e": [...]} or a failure record.
+
+    A cached completed curve that does not yet reach ``clearance_ev`` (default
+    ``policy.clearance_ev``) is extended outward from its ends; the first new
+    point on a side starts from the ROHF orbitals, the continuity check covers
+    the joined curve.
+    """
     space = full_valence_space(atoms, charge)
     wfnsym = target_c2v_irrep(label)
     if space is None or wfnsym is None or irrep_nelec is None:
         return {"status": "MR_ACTIVE_SPACE_NOT_DERIVED"}
-    if cache.is_file():
-        return json.loads(cache.read_text())
-    clearance = policy.clearance_ev / HARTREE_TO_EV
+    target = float(policy.clearance_ev if clearance_ev is None else clearance_ev)
+    cached = json.loads(cache.read_text()) if cache.is_file() else None
+    if cached is not None and (cached.get("status") != "COMPLETED"
+                               or float(cached.get("clearance_ev", policy.clearance_ev)) >= target - 1e-9):
+        return cached
+    clearance = target / HARTREE_TO_EV
     pts: dict[float, tuple[float, list]] = {}
-    mol0, mo0, e0, occ0 = _point(atoms, r_center, charge, spin_2s, irrep_nelec, wfnsym, space, policy.basis,
-                                 None, None, chk, policy)
-    pts[round(r_center, 6)] = (e0, occ0.tolist())
+    ends: dict[int, tuple[Any, Any]] = {}
+    if cached is None:
+        mol0, mo0, e0, occ0 = _point(atoms, r_center, charge, spin_2s, irrep_nelec, wfnsym, space, policy.basis,
+                                     None, None, chk, policy)
+        pts[round(r_center, 6)] = (e0, occ0.tolist())
+        ends = {-1: (mol0, mo0), +1: (mol0, mo0)}
+    else:
+        r_center = float(cached.get("r_center", r_center))
+        pts = {round(float(x), 6): (float(y), list(o))
+               for x, y, o in zip(cached["r"], cached["e"], cached["active_occupations"])}
     for direction in (-1, +1):
-        mol_prev, mo_prev = mol0, mo0
-        for k in range(1, policy.max_points_per_side + 1):
+        mol_prev, mo_prev = ends.get(direction, (None, None))
+        side = [x for x in pts if direction * (x - r_center) > 1e-6]
+        k0 = len(side)
+        if k0:
+            emin = min(v[0] for v in pts.values())
+            r_end = max(side, key=lambda x: direction * x)
+            if k0 >= policy.min_points_per_side and pts[r_end][0] - emin > clearance:
+                continue
+        for k in range(k0 + 1, policy.max_points_per_side + 1):
             r = r_center + direction * k * policy.step_angstrom
             mol_prev, mo_prev, e, occ = _point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space,
                                                policy.basis, mo_prev, mol_prev, chk, policy)
@@ -136,14 +161,17 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
             if k >= policy.min_points_per_side and e - emin > clearance:
                 break
         else:
-            record = {"status": "MR_CURVE_RANGE_NOT_REACHED"}
+            record = {"status": "MR_CURVE_RANGE_NOT_REACHED", "clearance_ev": target}
+            if cached is not None:  # keep the completed shorter curve usable
+                return cached
             _save_json(cache, record)
             return record
     r = sorted(pts)
     e = [pts[x][0] for x in r]
     occ = [pts[x][1] for x in r]
     record = {"status": "COMPLETED", "r": r, "e": e, "active_occupations": occ, "active_space": space,
-              "wfnsym_c2v": wfnsym, "method": "SC-NEVPT2/CASSCF(full valence)", "basis": policy.basis}
+              "wfnsym_c2v": wfnsym, "method": "SC-NEVPT2/CASSCF(full valence)", "basis": policy.basis,
+              "r_center": r_center, "clearance_ev": target}
     problems = continuity_problems(r, e, occ, policy)
     if problems:
         record.update(status="MR_CURVE_CONTINUITY_FAILED", problems=problems)
@@ -194,7 +222,7 @@ def mr_zpe_fallback(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any
     from .adaptive.nuclear_motion import NuclearMotionPEC, NuclearMotionStatus, run_diatomic_nuclear_motion
     curve_fn = curve_fn or mr_state_curve
     record: dict[str, Any] = {"policy": asdict(policy), "curves": {}}
-    pecs, model_terms = {}, {}
+    inputs = {}
     for role in ("neutral", "anion"):
         job = electronic_ea[f"selected_{role}_job"]
         loop = loops.get(job)
@@ -207,22 +235,50 @@ def mr_zpe_fallback(*, electronic_ea: Mapping[str, Any], loops: Mapping[str, Any
         if not done:
             return {**record, "status": "MR_NOT_ATTEMPTED", "reason": f"no checkpoint for {job}"}
         req, res = min(done, key=lambda item: abs(float(item[0].r_angstrom) - r_c))
-        curve = curve_fn(atoms=tuple(req.atoms), charge=req.charge, spin_2s=req.spin_2s,
-                         irrep_nelec=req.irrep_nelec, label=req.symmetry_label, r_center=r_c,
-                         chk=res.high_level_checkpoint_path, policy=policy,
-                         cache=Path(output_dir) / "mr_curves" / f"{role}.json")
-        record["curves"][role] = {k: v for k, v in curve.items() if k != "active_occupations"}
-        if curve.get("status") != "COMPLETED":
-            return {**record, "status": f"MR_{role.upper()}_{curve.get('status')}"}
-        pecs[role] = NuclearMotionPEC(role=role, state_id=job, r_angstrom=tuple(curve["r"]),
-                                      energy_hartree=tuple(curve["e"]), method=curve["method"],
-                                      basis=curve["basis"], evidence_ids=("OPENEA_MR_NUCLEAR_CURVE_FALLBACK",))
-        sr = sorted((float(p.r_angstrom), float(p.energy_hartree)) for p in loop.final_pec.points)
-        k_mr, k_sr = _harmonic_k(curve["r"], curve["e"]), _harmonic_k(*zip(*sr)) if len(sr) >= 3 else None
-        model_terms[role] = None if not k_mr or not k_sr else abs(float(np.sqrt(k_mr / k_sr)) - 1.0)
-    assessment = run_diatomic_nuclear_motion(neutral_pec=pecs["neutral"], anion_pec=pecs["anion"], masses=masses,
-                                             settings=nuclear_settings, anion_dissociation_channels=channels)
-    record["assessment_status"] = assessment.status.value
+        inputs[role] = (job, loop, req, res, r_c)
+    # The nuclear solver may ask for a wider curve (boundary clearance or
+    # finite-domain sensitivity): extend that role's curve to the next clearance.
+    schedule = (policy.clearance_ev,) + tuple(c for c in policy.extension_clearances_ev if c > policy.clearance_ev)
+    level = {"neutral": 0, "anion": 0}
+    curves: dict[str, dict] = {}
+    record["extension_rounds"] = []
+    while True:
+        pecs, model_terms = {}, {}
+        for role, (job, loop, req, res, r_c) in inputs.items():
+            curve = curve_fn(atoms=tuple(req.atoms), charge=req.charge, spin_2s=req.spin_2s,
+                             irrep_nelec=req.irrep_nelec, label=req.symmetry_label, r_center=r_c,
+                             chk=res.high_level_checkpoint_path, policy=policy,
+                             cache=Path(output_dir) / "mr_curves" / f"{role}.json",
+                             clearance_ev=schedule[level[role]])
+            curves[role] = curve
+            record["curves"][role] = {k: v for k, v in curve.items() if k != "active_occupations"}
+            if curve.get("status") != "COMPLETED":
+                return {**record, "status": f"MR_{role.upper()}_{curve.get('status')}"}
+            pecs[role] = NuclearMotionPEC(role=role, state_id=job, r_angstrom=tuple(curve["r"]),
+                                          energy_hartree=tuple(curve["e"]), method=curve["method"],
+                                          basis=curve["basis"], evidence_ids=("OPENEA_MR_NUCLEAR_CURVE_FALLBACK",))
+            sr = sorted((float(p.r_angstrom), float(p.energy_hartree)) for p in loop.final_pec.points)
+            k_mr, k_sr = _harmonic_k(curve["r"], curve["e"]), _harmonic_k(*zip(*sr)) if len(sr) >= 3 else None
+            model_terms[role] = None if not k_mr or not k_sr else abs(float(np.sqrt(k_mr / k_sr)) - 1.0)
+        assessment = run_diatomic_nuclear_motion(neutral_pec=pecs["neutral"], anion_pec=pecs["anion"],
+                                                 masses=masses, settings=nuclear_settings,
+                                                 anion_dissociation_channels=channels)
+        record["assessment_status"] = assessment.status.value
+        if assessment.status is not NuclearMotionStatus.PEC_REFINEMENT_REQUIRED:
+            break
+        wider = [role for role in inputs
+                 if (getattr(assessment, role).requires_lower_r_extension
+                     or getattr(assessment, role).requires_upper_r_extension)
+                 and level[role] + 1 < len(schedule)]
+        if not wider:
+            break
+        for role in wider:
+            level[role] += 1
+        record["extension_rounds"].append({role: {"clearance_ev": schedule[level[role]],
+                                                  "domain_difference_ev": getattr(assessment, role).domain_difference_ev,
+                                                  "points_before": len(curves[role]["r"])} for role in wider})
+        print(f"[ZPE] MR curves {', '.join(wider)}: {assessment.status.value}; extending to clearance "
+              f"{', '.join(f'{schedule[level[r]]:.2f}' for r in wider)} eV", flush=True)
     if assessment.status is not NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED:
         return {**record, "status": f"MR_NUCLEAR_{assessment.status.value}", "reason": assessment.rationale}
     if any(v is None for v in model_terms.values()):
