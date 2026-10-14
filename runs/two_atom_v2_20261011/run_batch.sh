@@ -1,5 +1,6 @@
 #!/bin/bash
 # Guarded batch: memory watchdog + several run_one.sh runs in one process namespace.
+# Start it detached with start_detached.sh (setsid + nohup), not in a terminal.
 # Usage: run_batch.sh C:C N:O Si:C O:H:benchmark_auto_p40   (from anywhere)
 # An optional third field selects the acquisition subdirectory (run_one_dir.sh).
 # Memory gate in each run (--mem-limit-frac 0.70 via run_one.sh) and
@@ -14,7 +15,7 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 # integral files behind (123 GB on 2026-10-12, disk quota exceeded).
 mkdir -p runs/scratch
 export PYSCF_TMPDIR="$(mktemp -d "$PWD/runs/scratch/batch_$(date +%Y%m%d_%H%M%S)_XXXX")"
-nice -n 19 .venv/bin/python scripts/openea_mem_watchdog.py --log runs/mem_watchdog.log &
+nohup nice -n 19 .venv/bin/python scripts/openea_mem_watchdog.py --log runs/mem_watchdog.log &
 WATCHDOG=$!
 trap 'kill -TERM $WATCHDOG 2>/dev/null; rm -rf "$PYSCF_TMPDIR"' EXIT
 for pair in "$@"; do

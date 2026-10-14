@@ -22,11 +22,20 @@ estimated storage exceeds ``q_memory_limit_mb`` the layer reports
 """
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import shutil
+import socket
+import tempfile
+import time
+import uuid
 from typing import Any, Mapping, Sequence
+
+import numpy as np
 
 from .core_valence_stage import selected_state_specs
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
@@ -87,15 +96,27 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     return mf1
 
 
-# CCpy keeps diis_size (6) amplitude and residual vectors in core, plus the
-# amplitudes, the residual and intermediates: ~16 copies of the highest-rank
-# amplitude array.  2026-10-13: CCSDTQ/cc-pVDZ of NO, ClO and N2 together with
-# CCSDT/aug-cc-pVTZ points took ~450 GB; the earlier 3-copy estimate was 5x low.
-AMPLITUDE_COPIES = 2 * 6 + 4
+# CCpy keeps diis_size (6) amplitude and residual vectors, plus the amplitudes, the
+# residual and intermediates: ~16 copies of the highest-rank amplitude array.
+# 2026-10-13: CCSDTQ/cc-pVDZ of NO, ClO and N2 together with CCSDT/aug-cc-pVTZ
+# points took ~450 GB; the earlier 3-copy estimate was 5x low.
+DIIS_SIZE = 6
+DIIS_COPIES = 2 * DIIS_SIZE
+IN_CORE_COPIES = 4
+AMPLITUDE_COPIES = DIIS_COPIES + IN_CORE_COPIES
+# With DIIS on disk: amplitudes, residual, intermediates plus the flattened vector
+# and one row read back in push/extrapolate (benchmark 2026-10-14: peak 5.1 copies).
+OUT_OF_CORE_COPIES = 6
+# Out-of-core DIIS (user decision 2026-10-14): when the DIIS vectors of a point
+# exceed this size, CCpy writes them to an HDF5 file in a per-point directory on
+# GPFS scratch, removed when the point ends.  OPENEA_DIIS_OUT_OF_CORE=0/1 forces
+# the choice (benchmark in-core vs scratch).
+DIIS_OUT_OF_CORE_MB = 10000
+CC_SCRATCH_ROOT = Path(os.environ.get("OPENEA_CC_SCRATCH", f"/scratch/{os.environ.get('USER', 'openea')}/openea_cc"))
 
 
-def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
-    """Memory estimate of a CCpy CCSDT or CCSDTQ point: copies x 8 bytes x sum over spin blocks of (o v)^n."""
+def _amplitude_mb(spec: Any, basis: str, method: str) -> float:
+    """One copy of the highest-rank amplitude array: 8 bytes x sum over spin blocks of (o v)^n."""
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
     rank = {"CCSD(T)": 2, "CCSDT": 3, "CCSDTQ": 4}[method]
     mol = _mol(spec, basis, False, 1000)
@@ -103,7 +124,98 @@ def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
     na, nb = mol.nelec
     nmo = mol.nao_nr()
     x, y = (na - nfz) * (nmo - na), (nb - nfz) * (nmo - nb)
-    return AMPLITUDE_COPIES * 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
+    return 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
+
+
+def diis_out_of_core(amplitude_mb: float) -> bool:
+    forced = os.environ.get("OPENEA_DIIS_OUT_OF_CORE")
+    if forced in ("0", "1"):
+        return forced == "1"
+    return DIIS_COPIES * amplitude_mb > DIIS_OUT_OF_CORE_MB
+
+
+def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
+    """Memory (RAM) estimate of a CCpy point; DIIS copies count only when kept in core."""
+    one = _amplitude_mb(spec, basis, method)
+    return (OUT_OF_CORE_COPIES if diis_out_of_core(one) else AMPLITUDE_COPIES) * one
+
+
+def cc_scratch_mb(spec: Any, basis: str, method: str) -> float:
+    one = _amplitude_mb(spec, basis, method)
+    return DIIS_COPIES * one if diis_out_of_core(one) else 0.0
+
+
+def cached_diis_class():
+    """CCpy's DIIS with the residual overlap matrix kept in memory.
+
+    CCpy's ``extrapolate`` rebuilds the full B matrix every iteration: with the
+    vectors on GPFS that re-reads ~2 x 21 residual vectors (2026-10-14 benchmark,
+    CN CCSDTQ/cc-pVDZ: 506 s of a 930 s iteration).  Here ``push`` computes the new
+    residual's overlaps with the stored ones once (diis_size reads), and
+    ``extrapolate`` only reads the diis_size amplitude vectors.  Same equations,
+    same Gaussian elimination.
+    """
+    import ccpy.drivers.diis as diis_mod
+
+    class CachedDIIS(diis_mod.DIIS):
+        def __init__(self, T, diis_size, out_of_core):
+            super().__init__(T, diis_size, out_of_core)
+            self.overlap = np.zeros((diis_size, diis_size), dtype=self.data_type)
+
+        def push(self, T, T_residuum, iteration):
+            slot = iteration % self.diis_size
+            resid = T_residuum.flatten()
+            self.T_list[slot, :] = T.flatten()
+            self.T_residuum_list[slot, :] = resid
+            for j in range(min(iteration + 1, self.diis_size)):
+                value = np.dot(resid.conj(), resid) if j == slot else np.dot(
+                    resid.conj(), self.T_residuum_list[j, :])
+                self.overlap[slot, j] = self.overlap[j, slot] = value
+
+        def extrapolate(self):
+            n = self.diis_size
+            B = -1.0 * np.ones((n + 1, n + 1), self.data_type)
+            B[:n, :n] = self.overlap
+            B[-1, -1] = 0.0
+            rhs = np.zeros(n + 1, dtype=self.data_type)
+            rhs[-1] = -1.0
+            coeff = self.solve_gauss(B, rhs)
+            x_xtrap = np.zeros(self.ndim, dtype=self.data_type)
+            for i in range(n):
+                x_xtrap += coeff[i] * self.T_list[i, :]
+            return x_xtrap
+
+    return CachedDIIS
+
+
+def _sweep_dead_scratch(root: Path) -> None:
+    """Remove scratch directories of killed points (finally never ran) on this host."""
+    host = socket.gethostname()
+    for d in root.glob(f"{host}_*_*"):
+        try:
+            os.kill(int(d.name.split("_")[1]), 0)
+        except ProcessLookupError:
+            shutil.rmtree(d, ignore_errors=True)
+        except (ValueError, PermissionError):
+            pass
+
+
+@contextmanager
+def cc_scratch_dir():
+    """Per-point directory for CCpy's DIIS file (tempfile-based), always removed afterwards.
+
+    Points run one per pool worker process, so redirecting ``tempfile.tempdir`` is safe.
+    """
+    CC_SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    _sweep_dead_scratch(CC_SCRATCH_ROOT)
+    path = CC_SCRATCH_ROOT / f"{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    path.mkdir()
+    previous, tempfile.tempdir = tempfile.tempdir, str(path)
+    try:
+        yield path
+    finally:
+        tempfile.tempdir = previous
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def quadruples_storage_mb(spec: Any, basis: str) -> float:
@@ -129,16 +241,25 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
         driver.options["energy_convergence"] = policy.cc_convergence
         driver.options["amp_convergence"] = policy.cc_convergence
         driver.options["maximum_iterations"] = policy.cc_max_iterations
-        if method == "CCSD(T)":
-            driver.run_cc(method="ccsd")
-            corr = float(driver.correlation_energy)
-            driver.run_ccp3(method="ccsd(t)")
-            corr += float(driver.deltap3[0]["A"])
-        else:
-            driver.run_cc(method=method.lower())
-            corr = float(driver.correlation_energy)
-        record.update(status="COMPLETED", nfrozen=nfz, reference_hartree=float(mf.e_tot),
-                      total_hartree=float(mf.e_tot) + corr)
+        driver.options["diis_size"] = DIIS_SIZE
+        out_of_core = diis_out_of_core(_amplitude_mb(spec, basis, method))
+        driver.options["diis_out_of_core"] = out_of_core
+        record["diis_out_of_core"] = out_of_core
+        if out_of_core:
+            import ccpy.drivers.solvers as solvers
+            solvers.DIIS = cached_diis_class()
+        t0 = time.perf_counter()
+        with cc_scratch_dir() if out_of_core else nullcontext():
+            if method == "CCSD(T)":
+                driver.run_cc(method="ccsd")
+                corr = float(driver.correlation_energy)
+                driver.run_ccp3(method="ccsd(t)")
+                corr += float(driver.deltap3[0]["A"])
+            else:
+                driver.run_cc(method=method.lower())
+                corr = float(driver.correlation_energy)
+        record.update(status="COMPLETED", cc_wall_seconds=time.perf_counter() - t0, nfrozen=nfz,
+                      reference_hartree=float(mf.e_tot), total_hartree=float(mf.e_tot) + corr)
     except Exception as exc:  # noqa: BLE001 - recorded, layer fails closed
         record.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
     _save_json(out, record)
