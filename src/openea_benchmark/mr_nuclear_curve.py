@@ -73,11 +73,16 @@ def _c2v_counts(irrep_nelec: Mapping[str, Any]) -> dict[str, tuple[int, int]]:
     return {k: (a, b) for k, (a, b) in out.items()}
 
 
+def _mol(atoms, r, charge, spin_2s, basis, policy):
+    from pyscf import gto
+    return gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=basis, charge=charge,
+                 spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
+
+
 def _point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space, basis, mo_guess, mol_guess, chk, policy,
            projected=None):
-    from pyscf import gto, mcscf, mrpt, scf
-    mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=basis, charge=charge,
-                spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
+    from pyscf import mcscf, mrpt, scf
+    mol = _mol(atoms, r, charge, spin_2s, basis, policy)
     ncas = sum(space["ras2"])
     nelecas = space["active_electrons"]
     ncore = {k: v for k, v in zip(C2V_IRREPS, space["inactive"]) if v}
@@ -118,19 +123,31 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
     """Walk outward from r_center; returns {"r": [...], "e": [...]} or a failure record.
 
     A cached completed curve that does not yet reach ``clearance_ev`` (default
-    ``policy.clearance_ev``) is extended outward from its ends; the first new
-    point on a side starts from the ROHF orbitals, the continuity check covers
-    the joined curve.
+    ``policy.clearance_ev``) is extended outward from its ends, every new point
+    seeded from its neighbour's CASSCF orbitals (stored next to the cache, file
+    ``<cache>.ends.npz``).  Without stored orbitals the curve is walked again from
+    the centre: a cold-started end point can land on a nearby CASSCF solution
+    (AlO- 1.450 A, 0.57 mEh off the cubic through its neighbours).
     """
     space = full_valence_space(atoms, charge)
     wfnsym = target_c2v_irrep(label)
     if space is None or wfnsym is None or irrep_nelec is None:
         return {"status": "MR_ACTIVE_SPACE_NOT_DERIVED"}
     target = float(policy.clearance_ev if clearance_ev is None else clearance_ev)
+    ends_file = cache.with_name(cache.name + ".ends.npz")
     cached = json.loads(cache.read_text()) if cache.is_file() else None
-    if cached is not None and (cached.get("status") != "COMPLETED"
-                               or float(cached.get("clearance_ev", policy.clearance_ev)) >= target - 1e-9):
-        return cached
+    if cached is not None:
+        reached = float(cached.get("clearance_ev", policy.clearance_ev)) >= target - 1e-9
+        if cached.get("status") == "COMPLETED" and reached:
+            return cached
+        # Before Patch 50c an extension started cold (no "seeded" flag); such a failed
+        # curve is walked again, a failure of a seeded walk is final.
+        cold = ("seeded" not in cached
+                and float(cached.get("clearance_ev", policy.clearance_ev)) > policy.clearance_ev + 1e-9)
+        if cached.get("status") != "COMPLETED" and not cold:
+            return cached
+        if cached.get("status") != "COMPLETED" or not ends_file.is_file():
+            cached = None  # walk again from the centre
     clearance = target / HARTREE_TO_EV
     pts: dict[float, tuple[float, list]] = {}
     ends: dict[int, tuple[Any, Any]] = {}
@@ -143,10 +160,16 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
         r_center = float(cached.get("r_center", r_center))
         pts = {round(float(x), 6): (float(y), list(o))
                for x, y, o in zip(cached["r"], cached["e"], cached["active_occupations"])}
+        with np.load(ends_file) as f:
+            for direction, tag in ((-1, "lo"), (+1, "hi")):
+                ends[direction] = (_mol(atoms, float(f[f"r_{tag}"]), charge, spin_2s, policy.basis, policy),
+                                   np.array(f[f"mo_{tag}"]))
+    end_orbitals: dict[int, tuple[float, Any]] = {}
     for direction in (-1, +1):
-        mol_prev, mo_prev = ends.get(direction, (None, None))
+        mol_prev, mo_prev = ends[direction]
         side = [x for x in pts if direction * (x - r_center) > 1e-6]
         k0 = len(side)
+        end_orbitals[direction] = (r_center + direction * k0 * policy.step_angstrom, mo_prev)
         if k0:
             emin = min(v[0] for v in pts.values())
             r_end = max(side, key=lambda x: direction * x)
@@ -157,6 +180,7 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
             mol_prev, mo_prev, e, occ = _point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space,
                                                policy.basis, mo_prev, mol_prev, chk, policy)
             pts[round(r, 6)] = (e, occ.tolist())
+            end_orbitals[direction] = (r, mo_prev)
             emin = min(v[0] for v in pts.values())
             if k >= policy.min_points_per_side and e - emin > clearance:
                 break
@@ -171,10 +195,14 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
     occ = [pts[x][1] for x in r]
     record = {"status": "COMPLETED", "r": r, "e": e, "active_occupations": occ, "active_space": space,
               "wfnsym_c2v": wfnsym, "method": "SC-NEVPT2/CASSCF(full valence)", "basis": policy.basis,
-              "r_center": r_center, "clearance_ev": target}
+              "r_center": r_center, "clearance_ev": target, "seeded": True}
     problems = continuity_problems(r, e, occ, policy)
     if problems:
         record.update(status="MR_CURVE_CONTINUITY_FAILED", problems=problems)
+    else:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(ends_file, r_lo=end_orbitals[-1][0], mo_lo=end_orbitals[-1][1],
+                 r_hi=end_orbitals[+1][0], mo_hi=end_orbitals[+1][1])
     _save_json(cache, record)
     return record
 

@@ -106,3 +106,29 @@ def test_fallback_widens_curves_until_domain_converged(tmp_path):
                           nuclear_settings=ZPEStagePolicy().nuclear_settings(), output_dir=tmp_path, curve_fn=curve_fn)
     assert res["status"] == "CLEARED", res
     assert res["extension_rounds"] and max(c for _, c in seen) == 0.9
+
+
+def test_extension_is_seeded_and_cold_failures_are_rewalked(tmp_path, monkeypatch):
+    import json
+    import openea_benchmark.mr_nuclear_curve as mod
+    seeds = []
+
+    def point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space, basis, mo_guess, mol_guess, chk, policy,
+              projected=None):
+        seeds.append((round(r, 4), mo_guess is not None))
+        return "mol", np.full(3, r), float(morse(r)), np.array([1.95, 1.0, 0.05])
+    monkeypatch.setattr(mod, "_point", point)
+    monkeypatch.setattr(mod, "_mol", lambda *a, **k: "mol")
+    kw = dict(atoms=("Al", "O"), charge=0, spin_2s=1, irrep_nelec={"A1": (5, 4)}, label="2Sigma+", r_center=1.62,
+              chk="/x", policy=MRCurvePolicy(), cache=tmp_path / "anion.json")
+    first = mod.mr_state_curve(**kw)
+    assert (tmp_path / "anion.json.ends.npz").is_file()
+    seeds.clear()
+    wide = mod.mr_state_curve(**kw, clearance_ev=0.9)
+    assert wide["seeded"] and seeds and all(seeded for _, seeded in seeds)
+    assert len(seeds) == len(wide["r"]) - len(first["r"])  # only new points
+    # A failed curve from a cold (pre-50c) extension is walked again from the centre.
+    (tmp_path / "anion.json").write_text(json.dumps({"status": "MR_CURVE_CONTINUITY_FAILED", "clearance_ev": 0.9}))
+    seeds.clear()
+    again = mod.mr_state_curve(**kw, clearance_ev=0.9)
+    assert again["status"] == "COMPLETED" and seeds[0] == (1.62, False) and len(seeds) == len(again["r"])
