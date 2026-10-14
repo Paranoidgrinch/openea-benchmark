@@ -222,15 +222,27 @@ def quadruples_storage_mb(spec: Any, basis: str) -> float:
     return cc_storage_mb(spec, basis, "CCSDTQ")
 
 
-def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy, path: str) -> dict:
+def _point_signature(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy) -> str:
+    return sha256(json.dumps({"state": {k: v for k, v in asdict(spec).items()}, "basis": basis,
+                              "method": method, "policy": asdict(policy)}, sort_keys=True, default=str)
+                  .encode()).hexdigest()
+
+
+def cached_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy, path: str) -> dict | None:
     out = Path(path)
-    signature = sha256(json.dumps({"state": {k: v for k, v in asdict(spec).items()}, "basis": basis,
-                                   "method": method, "policy": asdict(policy)}, sort_keys=True, default=str)
-                       .encode()).hexdigest()
     if out.is_file():
         cached = json.loads(out.read_text())
-        if cached.get("signature") == signature and cached.get("status") == "COMPLETED":
+        if (cached.get("signature") == _point_signature(spec, basis, method, policy)
+                and cached.get("status") == "COMPLETED"):
             return cached
+    return None
+
+
+def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy, path: str) -> dict:
+    signature = _point_signature(spec, basis, method, policy)
+    cached = cached_point(spec, basis, method, policy, path)
+    if cached is not None:
+        return cached
     from ccpy.drivers.driver import Driver
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
     record: dict[str, Any] = {"signature": signature, "role": spec.role, "basis": basis, "method": method}
@@ -262,7 +274,7 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
                       reference_hartree=float(mf.e_tot), total_hartree=float(mf.e_tot) + corr)
     except Exception as exc:  # noqa: BLE001 - recorded, layer fails closed
         record.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
-    _save_json(out, record)
+    _save_json(Path(path), record)
     return record
 
 
@@ -306,10 +318,14 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     jobs, reserves = [], []
     for role, spec in states.items():
         for basis, method in tasks:
-            reserves.append(cc_storage_mb(spec, basis, method))
-            print(f"[POST-CC] {spec.system} {role} {basis} {method}", flush=True)
-            jobs.append((spec, basis, method, policy,
-                         str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json")))
+            path = str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json")
+            # A completed point only reads its file: no memory reservation, so it does
+            # not wait behind a running large point for the one-at-a-time slot.
+            done_already = cached_point(spec, basis, method, policy, path) is not None
+            reserves.append(0.0 if done_already else cc_storage_mb(spec, basis, method))
+            print(f"[POST-CC] {spec.system} {role} {basis} {method}{' (cached)' if done_already else ''}",
+                  flush=True)
+            jobs.append((spec, basis, method, policy, path))
     results = run_parallel(fn, jobs, reserve_mb=reserves)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]

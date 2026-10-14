@@ -114,3 +114,30 @@ def test_pending_large_reservation_is_counted_by_others(tmp_path, monkeypatch):
     assert point_pool._pending_big_reservation_mb() == 0.0  # admitted: counted via its slot instead
     fcntl.flock(fh, fcntl.LOCK_UN)
     fh.close()
+
+
+def test_cached_points_reserve_no_memory(tmp_path, monkeypatch):
+    """A completed point only reads its file; it must not queue for the large-task slot."""
+    import json
+    seen = []
+    base_point = fake_point
+
+    def fake_parallel(fn, jobs, reserve_mb=None):
+        seen.append(list(reserve_mb))
+        return [fn(*job) for job in jobs]
+
+    def writing_point(spec, basis, method, policy, path):
+        rec = dict(base_point(spec, basis, method, policy, path),
+                   signature=post_ccsd_t_stage._point_signature(spec, basis, method, policy))
+        from pathlib import Path
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps(rec))
+        return rec
+
+    monkeypatch.setattr(post_ccsd_t_stage, "run_parallel", fake_parallel)
+    import test_post_ccsd_t_stage_v1 as me
+    monkeypatch.setattr(me, "fake_point", writing_point)
+    run(tmp_path, monkeypatch, limit=60000)
+    assert max(seen[0]) == 50000.0
+    run(tmp_path, monkeypatch, limit=60000)  # second pass: every point cached
+    assert seen[1] and all(x == 0.0 for x in seen[1])
