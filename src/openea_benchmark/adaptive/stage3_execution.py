@@ -42,6 +42,8 @@ Scientific invariants
 """
 from __future__ import annotations
 
+from ..heavy_elements import mole_basis_kwargs
+
 from dataclasses import asdict, dataclass
 from enum import Enum
 from math import isfinite
@@ -520,11 +522,11 @@ def _run_stage3_point_pyscf(
     ]
     mol = gto.M(
         atom=atom_spec,
-        basis=(
+        **mole_basis_kwargs(request.atoms, (
             dict(request.basis_by_element)
             if request.basis_by_element is not None
             else request.basis
-        ),
+        )),
         charge=request.charge,
         spin=request.spin_2s,
         unit="Angstrom",
@@ -693,6 +695,10 @@ def _run_stage3_point_pyscf(
     # PySCF's set_frozen() (which keeps the n-1 shell of Li-Ca correlated).
     if settings.frozen_core:
         mycc.frozen = valence_frozen_core_orbitals(mol)
+    else:
+        from ..heavy_elements import implicit_core_orbitals
+        if implicit_core_orbitals(mol):  # all-electron heavy atom: its ECP core stays frozen
+            mycc.frozen = implicit_core_orbitals(mol)
     mycc.conv_tol = settings.cc_conv_tol
     mycc.conv_tol_normt = settings.cc_conv_tol_normt
     mycc.max_cycle = settings.cc_max_cycle
@@ -746,7 +752,8 @@ def _valence_core_orbitals(z: int) -> int | None:
     MgH frozen-core CBS energies then jump erratically with the cardinal number).
     3d transition metals Sc-Zn: [Ar] (3d4s correlated; 3s3p correlation needs
     core-correlating cc-pwCVxZ functions and belongs to the core-valence layer, while
-    PySCF's table freezes only [Ne]).  4d and heavier: None (PySCF's table is kept).
+    PySCF's table freezes only [Ne]).  Beyond Kr: ``heavy_elements.valence_core_orbitals``
+    (all-electron count; ``valence_frozen_core_orbitals`` subtracts the ECP core).
     """
     if z <= 2:
         return 0
@@ -758,7 +765,8 @@ def _valence_core_orbitals(z: int) -> int | None:
         return 9
     if 31 <= z <= 36:
         return 14
-    return None
+    from ..heavy_elements import valence_core_orbitals
+    return valence_core_orbitals(z)
 
 
 def valence_frozen_core_orbitals(mol: Any) -> int:

@@ -17,6 +17,8 @@ turn a smoke-test threshold into production dissociation evidence.
 """
 from __future__ import annotations
 
+from ..heavy_elements import mole_basis_kwargs
+
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -206,7 +208,7 @@ def _run_atomic_fragment_pyscf(
 
     mol = gto.M(
         atom=[(request.element, (0.0, 0.0, 0.0))],
-        basis=request.basis,
+        **mole_basis_kwargs((request.element,), request.basis),
         charge=request.charge,
         spin=request.spin_2s,
         unit="Angstrom",

@@ -114,8 +114,19 @@ def _even_tempered_extra_diffuse(shells: list) -> list:
 
 
 def element_basis(element: str, cardinal: int, *, daug: bool = False) -> tuple[Any, str]:
-    """(PySCF basis spec, provenance) for one element."""
+    """(PySCF basis spec, provenance) for one element.
+
+    PP-route elements (beyond Kr) get the basis *name* aug-cc-pVXZ-PP (d-aug: its
+    even-tempered extension), resolved together with its ECP when the molecule is built.
+    """
     from pyscf import gto
+    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route, resolve_named_basis
+    if element_route(element)["route"] == ROUTE_PSEUDOPOTENTIAL:
+        name = f"{'d-' if daug else ''}aug-cc-pV{CARDINAL_LETTER[cardinal].upper()}Z-PP"
+        loaded = resolve_named_basis(name, element)
+        if loaded is None or loaded.ecp is None:
+            raise ValueError(f"no {name} with ECP for {element}")
+        return name, loaded.provenance
     name = _element_basis_name(element, cardinal)
     if not daug:
         return name, name

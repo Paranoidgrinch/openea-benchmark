@@ -26,6 +26,8 @@ unchanged.  No experimental data are read.
 """
 from __future__ import annotations
 
+from .heavy_elements import mole_basis_kwargs
+
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -100,7 +102,7 @@ def pyscf_atom_energy(symbol: str, charge: int, spin_2s: int, *, functional: str
                       grid_level: int, policy: OpenPECExtensionPolicy) -> dict:
     from pyscf import gto
 
-    mol = gto.M(atom=f"{symbol} 0 0 0", basis=basis, charge=charge, spin=spin_2s, verbose=0)
+    mol = gto.M(atom=f"{symbol} 0 0 0", **mole_basis_kwargs((symbol,), basis), charge=charge, spin=spin_2s, verbose=0)
     best = None
     for guess in ("minao", "atom", "huckel"):
         try:
@@ -121,7 +123,7 @@ def pyscf_continuation_point(*, atoms: tuple[str, str], charge: int, spin_2s: in
     from pyscf import gto
 
     mol = gto.M(atom=[(atoms[0], (0.0, 0.0, 0.0)), (atoms[1], (0.0, 0.0, float(r_angstrom)))],
-                basis=basis, charge=charge, spin=spin_2s, unit="Angstrom", verbose=0)
+                **mole_basis_kwargs(atoms, basis), charge=charge, spin=spin_2s, unit="Angstrom", verbose=0)
     mf = _dft_mean_field(mol, functional, grid_level, 1.0e-9, 200)
     dm0 = mf.from_chk(seed_checkpoint)
     mf.chkfile = checkpoint

@@ -201,3 +201,34 @@ Term-gap validation with cache v6 (ten measured T0): O2 a 0.954 (0.977), O2 b 1.
 (0.545), NH b 2.643 (2.629), NF b 2.346 (2.341), SO b 1.271 (1.303), S2 b 1.024
 (0.990) eV: mean -0.011, RMS 0.039, max 0.067 eV. The method term is now 0.10 eV
 (1.5 x the largest error), replacing the pilot 0.15 eV.
+
+## Patch 56 — elements beyond Kr, pseudopotential route (heavy-element step 1)
+
+`heavy_elements.py` holds every per-element rule; nothing looks at the molecule.
+
+* Route: Z <= 36 all-electron as before; Z > 36 the PSEUDOPOTENTIAL route when the
+  aug-cc-pV{T,Q,5}Z-PP series loads (PySCF library, else Basis Set Exchange) —
+  Y-Xe and Hf-Rn.  Fail closed (`final_verdict` ELEMENT_NOT_SUPPORTED, written before
+  any computation) for open 4f/5f shells (La-Lu, Ac-Lr) and for Rb, Sr, Cs, Ba (no
+  PP cardinal series in BSE).
+* ECPs travel with basis *names*: `mole_basis_kwargs` resolves every heavy element's
+  named basis together with its ECP at each `gto.M` (scout, Stage 3, atoms, MR blocks
+  and curves, post-CC, open-PEC DFT).  Heavy elements given as bare shells raise:
+  PySCF would otherwise load e.g. def2-TZVPPD for Ag silently as all-electron
+  (47 electrons in a basis built for 19).  Light-element molecules get exactly the
+  old arguments, so no cached point changes.
+* Frozen core (all-electron count, ECP core subtracted): 4d metals [Kr], 5p [Kr]4d10,
+  5d metals [Xe]4f14, 6p [Xe]4f14 5d10 (cc-pVXZ-PP practice).
+* Stage bases: CBS aug-cc-pV{Q,5}Z-PP (d-aug: even-tempered extension); CV
+  aug-cc-pwCVXZ-PP (outer core 4s4p / 5s5p correlated); post-CC aug-cc-pVXZ-PP;
+  scout/Stage 3/MR def2 with def2 ECPs.
+* Scalar relativity: the ECP carries it, so the SR layer becomes the ECP correction
+  EA[sfX2C, all-electron dyall-avXz] - EA[ECP, aug-cc-pVXZ-PP].  In the all-electron
+  member the orbitals the ECP replaces stay frozen (`implicit_core_orbitals`), so both
+  members correlate the same orbitals.
+* Active spaces: 5s4d / 6s5d for d metals, ns np otherwise; all-electron counts for
+  Molcas (ANO-RCC), ECP cores removed for PySCF MR blocks (`pyscf_valence_space`).
+* Atomic states: ns2 (n-1)d8 -> (n-1)d10 promotion added (Pd ground state 4d10 1S).
+
+Open (step 2): spin-orbit coupling of 5p/6p elements is not a small correction
+(I 0.94 eV, Bi ~1.9 eV atomic splittings); Lambda-S labels then lose meaning.

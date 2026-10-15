@@ -129,6 +129,13 @@ def _valence_promotions(occ) -> list[list[tuple[int, int, int]]]:
         cfg = moved(src, dst)
         if cfg is not None:
             out.append(cfg)
+    # ns2 (n-1)d8 -> (n-1)d10: closing the d shell moves both s electrons (Pd ground
+    # state 4d10 1S; Ni, Pt low-lying).
+    d = (outer_s - 1, 2)
+    if shells.get((outer_s, 0)) == 2 and shells.get(d) == 8:
+        new = {k: v for k, v in shells.items() if k != (outer_s, 0)}
+        new[d] = 10
+        out.append(sorted([(n, l, k) for (n, l), k in new.items()], key=lambda x: _MADELUNG.index((x[0], x[1]))))
     return out
 
 

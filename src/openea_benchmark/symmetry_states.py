@@ -22,6 +22,8 @@ for converged sigma/pi/delta orbitals).  For a determinant:
 """
 from __future__ import annotations
 
+from .heavy_elements import mole_basis_kwargs
+
 from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Any, Mapping, Sequence
@@ -48,7 +50,7 @@ def build_symmetric_molecule(atoms: tuple[str, str], r_angstrom: float, *, basis
                              verbose: int = 0):
     from pyscf import gto
     return gto.M(atom=[(atoms[0], (0.0, 0.0, 0.0)), (atoms[1], (0.0, 0.0, float(r_angstrom)))],
-                 basis=basis, charge=charge, spin=two_s, unit="Angstrom",
+                 **mole_basis_kwargs(atoms, basis), charge=charge, spin=two_s, unit="Angstrom",
                  symmetry=point_group_for(*atoms), verbose=verbose, dump_input=False)
 
 

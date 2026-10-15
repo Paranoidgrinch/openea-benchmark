@@ -22,6 +22,8 @@ estimated storage exceeds ``q_memory_limit_mb`` the layer reports
 """
 from __future__ import annotations
 
+from .heavy_elements import mole_basis_kwargs
+
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -68,8 +70,11 @@ class PostCCSDTStagePolicy:
 
 def _mol(spec: Any, basis: str, symmetry: Any, max_memory_mb: int):
     from pyscf import gto
+    from .heavy_elements import basis_name_for
+    if any(gto.charge(el) > 36 for el in spec.atoms):  # PP elements take the -PP member
+        basis = {el: basis_name_for(el, basis) for el in dict.fromkeys(spec.atoms)}
     return gto.M(atom=[(spec.atoms[0], (0.0, 0.0, 0.0)), (spec.atoms[1], (0.0, 0.0, float(spec.r_angstrom)))],
-                 basis=basis, charge=spec.charge, spin=spec.spin_2s, unit="Angstrom", symmetry=symmetry,
+                 **mole_basis_kwargs(spec.atoms, basis), charge=spec.charge, spin=spec.spin_2s, unit="Angstrom", symmetry=symmetry,
                  verbose=0, max_memory=max_memory_mb, dump_input=False)
 
 

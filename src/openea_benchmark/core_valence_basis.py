@@ -28,7 +28,12 @@ CV_FAMILIES = ("aug-cc-pwCV{x}Z", "cc-pwCV{x}Z", "aug-cc-pCV{x}Z", "cc-pCV{x}Z")
 
 @lru_cache(maxsize=None)
 def core_orbital_count(element: str) -> int:
+    """Frozen-core orbitals the CV layer correlates in addition (beyond an ECP core)."""
     from pyscf import gto
+    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route, frozen_orbitals
+    route = element_route(element)
+    if route["route"] == ROUTE_PSEUDOPOTENTIAL:
+        return frozen_orbitals(element, route["ecp_electrons"])
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
     z = gto.charge(element)
     mol = gto.M(atom=f"{element} 0 0 0", basis="sto-3g", spin=z % 2, verbose=0)
@@ -109,8 +114,25 @@ def element_series(element: str, cardinals: tuple[int, ...], families: tuple[str
     return None
 
 
+# Beyond Kr (pseudopotential route): basis names, resolved with their ECPs when the
+# molecule is built.  CV: aug-cc-pwCVXZ-PP (outer-core correlating functions).
+# SR: the ECP carries scalar relativity, so the "relativistic correction" becomes the
+# ECP correction EA[sfX2C, all-electron dyall-avXz, ECP core frozen] - EA[ECP, aug-cc-pVXZ-PP]
+# (heavy_elements.implicit_core_orbitals keeps the correlated orbitals identical).
+PP_CV_FAMILY = "aug-cc-pwCV{x}Z-PP"
+PP_SR_PAIR = ("dyall-av{n}z", "aug-cc-pV{x}Z-PP")
+
+
+def _pp_route(element: str) -> bool:
+    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route
+    return element_route(element)["route"] == ROUTE_PSEUDOPOTENTIAL
+
+
 def cv_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
     """Core-valence series of one element (rule in the module docstring)."""
+    if _pp_route(element):
+        from .heavy_elements import named_series
+        return named_series(element, cardinals, PP_CV_FAMILY)
     if core_orbital_count(element) == 0:
         series = element_series(element, cardinals, ("aug-cc-pV{x}Z",))
         return None if series is None else {x: (spec, prov + " NO_CORE_ELECTRONS")
@@ -126,6 +148,12 @@ SR_FAMILIES = ("aug-cc-pV{x}Z-DK", "cc-pV{x}Z-DK")
 
 def sr_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tuple[Any, str]] | None:
     """{X: ((DK spec, NR spec), provenance)} for the first family pair available at every X."""
+    if _pp_route(element):
+        from .heavy_elements import named_series
+        rel, model = (named_series(element, cardinals, f) for f in PP_SR_PAIR)
+        if rel is None or model is None:
+            return None
+        return {x: ((rel[x][0], model[x][0]), f"{rel[x][1]} | ECP {model[x][1]}") for x in cardinals}
     for family in SR_FAMILIES:
         rel = element_series(element, cardinals, (family,))
         nr = element_series(element, cardinals, (family.replace("-DK", ""),))

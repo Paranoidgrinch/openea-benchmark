@@ -90,33 +90,10 @@ VALENCE_SP, VALENCE_S, VALENCE_SD = (2, 1, 1, 0), (1, 0, 0, 0), (3, 1, 1, 1)
 
 
 def full_valence_space(atoms: Sequence[str], charge: int) -> dict | None:
-    """Full-valence CAS, frozen cores inactive.
-
-    Main group ns np (H/He: 1s; K/Ca and Ga-Kr: 4s 4p); 3d transition metals Sc-Zn:
-    4s 3d (rule FULL_VALENCE_NS_NP_ND).  Returns None for 4d and heavier elements
-    (their def2 bases carry ECPs, which this orbital count does not handle; fail closed).
-    """
-    from pyscf import gto
-    from .core_valence_basis import core_orbital_count
-    inactive, ras2, valence_electrons, d_block = [0, 0, 0, 0], [0, 0, 0, 0], 0, False
-    for el in atoms:
-        z = gto.charge(el)
-        if z > 36:
-            return None
-        ncore = core_orbital_count(el)
-        core = CORE_ORBITALS_BY_COUNT.get(ncore)
-        if core is None:
-            return None
-        shells = VALENCE_S if z <= 2 else (VALENCE_SD if 21 <= z <= 30 else VALENCE_SP)
-        d_block |= 21 <= z <= 30
-        inactive = [a + b for a, b in zip(inactive, core)]
-        ras2 = [a + b for a, b in zip(ras2, shells)]
-        valence_electrons += z - 2 * ncore
-    nact = valence_electrons - charge
-    if not 0 < nact < 2 * sum(ras2):
-        return None
-    return {"inactive": tuple(inactive), "ras2": tuple(ras2), "active_electrons": nact,
-            "rule": "FULL_VALENCE_NS_NP_ND" if d_block else "FULL_VALENCE_NS_NP"}
+    """Full-valence CAS, frozen cores inactive (rule in ``heavy_elements.full_valence_space``):
+    main group ns np (H/He 1s), d block ns (n-1)d; None for open f shells."""
+    from .heavy_elements import full_valence_space as rule
+    return rule(atoms, charge)
 
 
 def c2_space(space: Mapping) -> dict:

@@ -2162,6 +2162,13 @@ def _run_symmetry_auto(args) -> int:
     if not args.atoms or args.output is None:
         raise SystemExit("symmetry-auto needs --atoms A B and --output DIR")
     atom_a, atom_b = args.atoms
+    from .heavy_elements import element_route
+    unsupported = {el: element_route(el)["reason"] for el in (atom_a, atom_b) if element_route(el)["route"] is None}
+    if unsupported:  # fail closed before any computation
+        verdict = {"system": f"{atom_a}{atom_b}", "final_verdict": "ELEMENT_NOT_SUPPORTED", "elements": unsupported}
+        _write_json(args.output / f"{atom_a}{atom_b}" / "final_verdict.json", verdict)
+        print("[SYMMETRY AUTO] " + json.dumps(verdict), flush=True)
+        return 2
     from .compute_threads import set_compute_threads
     from .point_pool import configure_point_pool
     set_compute_threads(args.threads)

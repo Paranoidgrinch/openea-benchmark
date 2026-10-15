@@ -33,6 +33,8 @@ cannot be computed stays unresolved.
 """
 from __future__ import annotations
 
+from .heavy_elements import mole_basis_kwargs, pyscf_valence_space
+
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -42,7 +44,7 @@ import numpy as np
 
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
-from .spin_orbit_stage import D2H_TO_C2V, full_valence_space
+from .spin_orbit_stage import D2H_TO_C2V
 
 # Version of the per-root Lambda / g-u classification; older block caches are recomputed.
 # 3: high-spin ROHF start orbitals tried as well; 4: borrowed CASSCF orbitals + median
@@ -87,7 +89,7 @@ def active_orbital_parities(atoms, r, basis, mo_active) -> list[int] | None:
     from pyscf import gto, symm
     if atoms[0] != atoms[1]:
         return None
-    mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=basis, unit="Angstrom",
+    mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], **mole_basis_kwargs(atoms, basis), unit="Angstrom",
                 symmetry="D2h", verbose=0)
     try:
         labels = symm.label_orb_symm(mol, mol.irrep_name, mol.symm_orb, mo_active)
@@ -197,13 +199,14 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
                 or cached.get("root_classification") == ROOT_CLASSIFICATION):
             return cached
     from pyscf import gto, mcscf, mrpt, scf
-    space = full_valence_space(atoms, charge)
+    space = pyscf_valence_space(atoms, charge, policy.basis)
     if space is None:
         return {"status": "MR_ACTIVE_SPACE_NOT_DERIVED"}
     spin_2s = mult - 1
     record: dict[str, Any] = {"charge": charge, "mult": mult, "irrep": irrep, "r": r}
     try:
-        mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=policy.basis, charge=charge,
+        mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], **mole_basis_kwargs(atoms, policy.basis),
+                    charge=charge,
                     spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
         mf = (scf.ROHF(mol) if spin_2s else scf.RHF(mol)).run()
         ncas, nelecas = sum(space["ras2"]), space["active_electrons"]
@@ -249,7 +252,7 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
         guesses = [("block_scf", mf.mo_coeff)]
         if spin_2s + 2 <= min(nelecas, 2 * ncas - nelecas):  # room for two more unpaired active electrons
             try:
-                hs = gto.M(atom=mol.atom, basis=policy.basis, charge=charge, spin=spin_2s + 2, unit="Angstrom",
+                hs = gto.M(atom=mol.atom, **mole_basis_kwargs(atoms, policy.basis), charge=charge, spin=spin_2s + 2, unit="Angstrom",
                            symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
                 mf_hs = scf.ROHF(hs).run()
                 if mf_hs.converged:

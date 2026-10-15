@@ -6,7 +6,7 @@ followed branch changes character at 1.46 A), the CCSD(T) curve cannot be
 extended.  The zero-point correction then comes from a multireference curve:
 
 * full-valence CASSCF (ns, np of each atom; 1s for H/He; noble-gas cores
-  inactive; the rule of ``spin_orbit_stage.full_valence_space``) in the state's
+  inactive; the rule of ``heavy_elements.full_valence_space``, ECP cores removed) in the state's
   spin and C2v symmetry block (homonuclear D2h labels are mapped to C2v), lowest
   root; strongly contracted NEVPT2 on top;
 * the same primary basis as the Stage-3 curve (def2-TZVPPD), the same method for
@@ -28,6 +28,8 @@ dissociation margin minus twice the MR anion ZPE must stay positive.
 """
 from __future__ import annotations
 
+from .heavy_elements import mole_basis_kwargs, pyscf_valence_space
+
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -36,7 +38,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
-from .spin_orbit_stage import D2H_TO_C2V, full_valence_space, parse_term_symbol
+from .spin_orbit_stage import D2H_TO_C2V, parse_term_symbol
 
 C2V_IRREPS = ("A1", "B1", "B2", "A2")  # order of full_valence_space tuples (Molcas a1 b1 b2 a2)
 
@@ -78,7 +80,8 @@ def _c2v_counts(irrep_nelec: Mapping[str, Any]) -> dict[str, tuple[int, int]]:
 
 def _mol(atoms, r, charge, spin_2s, basis, policy):
     from pyscf import gto
-    return gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], basis=basis, charge=charge,
+    return gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], **mole_basis_kwargs(atoms, basis),
+                 charge=charge,
                  spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
 
 
@@ -132,7 +135,7 @@ def mr_state_curve(*, atoms, charge, spin_2s, irrep_nelec, label, r_center, chk,
     the centre: a cold-started end point can land on a nearby CASSCF solution
     (AlO- 1.450 A, 0.57 mEh off the cubic through its neighbours).
     """
-    space = full_valence_space(atoms, charge)
+    space = pyscf_valence_space(atoms, charge, policy.basis)
     wfnsym = target_c2v_irrep(label)
     if space is None or wfnsym is None or irrep_nelec is None:
         return {"status": "MR_ACTIVE_SPACE_NOT_DERIVED"}

@@ -20,7 +20,9 @@ def test_full_valence_space_rule():
     fe_o = full_valence_space(("Fe", "O"), 0)  # 3d metals: 4s 3d, [Ar] core (Patch 55)
     assert fe_o["inactive"] == (6, 2, 2, 0) and fe_o["ras2"] == (5, 2, 2, 1) and fe_o["active_electrons"] == 14
     assert fe_o["rule"] == "FULL_VALENCE_NS_NP_ND"
-    assert full_valence_space(("Ag", "H"), 0) is None  # 4d: def2 ECP, fail closed
+    ag_h = full_valence_space(("Ag", "H"), 0)  # 4d: [Kr] core, 5s 4d (heavy-element step 1)
+    assert ag_h["inactive"] == (9, 4, 4, 1) and ag_h["ras2"] == (4, 1, 1, 1) and ag_h["active_electrons"] == 12
+    assert full_valence_space(("Ce", "H"), 0) is None  # open 4f shell: fail closed
     assert c2_space(fe_o)["ras2"] == (6, 4) and c2_space(fe_o)["inactive"] == (6, 4)
 
 
