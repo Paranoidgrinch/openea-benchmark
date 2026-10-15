@@ -147,6 +147,12 @@ class AtomicFragmentResult:
     scf_primary_converged: bool | None = None
     scf_newton_attempted: bool = False
     scf_newton_converged: bool | None = None
+    # Configuration control (Patch 60): open-shell label of the chosen SCF
+    # solution and every distinct solution that received CCSD(T).
+    configuration_label: str | None = None
+    configuration_candidates: tuple[dict, ...] = ()
+    configuration_gap_ev: float | None = None
+    internal_instability_accepted: bool = False
 
     def __post_init__(self) -> None:
         if self.state_manifold_resolved:
@@ -202,6 +208,9 @@ def _run_atomic_fragment_pyscf(
     request: AtomicFragmentRequest,
     settings: Stage3ExecutionSettings,
     retry_settings: AtomicFragmentSCFRetrySettings,
+    dm0: Any = None,
+    mom_start: tuple[Any, Any] | None = None,
+    accept_internal_instability: bool = False,
 ) -> AtomicFragmentResult:
     import pyscf
     from pyscf import cc, gto, scf
@@ -222,12 +231,17 @@ def _run_atomic_fragment_pyscf(
     else:
         mf = scf.ROHF(mol)
     mf = apply_hamiltonian(mf)
+    if mom_start is not None:
+        # Configuration-targeted start: keep the occupied space by maximum overlap.
+        mo_start, occ_start = mom_start
+        mf = _maximum_overlap(mf, mo_start, occ_start)
+        dm0 = mf.make_rdm1(mo_start, occ_start if request.spin_2s == 0 else occ_start[0] + occ_start[1])
 
     mf.conv_tol = settings.scf_conv_tol
     mf.conv_tol_grad = settings.scf_conv_tol_grad
     mf.max_cycle = settings.scf_max_cycle
     mf.max_memory = settings.max_memory_mb
-    mf.kernel()
+    mf.kernel(dm0)
 
     primary_converged = bool(mf.converged)
     solver_path = ["PRIMARY_DIIS"]
@@ -336,7 +350,8 @@ def _run_atomic_fragment_pyscf(
         external_stable=external_stable,
     )
 
-    if settings.require_internal_stability and not internal_stable:
+    common.update(internal_instability_accepted=bool(accept_internal_instability and not internal_stable))
+    if settings.require_internal_stability and not internal_stable and not accept_internal_instability:
         return _empty_result(
             request,
             FragmentExecutionStatus.SCF_UNSTABLE,
@@ -436,21 +451,242 @@ def _run_atomic_fragment_pyscf(
     )
 
 
+@dataclass(frozen=True)
+class AtomicConfigurationPolicy:
+    """Configuration control for atomic fragments (Patch 60).
+
+    One default SCF guess can land in an excited configuration: for La the
+    minao guess gives 6s2 6p (neutral) and 6s2 6p2 (anion) instead of 5d 6s2 /
+    5d2 6s2, which moved the CCSD(T) EA by 0.4 eV between aTZ and aQZ.  Every
+    guess is converged, distinct solutions are labelled by their l-resolved
+    spin populations, and each within ``scf_window_ev`` of the lowest gets
+    CCSD(T); the lowest CCSD(T) energy is the fragment energy (the SCF order is
+    not used: La 5d2 6s 4F lies below 5d 6s2 2D at SCF, above it at CCSD(T)).
+    """
+    guesses: tuple[str, ...] = ("minao", "atom", "huckel", "1e")
+    scf_window_ev: float = 3.0
+    distinct_energy_hartree: float = 1.0e-5
+
+
+def configuration_label(mol, mf) -> str:
+    """Open shells as integer l-resolved spin populations, e.g. 's1d2'; 'closed' for none."""
+    import numpy as np
+    dm = mf.make_rdm1()
+    if getattr(dm, "ndim", 2) != 3:
+        return "closed"
+    pop = np.einsum("ij,ji->i", dm[0] - dm[1], mol.intor("int1e_ovlp"))
+    by_l: dict[str, float] = {}
+    for i, lab in enumerate(mol.ao_labels(fmt=False)):
+        letter = next((c for c in lab[2] if c in "spdfgh"), "?")
+        by_l[letter] = by_l.get(letter, 0.0) + float(pop[i])
+    parts = [f"{l}{round(v)}" for l, v in sorted(by_l.items(), key=lambda kv: "spdfgh".find(kv[0])) if round(v) != 0]
+    return "".join(parts) or "closed"
+
+
+def scan_scf_configurations(request: AtomicFragmentRequest, settings: Stage3ExecutionSettings,
+                            policy: AtomicConfigurationPolicy) -> list[dict]:
+    """Distinct converged SCF solutions over all guesses, lowest first."""
+    from pyscf import gto, scf
+    mol = gto.M(atom=[(request.element, (0.0, 0.0, 0.0))], **mole_basis_kwargs((request.element,), request.basis),
+                charge=request.charge, spin=request.spin_2s, unit="Angstrom", symmetry=False,
+                verbose=settings.verbose, max_memory=settings.max_memory_mb)
+    found: list[dict] = []
+    for guess in policy.guesses:
+        mf = apply_hamiltonian(scf.RHF(mol) if request.spin_2s == 0 else scf.ROHF(mol))
+        mf.conv_tol, mf.conv_tol_grad = settings.scf_conv_tol, settings.scf_conv_tol_grad
+        mf.max_cycle, mf.max_memory, mf.init_guess = settings.scf_max_cycle, settings.max_memory_mb, guess
+        try:
+            mf.kernel()
+        except Exception:
+            continue
+        if not mf.converged:
+            continue
+        e = float(mf.e_tot)
+        if any(abs(e - f["scf_energy_hartree"]) < policy.distinct_energy_hartree for f in found):
+            continue
+        found.append({"guess": guess, "scf_energy_hartree": e, "label": configuration_label(mol, mf),
+                      "dm0": mf.make_rdm1(), "mo_coeff": mf.mo_coeff, "mo_energy": mf.mo_energy})
+    if found:
+        base = min(found, key=lambda f: f["scf_energy_hartree"])
+        for config, occ in target_occupations(mol, base["mo_coeff"], base["mo_energy"], request.element,
+                                              request.charge, request.spin_2s):
+            mf = apply_hamiltonian(scf.RHF(mol) if request.spin_2s == 0 else scf.ROHF(mol))
+            mf.conv_tol, mf.conv_tol_grad = settings.scf_conv_tol, settings.scf_conv_tol_grad
+            mf.max_cycle, mf.max_memory = settings.scf_max_cycle, settings.max_memory_mb
+            mf = _maximum_overlap(mf, base["mo_coeff"], occ)
+            try:
+                mf.kernel(mf.make_rdm1(base["mo_coeff"], occ if request.spin_2s == 0 else occ[0] + occ[1]))
+            except Exception:
+                continue
+            if not mf.converged:
+                continue
+            e = float(mf.e_tot)
+            if any(abs(e - f["scf_energy_hartree"]) < policy.distinct_energy_hartree for f in found):
+                continue
+            found.append({"guess": f"config:{config}", "scf_energy_hartree": e, "label": configuration_label(mol, mf),
+                          "mom_start": (mf.mo_coeff, _occupation_pattern(mf.mo_occ, request.spin_2s)),
+                          "dm0": None})
+    found.sort(key=lambda f: f["scf_energy_hartree"])
+    return found
+
+
+def _maximum_overlap(mf, mo_start, occ_start):
+    """Maximum-overlap occupations; PySCF's mom_occ handles UHF/ROHF but sets 1 (not 2) for RHF."""
+    import numpy as np
+    from pyscf import scf
+    if mf.istype("ROHF") or mf.istype("UHF"):
+        return scf.addons.mom_occ(mf, mo_start, occ_start)
+    occ_start = np.asarray(occ_start)
+    c_occ, nocc = mo_start[:, occ_start > 0], int(np.count_nonzero(occ_start > 0))
+
+    def get_occ(mo_energy=None, mo_coeff=None):
+        mo_coeff = mf.mo_coeff if mo_coeff is None else mo_coeff
+        ov = c_occ.conj().T @ mf.get_ovlp() @ mo_coeff
+        occ = np.zeros(mo_coeff.shape[1])
+        occ[np.argsort(np.einsum("ij,ij->j", ov, ov))[::-1][:nocc]] = 2.0
+        return occ
+    mf.get_occ = get_occ
+    return mf
+
+
+def _occupation_pattern(mo_occ, spin_2s: int):
+    import numpy as np
+    mo_occ = np.asarray(mo_occ)
+    if spin_2s == 0:
+        return mo_occ.copy()
+    return np.array([(mo_occ > 0).astype(float), (mo_occ > 1).astype(float)])
+
+
+def _core_shells_removed(n_core: int) -> list[tuple[int, int]]:
+    """Shells an n_core-electron pseudopotential replaces, in (n, l) order (28: 1s-3d, 46: 1s-4d, 60: 1s-4f)."""
+    shells, left = [], n_core
+    for n in range(1, 8):
+        for l in range(0, n):
+            if left <= 0:
+                return shells
+            if l > 3:
+                continue
+            shells.append((n, l))
+            left -= 2 * (2 * l + 1)
+    return shells
+
+
+def target_occupations(mol, mo_coeff, mo_energy, element: str, charge: int, spin_2s: int):
+    """(configuration, occupation) per low-lying configuration of the atom (``state_candidates``)
+    that can carry 2S = spin_2s: MOs are classified by l (largest Mulliken weight), each l is
+    filled in orbital-energy order, open subshells high-spin and paired down to 2S."""
+    import numpy as np
+    from ..state_candidates import atomic_states
+    s = mol.intor("int1e_ovlp")
+    letters = [next((c for c in lab[2] if c in "spdfgh"), "?") for lab in mol.ao_labels(fmt=False)]
+    weights = mo_coeff * (s @ mo_coeff)
+    mo_l = []
+    for j in range(mo_coeff.shape[1]):
+        w = {l: float(weights[[i for i, c in enumerate(letters) if c == "spdf"[l]], j].sum()) for l in range(4)}
+        mo_l.append(max(w, key=w.get))
+    n_core = int(mol.atom_nelec_core(0)) if mol.has_ecp() else 0
+    removed = set(_core_shells_removed(n_core))
+    configs = []
+    for st in atomic_states(element, charge):
+        if st.configuration not in configs:
+            configs.append(st.configuration)
+    out = []
+    for config in configs:
+        per_l: dict[int, list[int]] = {}
+        for tok in config.split():
+            n, l, k = int(tok[0]), "spdf".index(tok[1]), int(tok[2:])
+            if (n, l) not in removed:
+                per_l.setdefault(l, []).append(k)
+        nmo = mo_coeff.shape[1]
+        alpha, beta = np.zeros(nmo), np.zeros(nmo)
+        open_orbitals, ok = [], True
+        for l, counts in per_l.items():
+            mos = sorted((j for j in range(nmo) if mo_l[j] == l), key=lambda j: mo_energy[j])
+            width, pos = 2 * l + 1, 0
+            for k in counts:  # shells of this l in (n) order
+                shell = mos[pos:pos + width]
+                if len(shell) < width:
+                    ok = False
+                    break
+                pos += width
+                n_double = max(0, k - width)
+                for j in shell[:n_double]:
+                    alpha[j] = beta[j] = 1
+                singles = shell[n_double:k] if k <= width else shell[n_double:width]
+                for j in singles:
+                    alpha[j] = 1
+                open_orbitals.append(list(singles))
+        if not ok:
+            continue
+        unpaired = sum(len(o) for o in open_orbitals)
+        if unpaired < spin_2s or (unpaired - spin_2s) % 2:
+            continue
+        # pair down inside one open subshell at a time (pairing across subshells
+        # would change the configuration)
+        pairs = (unpaired - spin_2s) // 2
+        for shell in open_orbitals:
+            while pairs and len(shell) >= 2:
+                alpha[shell.pop()] = 0
+                beta[shell[0]] = 1
+                shell.pop(0)
+                pairs -= 1
+        if pairs:
+            continue
+        if int(alpha.sum() + beta.sum()) != mol.nelectron or int(alpha.sum() - beta.sum()) != spin_2s:
+            continue
+        if spin_2s == 0 and np.any(alpha != beta):
+            continue  # open-shell singlet: not a closed-shell determinant
+        out.append((config, (alpha + beta) if spin_2s == 0 else np.array([alpha, beta])))
+    return out
+
+
+def _run_atomic_fragment_configurations(request: AtomicFragmentRequest, settings: Stage3ExecutionSettings,
+                                        retry_settings: AtomicFragmentSCFRetrySettings,
+                                        policy: AtomicConfigurationPolicy) -> AtomicFragmentResult:
+    from dataclasses import replace
+    hartree_ev = 27.211386245988
+    solutions = scan_scf_configurations(request, settings, policy)
+    if not solutions:  # keep the single-guess path and its Newton retry for hard cases
+        return _run_atomic_fragment_pyscf(request, settings, retry_settings)
+    e_min = solutions[0]["scf_energy_hartree"]
+    results = []
+    for sol in solutions:
+        if (sol["scf_energy_hartree"] - e_min) * hartree_ev > policy.scf_window_ev:
+            continue
+        res = _run_atomic_fragment_pyscf(request, settings, retry_settings, dm0=sol["dm0"],
+                                         mom_start=sol.get("mom_start"), accept_internal_instability=True)
+        results.append((sol, res))
+    candidates = tuple({"guess": sol["guess"], "label": sol["label"], "scf_energy_hartree": sol["scf_energy_hartree"],
+                        "status": res.status.value, "ccsd_t_total_hartree": res.ccsd_t_total_hartree}
+                       for sol, res in results)
+    done = [(sol, res) for sol, res in results
+            if res.status == FragmentExecutionStatus.COMPLETED and res.ccsd_t_total_hartree is not None]
+    if not done:
+        return replace(results[0][1], configuration_label=results[0][0]["label"], configuration_candidates=candidates)
+    done.sort(key=lambda sr: sr[1].ccsd_t_total_hartree)
+    best_sol, best = done[0]
+    other = [r.ccsd_t_total_hartree for s, r in done[1:] if s["label"] != best_sol["label"]]
+    gap = None if not other else (min(other) - best.ccsd_t_total_hartree) * hartree_ev
+    return replace(best, configuration_label=best_sol["label"], configuration_candidates=candidates,
+                   configuration_gap_ev=gap)
+
+
 def run_atomic_fragment(
     request: AtomicFragmentRequest,
     *,
     settings: Stage3ExecutionSettings | None = None,
     retry_settings: AtomicFragmentSCFRetrySettings | None = None,
     runner: Callable[..., AtomicFragmentResult] | None = None,
+    configuration_policy: AtomicConfigurationPolicy | None = None,
 ) -> AtomicFragmentResult:
     settings = settings or Stage3ExecutionSettings()
     retry_settings = retry_settings or AtomicFragmentSCFRetrySettings()
-    implementation = runner or _run_atomic_fragment_pyscf
     try:
         if runner is None:
-            result = implementation(request, settings, retry_settings)
+            result = _run_atomic_fragment_configurations(request, settings, retry_settings,
+                                                         configuration_policy or AtomicConfigurationPolicy())
         else:
-            result = implementation(request, settings)
+            result = runner(request, settings)
     except Exception as exc:
         return _empty_result(
             request,

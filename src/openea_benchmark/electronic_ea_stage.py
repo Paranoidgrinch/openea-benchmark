@@ -83,6 +83,10 @@ class ElectronicEAStagePolicy:
     # above the lowest candidate's is not a ground-state competitor; closer
     # ones block D04 until a multireference treatment exists.
     collapsed_reference_scf_margin_ev: float = 3.0
+    # Atomic multistate layer (Patch 61) for d/f fragments: XMS-CASPT2 check of the
+    # CCSD(T) spin order; method term as validated for NEVPT2 term gaps (Patch 55b).
+    atomic_multistate: bool = True
+    atomic_multistate_method_ev: float = 0.10
 
     def refinement(self) -> Stage3RefinementSettings:
         return Stage3RefinementSettings(
@@ -179,6 +183,12 @@ def _atomic_electrons(symbol: str, charge: int) -> int:
     return int(nuclear_charge(symbol)) - int(charge)
 
 
+def needs_atomic_multistate(element: str) -> bool:
+    """d/f atoms (an active d or f subshell): several configurations and 2S compete."""
+    from .atomic_multistate import active_shells
+    return any(l >= 2 for _, l in active_shells(element))
+
+
 def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3ExecutionSettings,
                           policy: ElectronicEAStagePolicy, cache_dir: Path,
                           runner: Callable[..., Any] | None = None) -> dict:
@@ -193,9 +203,10 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
             for spin_2s in range(n % 2, min(n, policy.max_atomic_2s) + 1, 2):
                 fid = f"{element}_q{charge:+d}_2S{spin_2s}"
                 path = cache_dir / f"{fid}__{basis}.json"
-                if path.exists():
-                    rec = json.loads(path.read_text())
-                else:
+                rec = json.loads(path.read_text()) if path.exists() else None
+                if rec is not None and runner is None and "configuration_candidates" not in rec:
+                    rec = None  # single-guess record from before configuration control (Patch 60)
+                if rec is None:
                     result = run_atomic_fragment(
                         AtomicFragmentRequest(fid, element, charge, spin_2s, basis, state_label=None),
                         settings=settings, runner=runner)
@@ -205,13 +216,34 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
             completed = [r for r in scanned if r["status"] == FragmentExecutionStatus.COMPLETED.value
                          and r.get("ccsd_t_total_hartree") is not None]
             best = min(completed, key=lambda r: r["ccsd_t_total_hartree"], default=None)
+            multistate = None
+            if best is not None and runner is None and policy.atomic_multistate and needs_atomic_multistate(element):
+                from .atomic_multistate import atomic_multistate
+                multistate = atomic_multistate(
+                    element=element, charge=charge,
+                    cc_by_spin={r["spin_2s"]: r["ccsd_t_total_hartree"] for r in completed},
+                    labels={r["spin_2s"]: r.get("configuration_label") for r in completed},
+                    workdir=Path(cache_dir).resolve().parent.parent / "atomic_multistate" / f"{element}{charge:+d}")
+            if multistate is not None and multistate.get("status") == "CLEARED":
+                # Lowest spin-free level: another 2S may lie below the CCSD(T) anchor
+                # at XMS-CASPT2; both gaps enter, less the method term (conservative:
+                # a lower asymptote never makes an anion look more bound).
+                other = [min(g, multistate["spin_free_gap_ev_cc"].get(s, g))
+                         for s, g in multistate["spin_free_gap_ev_mr"].items() if s != multistate["anchor_two_s"]]
+                shift_ev = min(0.0, min(other, default=float("inf")) - policy.atomic_multistate_method_ev)
+                best = {**best, "ccsd_t_total_hartree": best["ccsd_t_total_hartree"] + shift_ev / HARTREE_TO_EV}
+                multistate["asymptote_shift_ev"] = shift_ev
             table[f"{element}{charge:+d}"] = {
                 "element": element, "charge": charge,
                 "lowest": None if best is None else {"spin_2s": best["spin_2s"],
-                                                     "ccsd_t_total_hartree": best["ccsd_t_total_hartree"]},
+                                                     "ccsd_t_total_hartree": best["ccsd_t_total_hartree"],
+                                                     "configuration_label": best.get("configuration_label")},
                 "scanned": [{"spin_2s": r["spin_2s"], "status": r["status"],
-                             "ccsd_t_total_hartree": r.get("ccsd_t_total_hartree")} for r in scanned],
+                             "ccsd_t_total_hartree": r.get("ccsd_t_total_hartree"),
+                             "configuration_label": r.get("configuration_label"),
+                             "configuration_gap_ev": r.get("configuration_gap_ev")} for r in scanned],
                 "all_spins_completed": len(completed) == len(scanned),
+                "multistate": multistate,
             }
     return table
 
@@ -233,7 +265,8 @@ def anion_dissociation_channels(atoms: Sequence[str], fragments: Mapping[str, Ma
 # Policy fields that only classify existing points; kept out of the
 # refinement-point cache signature so adding them does not recompute points.
 _CLASSIFICATION_ONLY_FIELDS = ("collapse_max_t2_amplitude", "collapse_triples_fraction",
-                               "collapsed_reference_scf_margin_ev")
+                               "collapsed_reference_scf_margin_ev", "atomic_multistate",
+                               "atomic_multistate_method_ev")
 
 
 def reference_collapse_evidence(record: Mapping[str, Any], policy: "ElectronicEAStagePolicy") -> dict | None:
