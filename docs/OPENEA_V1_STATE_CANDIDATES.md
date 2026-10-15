@@ -259,3 +259,24 @@ Every element H-Lr now has a route; only Z > 103 fails closed (ELEMENT_NOT_SUPPO
 Open (step 3): open-f molecules give hundreds of atomic terms (Gd: 267) and very
 large candidate lists; the scout needs energy screening, the MR layer larger
 spaces (RAS/DMRG/selected CI).  SOC is large (step 2).
+
+## Patch 58 — multistate spin-orbit beyond Kr (heavy-element step 2)
+
+`spin_orbit_multistate.py` replaces the first-order layer when an atom beyond Kr is
+present: SA-CASSCF blocks for 2S+1 and 2S+1 +- 2 in both C2 symmetries, XMS-CASPT2
+diagonal, RASSI-EJOB spin-orbit (AMFI, ANO-RCC-VTZP); Delta_SO = lowest SO level -
+reference Lambda-S energy; bound 15 % |Delta_SO| + (1 - w) 0.10 eV; fail closed when
+the reference weight w in the lowest level is below 0.5.
+
+Validation (not used in computation), 2026-10-15:
+* atomic J splittings (SO-XMS-CASPT2 / NIST, cm-1): Br 3395/3685, I 6973/7603
+  (VQZP: 6973, no basis effect), Tl 7204/7793, Pb 3P1 6653/7819, 3P2 9535/10650,
+  Bi 2D3/2 10690/11419, 2P1/2 22072/21661 - 5-15 % low;
+* atomic EAs, spin-free FC-CCSD(T)/aug-cc-pV{Q,5}Z-PP (Q/5 corr.) + Delta_SO, no CV:
+  I 3.055 (3.059), Te 1.960 (1.971), Sb 1.026 (1.047), Sn 1.136 (1.112), In 0.402
+  (0.384), Pb 0.326 (0.357), Bi 0.932 (0.942), Tl ~0.34 (0.320; 5Z anion ROHF needed
+  stability following) - |error| <= 0.031 eV with Delta_EA_SO up to 0.96 eV (Pb);
+* IO: Delta_SO X2Pi -0.150 eV (X2Pi3/2-X2Pi1/2 1790 vs ~2090 cm-1), IO- X1Sigma+
+  -0.024 eV (second order, zero in the first-order layer).
+Open: spin-orbit of the atomic fragments in the dissociation channels; a molecule
+run (IO, PbO).
