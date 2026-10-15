@@ -12,14 +12,16 @@ second-order shift is not computed here (recorded, small for light atoms).
 
 Method, per state (no molecule-specific input):
 
-* full-valence CASSCF (ns, np of each atom; 1s for H/He; noble-gas cores
-  inactive), the same rule for every main-group diatomic.  A minimal open-shell
-  CAS was tried first and fails for polar pi* shells (ClO X2Pi: 196 cm-1 against
-  320 cm-1 measured), because the ROHF-like pi* is too O-localized.  d-valence
-  atoms, Delta/Phi states fail closed (``SOC_ACTIVE_SPACE_NOT_DERIVED``);
-* OpenMolcas: ANO-RCC-VTZP, AMFI mean-field spin-orbit integrals, one CASSCF per
-  Lambda component (C2v symmetries b1 and b2), RASSI spin-orbit state
-  interaction between the two components;
+* full-valence CASSCF (ns, np of each atom; 1s for H/He; 4s 3d for Sc-Zn;
+  frozen cores inactive), the same rule for every diatomic up to Kr.  A minimal
+  open-shell CAS was tried first and fails for polar pi* shells (ClO X2Pi: 196
+  cm-1 against 320 cm-1 measured), because the ROHF-like pi* is too O-localized;
+* OpenMolcas: ANO-RCC-VTZP, AMFI mean-field spin-orbit integrals.  The two
+  Lambda components need not be the lowest roots (Sigma states share their
+  symmetry).  Patch 55: in C2 (both components in one symmetry: a for even,
+  b for odd Lambda) a first run state-averages the ``identify_roots`` lowest
+  roots and finds the component pair by RASSI |<i|Lz|j>| = Lambda and
+  degeneracy; a second RASSI couples that pair by spin-orbit;
 * Delta_SO = lowest SO-RASSI energy - mean of the two spin-free energies.
   The two spin-free component energies must agree (degenerate by symmetry).
 
@@ -57,6 +59,8 @@ class SpinOrbitStagePolicy:
     # O2- 153/~160, ClO 244/320 cm-1 (polar pi*, dynamic correlation missing).
     relative_bound: float = 0.30
     degeneracy_tolerance_hartree: float = 1.0e-5
+    # Roots in the C2 symmetry for the <Lz> identification run, tried in turn.
+    identify_roots: tuple[int, ...] = (6, 4, 2)
     molcas_memory_mb: int = 4000
 
 
@@ -77,53 +81,111 @@ def c2v_occupation(irrep_nelec: Mapping[str, Sequence[int]]) -> dict[str, tuple[
     return {k: (v[0], v[1]) for k, v in out.items()}
 
 
-# Noble-gas cores (orbitals per C2v irrep, Molcas order a1 b1 b2 a2).
-CORE_ORBITALS_BY_COUNT = {0: (0, 0, 0, 0), 1: (1, 0, 0, 0), 5: (3, 1, 1, 0), 9: (5, 2, 2, 0)}
+# Frozen cores (orbitals per C2v irrep, Molcas order a1 b1 b2 a2): noble gases, and
+# [Ar]3d for Ga-Kr (d: a1 a1 b1 b2 a2).
+CORE_ORBITALS_BY_COUNT = {0: (0, 0, 0, 0), 1: (1, 0, 0, 0), 5: (3, 1, 1, 0), 9: (5, 2, 2, 0),
+                          14: (7, 3, 3, 1)}
+# Valence shells per C2v irrep: ns np (main group), 1s (H, He), 4s 3d (Sc-Zn).
+VALENCE_SP, VALENCE_S, VALENCE_SD = (2, 1, 1, 0), (1, 0, 0, 0), (3, 1, 1, 1)
 
 
 def full_valence_space(atoms: Sequence[str], charge: int) -> dict | None:
-    """Full-valence CAS for main-group atoms (ns, np; H/He: 1s), noble-gas cores inactive.
+    """Full-valence CAS, frozen cores inactive.
 
-    Returns None for atoms with d valence or a core beyond [Ar] (fail closed).
+    Main group ns np (H/He: 1s; K/Ca and Ga-Kr: 4s 4p); 3d transition metals Sc-Zn:
+    4s 3d (rule FULL_VALENCE_NS_NP_ND).  Returns None for 4d and heavier elements
+    (their def2 bases carry ECPs, which this orbital count does not handle; fail closed).
     """
     from pyscf import gto
     from .core_valence_basis import core_orbital_count
-    inactive, ras2, valence_electrons = [0, 0, 0, 0], [0, 0, 0, 0], 0
+    inactive, ras2, valence_electrons, d_block = [0, 0, 0, 0], [0, 0, 0, 0], 0, False
     for el in atoms:
         z = gto.charge(el)
-        if z > 18 and el not in ("K", "Ca"):
-            return None  # 3d elements and beyond: d valence not handled here
+        if z > 36:
+            return None
         ncore = core_orbital_count(el)
         core = CORE_ORBITALS_BY_COUNT.get(ncore)
         if core is None:
             return None
+        shells = VALENCE_S if z <= 2 else (VALENCE_SD if 21 <= z <= 30 else VALENCE_SP)
+        d_block |= 21 <= z <= 30
         inactive = [a + b for a, b in zip(inactive, core)]
-        ras2 = [a + b for a, b in zip(ras2, (1, 0, 0, 0) if z <= 2 else (2, 1, 1, 0))]
+        ras2 = [a + b for a, b in zip(ras2, shells)]
         valence_electrons += z - 2 * ncore
     nact = valence_electrons - charge
     if not 0 < nact < 2 * sum(ras2):
         return None
     return {"inactive": tuple(inactive), "ras2": tuple(ras2), "active_electrons": nact,
-            "rule": "FULL_VALENCE_NS_NP"}
+            "rule": "FULL_VALENCE_NS_NP_ND" if d_block else "FULL_VALENCE_NS_NP"}
 
 
-def molcas_input(atoms: Sequence[str], r_angstrom: float, charge: int, spin_mult: int, space: Mapping,
-                 policy: SpinOrbitStagePolicy) -> str:
-    def rasscf(sym: int, title: str) -> str:
-        return "\n".join([
-            "&RASSCF", "Title", title, "Symmetry", str(sym), "Spin", str(spin_mult),
-            "Charge", str(charge), "nActEl", f"{space['active_electrons']} 0 0",
-            "Inactive", " ".join(map(str, space["inactive"])), "Ras2", " ".join(map(str, space["ras2"])),
-            "CIRoot", "1 1 1", "Iterations", "200 100", "End of input", ""])
-    return "\n".join([
-        "&GATEWAY", "Coord", "2", "Angstrom",
-        f"{atoms[0]}1  0.0 0.0 0.0", f"{atoms[1]}2  0.0 0.0 {float(r_angstrom):.8f}",
-        "Group = X Y", f"Basis = {policy.basis}", "AMFI", "", "&SEWARD", "",
-        rasscf(2, "Lambda component b1"),
-        ">>> COPY $Project.JobIph JOB001", "",
-        rasscf(3, "Lambda component b2"),
-        ">>> COPY $Project.JobIph JOB002", "",
-        "&RASSI", "SpinOrbit", "Nr of JobIph", "2 1 1", "1", "1", "End of input", ""])
+def c2_space(space: Mapping) -> dict:
+    """C2v (a1 b1 b2 a2) orbital counts merged to C2 (a = a1+a2, b = b1+b2)."""
+    merge = lambda t: (t[0] + t[3], t[1] + t[2])
+    return {**space, "inactive": merge(space["inactive"]), "ras2": merge(space["ras2"])}
+
+
+def _molcas_head(atoms, r_angstrom, policy, angmom: bool) -> list[str]:
+    # Group XY = C2 about the bond axis: both components of a Lambda > 0 state lie in
+    # one symmetry (a: even Lambda, b: odd), so one state average treats them alike.
+    return ["&GATEWAY", "Coord", "2", "Angstrom",
+            f"{atoms[0]}1  0.0 0.0 0.0", f"{atoms[1]}2  0.0 0.0 {float(r_angstrom):.8f}",
+            "Group = XY", f"Basis = {policy.basis}", "AMFI"] + (["AngMom = 0.0 0.0 0.0"] if angmom else []) \
+        + ["", "&SEWARD", ""]
+
+
+def identify_input(atoms, r_angstrom, charge, spin_mult, space, lam, nroots, policy) -> str:
+    """Run 1: SA-CASSCF over the ``nroots`` lowest roots of the C2 symmetry of Lambda,
+    RASSI <Lz> matrix between them."""
+    sp = c2_space(space)
+    lines = _molcas_head(atoms, r_angstrom, policy, angmom=True)
+    lines += ["\n".join([
+        "&RASSCF", "Symmetry", "2" if lam % 2 else "1", "Spin", str(spin_mult), "Charge", str(charge),
+        "nActEl", f"{sp['active_electrons']} 0 0", "Inactive", " ".join(map(str, sp["inactive"])),
+        "Ras2", " ".join(map(str, sp["ras2"])), "CIRoot", f"{nroots} {nroots} 1", "Iterations", "200 100",
+        "End of input", ""]),
+              ">>> COPY $Project.JobIph JOB001", "",
+              "&RASSI", "Nr of JobIph", f"1 {nroots}", " ".join(map(str, range(1, nroots + 1))),
+              "Prop", "1", "'AngMom' 3", "MEES", "End of input", ""]
+    return "\n".join(lines)
+
+
+def spin_orbit_rassi_input(roots: tuple[int, int]) -> str:
+    """Run 2, in the scratch of run 1: RASSI spin-orbit between the two identified
+    component roots of the state-averaged JobIph (state-specific CASSCF of an excited
+    root can fall to another solution: TiO X3Delta 0.2 Eh too high)."""
+    ia, ib = roots
+    return "\n".join(["&RASSI", "SpinOrbit", "Nr of JobIph", "1 2", f"{ia} {ib}", "End of input", ""])
+
+
+def parse_angmom_z(text: str, n: int):
+    """The n x n RASSI matrix of ANGMOM component 3 (Lz, antihermitian real part)."""
+    import numpy as np
+    m = re.search(r"PROPERTY: ANGMOM\s+COMPONENT:\s+3\s*\n\s*ORIGIN:.*\n\s*\n\s*STATE[^\n]*\n\s*\n((?:\s*\d+(?:\s+-?\d\.\d+E[+-]\d+)+\s*\n)+)",
+                  text)
+    if m is None:
+        return None
+    rows = [list(map(float, line.split()[1:])) for line in m.group(1).strip().splitlines()]
+    if len(rows) != n or any(len(r) != n for r in rows):
+        return None  # wide matrices are printed in column blocks; not needed for n <= 8
+    return np.array(rows)
+
+
+def component_pair(sf: Sequence[float], lz, lam: int, nroots: int, *, lz_tolerance: float = 0.15,
+                   degeneracy_hartree: float = 1.0e-5) -> tuple[int, int] | None:
+    """Lowest pair of roots (1-based) with |<i|Lz|j>| = Lambda and equal energies.
+
+    The pair must lie wholly inside the averaged roots: a degenerate partner cut off
+    at the last root would leave one component unequally treated."""
+    best = None
+    for i in range(nroots):
+        for j in range(i + 1, nroots):
+            if abs(abs(lz[i, j]) - lam) > lz_tolerance or abs(sf[i] - sf[j]) > degeneracy_hartree:
+                continue
+            e = 0.5 * (sf[i] + sf[j])
+            if best is None or e < best[0]:
+                best = (e, i + 1, j + 1)
+    return None if best is None else (best[1], best[2])
 
 
 def parse_rassi(text: str) -> tuple[list[float], list[float]]:
@@ -132,21 +194,21 @@ def parse_rassi(text: str) -> tuple[list[float], list[float]]:
     return sf, so
 
 
-def _run_molcas(workdir: Path, text: str, policy: SpinOrbitStagePolicy) -> str:
+def _run_molcas(workdir: Path, text: str, policy: SpinOrbitStagePolicy, name: str = "soc") -> str:
     workdir = Path(workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
-    out = workdir / "soc.out"
-    stamp = workdir / "soc.input.sha256"
+    out = workdir / f"{name}.out"
+    stamp = workdir / f"{name}.input.sha256"
     digest = sha256(text.encode()).hexdigest()
     if out.is_file() and stamp.is_file() and stamp.read_text().strip() == digest and "Happy landing" in out.read_text():
         return out.read_text()
-    (workdir / "soc.input").write_text(text)
+    (workdir / f"{name}.input").write_text(text)
     molcas = Path(os.environ.get("OPENEA_MOLCAS", DEFAULT_MOLCAS))
     env = dict(os.environ, MOLCAS=str(molcas), MOLCAS_WORKDIR=str(workdir / "scratch"),
                MOLCAS_MEM=str(policy.molcas_memory_mb), MOLCAS_PROJECT="soc")
     (workdir / "scratch").mkdir(exist_ok=True)
     with open(out, "w") as fh:
-        subprocess.run(["nice", "-n", "19", str(molcas / "pymolcas"), "soc.input"], cwd=workdir, env=env,
+        subprocess.run(["nice", "-n", "19", str(molcas / "pymolcas"), f"{name}.input"], cwd=workdir, env=env,
                        stdout=fh, stderr=subprocess.STDOUT, check=False)
     stamp.write_text(digest)
     return out.read_text()
@@ -162,11 +224,29 @@ def state_spin_orbit_shift(*, atoms, r_angstrom, charge, symmetry_label, irrep_n
     if lam == 0 or mult == 1:
         return {**rec, "status": "FIRST_ORDER_ZERO", "delta_so_ev": 0.0, "bound_ev": 0.0,
                 "second_order": "NOT_COMPUTED"}
-    space = full_valence_space(atoms, charge) if lam == 1 else None
+    space = full_valence_space(atoms, charge)
     if space is None:
         return {**rec, "status": "SOC_ACTIVE_SPACE_NOT_DERIVED", "delta_so_ev": None}
     rec["active_space"] = space
-    text = _run_molcas(workdir, molcas_input(atoms, r_angstrom, charge, mult, space, policy), policy)
+    roots, ident_dir = None, None
+    for nroots in policy.identify_roots:
+        ident_dir = Path(workdir) / f"identify{nroots}"
+        ident = _run_molcas(ident_dir, identify_input(atoms, r_angstrom, charge, mult, space, lam, nroots, policy),
+                            policy)
+        sf_id, _ = parse_rassi(ident)
+        lz = parse_angmom_z(ident, nroots)
+        if len(sf_id) != nroots or lz is None:
+            continue  # e.g. fewer configurations than roots
+        roots = component_pair(sf_id, lz, lam, nroots)
+        rec["identification"] = {"nroots": nroots, "spin_free_hartree": sf_id,
+                                 "lz": [[float(x) for x in row] for row in lz], "component_roots": roots}
+        if roots is not None:
+            break
+    if roots is None:
+        return {**rec, "status": "SOC_COMPONENTS_NOT_IDENTIFIED", "delta_so_ev": None}
+    # The run-1 digest is part of the run-2 input, so a recomputed run 1 also reruns run 2.
+    text = _run_molcas(ident_dir, spin_orbit_rassi_input(roots) + f"* run1 {sha256(ident.encode()).hexdigest()}\n",
+                       policy, name="soc_so")
     sf, so = parse_rassi(text)
     if len(sf) != 2 or len(so) != 2 * mult:
         return {**rec, "status": "SOC_CALCULATION_FAILED", "delta_so_ev": None,
@@ -176,7 +256,10 @@ def state_spin_orbit_shift(*, atoms, r_angstrom, charge, symmetry_label, irrep_n
                 "spin_free_hartree": sf, "spin_orbit_hartree": so}
     shift = (min(so) - 0.5 * (sf[0] + sf[1])) * HARTREE_TO_EV
     splitting_cm = (max(so) - min(so)) * 219474.6313632
-    return {**rec, "status": "CLEARED", "delta_so_ev": shift, "bound_ev": policy.relative_bound * abs(shift),
+    # Both components come from one state average; any residual asymmetry is added.
+    asym = 0.5 * abs(sf[0] - sf[1]) * HARTREE_TO_EV
+    return {**rec, "status": "CLEARED", "delta_so_ev": shift,
+            "bound_ev": policy.relative_bound * abs(shift) + asym, "component_asymmetry_ev": asym,
             "splitting_cm1": splitting_cm, "spin_free_hartree": sf, "spin_orbit_hartree": so,
             "method": f"CASSCF/{policy.basis} AMFI RASSI (OpenMolcas)"}
 

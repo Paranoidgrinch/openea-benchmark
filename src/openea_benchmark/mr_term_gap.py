@@ -26,8 +26,9 @@ state of that charge lies at offset min(0, gap0) in [min(0, lo), min(0, hi)]
 relative to the SR state, so an overlapping interval widens the EA instead of
 forcing a choice.  Corrections computed for the SR state (core-valence, scalar
 relativity, post-CCSD(T)) are transferred with their full size as extra
-uncertainty when the MR state can be the ground state; first-order spin-orbit
-of an MR state with S > 0 and Lambda > 0 is not computed and blocks.
+uncertainty when the MR state can be the ground state.  First-order spin-orbit of
+each state with S > 0 and Lambda > 0 (``spin_orbit_stage``, any Lambda since Patch
+55) enters gap0, so E0 refers to the lowest spin-orbit level.
 """
 from __future__ import annotations
 
@@ -134,7 +135,7 @@ def state_minimum(energy_at, r_start: float, policy: MRTermGapPolicy, grid_hint:
 
 def term_gap(*, atoms: tuple[str, str], charge: int, reference: Mapping[str, Any], state: Mapping[str, Any],
              r_start: float, policy: MRTermGapPolicy, cache_dir: Path, grid_hint: Sequence[float] = (),
-             block_fn=None, basis_cache_dirs: Mapping[str, Path] | None = None) -> dict:
+             block_fn=None, basis_cache_dirs: Mapping[str, Path] | None = None, soc_fn=None) -> dict:
     """Gap0 = E0(state) - E0(reference) of one charge, both as specific Lambda/(g/u) roots.
 
     ``reference``/``state``: {"label", "mult", "irrep", "lambda", "parity"}."""
@@ -181,10 +182,32 @@ def term_gap(*, atoms: tuple[str, str], charge: int, reference: Mapping[str, Any
     zpe_term = policy.zpe_relative_uncertainty * abs(d_zpe) + sum(fit_spread.values())
     half = abs(basis_shift) + policy.method_uncertainty_ev + zpe_term
     gap0 = gap_e + d_zpe
-    return {**out, "status": "COMPLETED", "gap_e_tz_ev": gap_tz, "basis_shift_ev": basis_shift,
+    # First-order spin-orbit (Patch 55): E0 means the lowest SO level of each state.
+    so = {}
+    for role, spec in (("reference", reference), ("state", state)):
+        if spec["mult"] > 1 and (spec["lambda"] or 0) > 0:
+            so[role] = (soc_fn or _state_soc)(atoms, mins[role]["r_e"], charge, spec["label"],
+                                             cache_dir / "spin_orbit" / f"q{charge}_{spec['label']}")
+            if so[role].get("delta_so_ev") is None:
+                return {**out, "status": f"{role.upper()}_SPIN_ORBIT_{so[role].get('status')}", "spin_orbit": so}
+        else:
+            so[role] = {"status": "FIRST_ORDER_ZERO", "delta_so_ev": 0.0, "bound_ev": 0.0}
+    d_so = so["state"]["delta_so_ev"] - so["reference"]["delta_so_ev"]
+    gap0 += d_so
+    half += so["state"]["bound_ev"] + so["reference"]["bound_ev"]
+    return {**out, "status": "COMPLETED", "delta_so_ev": d_so,
+            "spin_orbit": {k: {x: v.get(x) for x in ("status", "delta_so_ev", "bound_ev", "splitting_cm1")}
+                           for k, v in so.items()},
+            "gap_e_tz_ev": gap_tz, "basis_shift_ev": basis_shift,
             "gap_e_ev": gap_e, "zpe_ev": zpe, "zpe_fit_spread_ev": fit_spread, "zpe_term_ev": zpe_term,
             "delta_zpe_ev": d_zpe, "gap0_ev": gap0,
             "gap0_half_width_ev": half, "gap0_lower_ev": gap0 - half, "gap0_upper_ev": gap0 + half}
+
+
+def _state_soc(atoms, r, charge, label, workdir) -> dict:
+    from .spin_orbit_stage import SpinOrbitStagePolicy, state_spin_orbit_shift
+    return state_spin_orbit_shift(atoms=atoms, r_angstrom=r, charge=charge, symmetry_label=label,
+                                  irrep_nelec=None, workdir=Path(workdir), policy=SpinOrbitStagePolicy())
 
 
 def _spec_from_label(label: str) -> dict | None:
@@ -282,10 +305,11 @@ def apply_mr_term_gaps(adiabatic: Mapping[str, Any] | None, gap_stage: Mapping[s
     # Corrections computed for the SR states, transferred to an MR state: full size as uncertainty.
     transfer = sum(abs(float(adiabatic.get(k) or 0.0)) for k in ("delta_cv_ev", "delta_sr_ev", "delta_post_ccsd_t_ev"))
     blocking = []
+    with_soc = {g["label"] for g in (gap_stage or {}).get("gaps", ()) if g.get("spin_orbit")}
     for role in ("neutral", "anion"):
         for label in off[role]["mr_possible"]:
             spec = _spec_from_label(label)
-            if spec and spec["mult"] > 1 and (spec["lambda"] or 0) > 0:
+            if spec and spec["mult"] > 1 and (spec["lambda"] or 0) > 0 and label not in with_soc:
                 blocking.append(f"{role} MR state {label}: first-order spin-orbit not computed")
     ea0 = float(adiabatic["ea0_ev"]) + n["central_ev"] - a["central_ev"]
     lower = float(adiabatic["ea0_lower_ev"]) + n["lower_ev"] - a["upper_ev"] - transfer

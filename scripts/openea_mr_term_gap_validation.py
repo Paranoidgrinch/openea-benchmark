@@ -22,6 +22,10 @@ CASES = [  # atoms, reference (SR) state, MR state, measured T0 in eV
     (("N", "F"), "3Sigma-", "1Delta", 1.418),
     (("S", "O"), "3Sigma-", "1Delta", 0.728),
     (("S", "S"), "3Sigmag-", "1Deltag", 0.545),
+    (("N", "H"), "3Sigma-", "1Sigma+", 2.629),
+    (("N", "F"), "3Sigma-", "1Sigma+", 2.341),
+    (("S", "O"), "3Sigma-", "1Sigma+", 1.303),
+    (("S", "S"), "3Sigmag-", "1Sigmag+", 0.990),
 ]
 
 
@@ -45,7 +49,7 @@ def run(case, outdir):
 if __name__ == "__main__":
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    with Pool(len(CASES)) as pool:
+    with Pool(min(len(CASES), 6)) as pool:
         results = pool.starmap(run, [(c, str(out)) for c in CASES])
     (out / "validation.json").write_text(json.dumps(results, indent=1, default=str))
     print("case                      gap0    T0(exp)  error")

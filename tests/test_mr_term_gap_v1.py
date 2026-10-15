@@ -128,3 +128,24 @@ def test_resolver_accepts_term_gap_route():
     assert resolve_final_verdict(**common, mr_term_gap={"status": "CLEARED"})["outcome"] == "EA"
     blocked = resolve_final_verdict(**common, mr_term_gap={"status": "UNRESOLVED_GAP_NOT_COMPUTED"})
     assert "term gap UNRESOLVED_GAP_NOT_COMPUTED" in blocked["blocking"][0]
+
+
+def test_term_gap_adds_spin_orbit_of_open_shell_states(tmp_path):
+    P = {"label": "3Pi", "mult": 3, "irrep": "A2", "lambda": 0, "parity": 1}  # reference treated as Sigma-like
+    T = {"label": "3Delta", "mult": 3, "irrep": "A2", "lambda": 2, "parity": 1}
+    calls = []
+
+    def soc(atoms, r, charge, label, workdir):
+        calls.append(label)
+        return {"status": "CLEARED", "delta_so_ev": -0.012, "bound_ev": 0.004, "splitting_cm1": 200.0}
+
+    def blocks(atoms, charge, mult, irrep, r, policy, cache):
+        return {"status": "COMPLETED", "roots": [{"lambda": 0, "parity": 1, "e_hartree": morse(r, 1.21)},
+                                                 {"lambda": 2, "parity": 1, "e_hartree": morse(r, 1.22, e0=1.0 / EV)}]}
+    res = term_gap(atoms=("Ti", "O"), charge=0, reference=P, state=T, r_start=1.2, policy=MRTermGapPolicy(),
+                   cache_dir=tmp_path, block_fn=blocks, soc_fn=soc)
+    assert res["status"] == "COMPLETED" and calls == ["3Delta"]
+    assert res["delta_so_ev"] == -0.012 and res["gap0_half_width_ev"] > 0.15 + 0.004 - 1e-9
+    out = apply_mr_term_gaps(ADIABATIC, {"gaps": [{**gap("anion", "q=-1 3Delta", -0.4, 0.15),
+                                                   "spin_orbit": res["spin_orbit"]}]})
+    assert out["status"] == "CLEARED"  # SOC included: no longer blocking

@@ -744,7 +744,9 @@ def _valence_core_orbitals(z: int) -> int | None:
     to Ar but freezes only the n-2 shell for Li/Be, Na/Mg and K/Ca, which leaves
     e.g. Mg 2s2p correlated in a basis without core-correlating functions (the
     MgH frozen-core CBS energies then jump erratically with the cardinal number).
-    Transition metals and heavier elements: None (PySCF's table is kept).
+    3d transition metals Sc-Zn: [Ar] (3d4s correlated; 3s3p correlation needs
+    core-correlating cc-pwCVxZ functions and belongs to the core-valence layer, while
+    PySCF's table freezes only [Ne]).  4d and heavier: None (PySCF's table is kept).
     """
     if z <= 2:
         return 0
@@ -752,7 +754,7 @@ def _valence_core_orbitals(z: int) -> int | None:
         return 1
     if z <= 18:
         return 5
-    if z <= 20:
+    if z <= 30:
         return 9
     if 31 <= z <= 36:
         return 14

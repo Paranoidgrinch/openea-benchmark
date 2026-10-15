@@ -45,7 +45,8 @@ from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
 from .spin_orbit_stage import D2H_TO_C2V, full_valence_space
 
 # Version of the per-root Lambda / g-u classification; older block caches are recomputed.
-ROOT_CLASSIFICATION = 3  # 3: high-spin ROHF start orbitals tried as well
+# 3: high-spin ROHF start orbitals tried as well; 4: borrowed CASSCF orbitals, NEVPT2 intruder check
+ROOT_CLASSIFICATION = 4
 LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
 
@@ -63,6 +64,8 @@ class MRCompetitorPolicy:
     # CASCI roots classified by Lambda (0 = no classification, old behaviour).
     classify_roots: int = 6
     lambda_tolerance: float = 0.25
+    # A root whose NEVPT2 correction differs from the block median by more is an intruder.
+    max_nevpt2_deviation_hartree: float = 0.1
     max_memory_mb: int = 16000
 
 
@@ -245,6 +248,34 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
             rank = (mc is None, not pure, float(e_casci[0]))
             if best is None or rank < best[0]:
                 best = (rank, name, mc, n_avg, ci, e_casci)
+        if best is None or best[2] is None:
+            # No CASSCF of this block converged (ClO- 1A2: NEVPT2 on SCF orbitals put the
+            # block 8 eV below the ground state).  Borrow the converged single-root
+            # CASSCF orbitals of another block of the same charge and spin.
+            for other in C2V_IRREPS:
+                if other == irrep:
+                    continue
+                for name, coeff in guesses:
+                    try:
+                        mo = mcscf.sort_mo_by_irrep(mcscf.CASSCF(mf, ncas, nelecas), coeff, ras2, inactive)
+                        mc_o = mcscf.CASSCF(mf, ncas, nelecas)
+                        mc_o.fcisolver.wfnsym = other
+                        mc_o.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
+                        mc_o.max_cycle_macro = 200
+                        mc_o.kernel(mo)
+                        if not mc_o.converged:
+                            continue
+                        ci, e_casci = casci(mc_o.mo_coeff)
+                    except Exception:  # noqa: BLE001 - try the next block
+                        continue
+                    tried.append({"guess": f"casscf_{other}_{name}", "casscf_converged": True,
+                                  "e_casci_hartree": float(e_casci[0])})
+                    best = ((True, False, float(e_casci[0])), f"casscf_{other}_{name}", None, None, ci, e_casci)
+                    break
+                if best is not None and best[1].startswith("casscf_"):
+                    break
+        if best is None:
+            raise RuntimeError("no orbital start gave a CASCI solution")
         _, guess_name, mc, n_avg, ci, e_casci = best
         record["orbital_guess"] = guess_name
         record["orbital_guesses_tried"] = tried
@@ -261,7 +292,17 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
             roots.append({"casci_index": i, "lz2": lz2, "lambda": root_lambda(lz2, policy.lambda_tolerance, irrep),
                           "parity": None if orb_par is None else root_parity(civecs[i], ncas, ci.nelecas, orb_par)})
         for i, root in enumerate(roots):
-            root["e_hartree"] = float(e_casci[i]) + float(mrpt.NEVPT(ci, root=i).kernel())
+            root["e_casci_hartree"] = float(e_casci[i])
+            root["nevpt2_hartree"] = float(mrpt.NEVPT(ci, root=i).kernel())
+        # Intruder check: valence NEVPT2 corrections of states in one block differ by
+        # tenths of an eV, not by Hartrees (NH high roots: -1.7 vs -0.16 Eh).  An outlier
+        # root keeps its CASCI energy plus the median correction, and is flagged.
+        corr = np.array([x["nevpt2_hartree"] for x in roots])
+        med = float(np.median(corr))
+        for root in roots:
+            root["nevpt2_intruder"] = abs(root["nevpt2_hartree"] - med) > policy.max_nevpt2_deviation_hartree
+            root["e_hartree"] = root["e_casci_hartree"] + (med if root["nevpt2_intruder"] else root["nevpt2_hartree"])
+        record["nevpt2_intruder_roots"] = sum(x["nevpt2_intruder"] for x in roots)
         roots.sort(key=lambda x: x["e_hartree"])
         record.update(status="COMPLETED", energies_hartree=[x["e_hartree"] for x in roots], roots=roots,
                       root_classification=ROOT_CLASSIFICATION)

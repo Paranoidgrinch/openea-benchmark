@@ -152,3 +152,23 @@ covalent radii):
 Largest error 0.067 eV, below the pilot method term of 0.15 eV; every measured value lies
 inside its interval. Basis shifts TZ -> QZ: -0.007 to -0.043 eV. The seven-point check
 flags the S2 1Delta kink (ZPE fit spread 0.014 eV).
+
+## Patch 55 — robust MR blocks, 3d metals, spin-orbit for any Lambda
+
+- **Block solver (cache version 4):** when no CASSCF of a block converges, the
+  converged single-root CASSCF orbitals of another block of the same charge and spin
+  are used (ClO- 1A2: NEVPT2 on SCF orbitals had put 1Delta 8.3 eV *below* X1Sigma+, so
+  the run stayed UNRESOLVED; now 5.6 eV above, A1/A2 components within 0.25 eV). Roots
+  whose NEVPT2 correction deviates > 0.1 Eh from the block median are intruders: CASCI
+  energy + median correction, flagged.
+- **3d transition metals:** valence frozen core [Ar] for Sc-Zn (PySCF froze only [Ne]);
+  full-valence CAS 4s 3d for the metal (FeO: CAS(14,10), Cr2: CAS(12,12)). 4d and
+  heavier fail closed (def2 ECPs).
+- **Spin-orbit for any Lambda:** in C2 both components of a Lambda > 0 state share one
+  symmetry; a state average over the lowest roots and RASSI |<i|Lz|j>| = Lambda
+  identify the pair, a second RASSI couples it. TiO X3Delta 199 cm-1 (measured 4A =
+  202), NO 129 (123), ClO 271 (320). MR states with S > 0 and Lambda > 0 get their
+  spin-orbit shift in the term gap instead of blocking.
+- Tested and not adopted for the term gap (O2 a1Delta_g, measured Te 0.982 eV):
+  MRCI+Q/aug-cc-pVTZ 1.030; DEA-EOMCC(3p-1h)/aug-cc-pVTZ 0.792; with a (4p-2h)
+  cc-pVDZ increment 1.067. NEVPT2/QZ gives 0.958; it stays the method.
