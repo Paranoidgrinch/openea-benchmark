@@ -28,7 +28,7 @@ dissociation margin minus twice the MR anion ZPE must stay positive.
 """
 from __future__ import annotations
 
-from .heavy_elements import mole_basis_kwargs, pyscf_valence_space
+from .heavy_elements import apply_hamiltonian, mole_basis_kwargs, pyscf_valence_space
 
 from dataclasses import asdict, dataclass
 import json
@@ -102,7 +102,7 @@ def _point(atoms, r, charge, spin_2s, irrep_nelec, wfnsym, space, basis, mo_gues
     # A converged SCF object at every point: NEVPT2 reads it (an unconverged
     # placeholder gave Hartree-sized errors).  CASSCF start orbitals come from the
     # neighbouring point when given, else from this SCF.
-    mf = scf.ROHF(mol) if spin_2s else scf.RHF(mol)
+    mf = apply_hamiltonian(scf.ROHF(mol) if spin_2s else scf.RHF(mol))
     counts = _c2v_counts(irrep_nelec)
     mf.irrep_nelec = ({k: v for k, v in counts.items() if sum(v)} if spin_2s
                       else {k: sum(v) for k, v in counts.items() if sum(v)})

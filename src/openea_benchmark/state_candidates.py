@@ -129,9 +129,18 @@ def _valence_promotions(occ) -> list[list[tuple[int, int, int]]]:
         cfg = moved(src, dst)
         if cfg is not None:
             out.append(cfg)
+    # f block: (n-2)f -> (n-1)d, one or two electrons (La 5d1 6s2, Ce 4f1 5d1 6s2,
+    # Gd 4f7 5d1 6s2, Th 6d2 7s2, U 5f3 6d1 7s2 lie off the Madelung order).
+    f, d = (outer_s - 2, 3), (outer_s - 1, 2)
+    for k in (1, 2):
+        if shells.get(f, 0) >= k and shells.get(d, 0) + k <= _CAPACITY[2]:
+            new = dict(shells)
+            new[f] -= k
+            new[d] = new.get(d, 0) + k
+            out.append(sorted([(n, l, c) for (n, l), c in new.items() if c > 0],
+                              key=lambda x: _MADELUNG.index((x[0], x[1]))))
     # ns2 (n-1)d8 -> (n-1)d10: closing the d shell moves both s electrons (Pd ground
     # state 4d10 1S; Ni, Pt low-lying).
-    d = (outer_s - 1, 2)
     if shells.get((outer_s, 0)) == 2 and shells.get(d) == 8:
         new = {k: v for k, v in shells.items() if k != (outer_s, 0)}
         new[d] = 10

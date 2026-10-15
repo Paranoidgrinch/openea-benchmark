@@ -22,7 +22,7 @@ def test_full_valence_space_rule():
     assert fe_o["rule"] == "FULL_VALENCE_NS_NP_ND"
     ag_h = full_valence_space(("Ag", "H"), 0)  # 4d: [Kr] core, 5s 4d (heavy-element step 1)
     assert ag_h["inactive"] == (9, 4, 4, 1) and ag_h["ras2"] == (4, 1, 1, 1) and ag_h["active_electrons"] == 12
-    assert full_valence_space(("Ce", "H"), 0) is None  # open 4f shell: fail closed
+    assert full_valence_space(("Ce", "H"), 0)["ras2"] == (6, 3, 3, 2)  # 6s 5d 4f + H 1s (step 1b)
     assert c2_space(fe_o)["ras2"] == (6, 4) and c2_space(fe_o)["inactive"] == (6, 4)
 
 

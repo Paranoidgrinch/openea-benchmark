@@ -53,7 +53,7 @@ from .adaptive.stage3_execution import (
     Stage3PointResult,
 )
 from .attachment.component_resolved_cbs import (
-    PRIMARY_EXPONENTS, extrapolate_species, ComponentPair, resolve_cbs,
+    PAIR_EXPONENTS, PRIMARY_EXPONENTS, TQ_MODEL_SPREAD_TARGET_EV, extrapolate_species, ComponentPair, resolve_cbs,
 )
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner
 from .point_pool import run_parallel
@@ -113,6 +113,14 @@ def _even_tempered_extra_diffuse(shells: list) -> list:
     return list(shells) + extra
 
 
+def _has_cardinal(element: str, cardinal: int) -> bool:
+    try:
+        element_basis(element, cardinal)
+    except Exception:  # noqa: BLE001 - not in any library
+        return False
+    return True
+
+
 def element_basis(element: str, cardinal: int, *, daug: bool = False) -> tuple[Any, str]:
     """(PySCF basis spec, provenance) for one element.
 
@@ -120,7 +128,13 @@ def element_basis(element: str, cardinal: int, *, daug: bool = False) -> tuple[A
     even-tempered extension), resolved together with its ECP when the molecule is built.
     """
     from pyscf import gto
-    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route, resolve_named_basis
+    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, ROUTE_X2C, basis_name_for, element_route, resolve_named_basis
+    if element_route(element)["route"] == ROUTE_X2C:
+        name = basis_name_for(element, f"{'d-' if daug else ''}aug-cc-pV{CARDINAL_LETTER[cardinal].upper()}Z")
+        loaded = resolve_named_basis(name, element)
+        if loaded is None:
+            raise ValueError(f"no {name} for {element}")
+        return name, loaded.provenance
     if element_route(element)["route"] == ROUTE_PSEUDOPOTENTIAL:
         name = f"{'d-' if daug else ''}aug-cc-pV{CARDINAL_LETTER[cardinal].upper()}Z-PP"
         loaded = resolve_named_basis(name, element)
@@ -234,8 +248,13 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
                   stage3_settings: Stage3ExecutionSettings, output_dir: Path,
                   policy: CBSStagePolicy = CBSStagePolicy(),
                   point_backend: Callable[..., Stage3PointResult] | None = None) -> dict:
-    if policy.low_cardinal != 4 or policy.high_cardinal != 5:
-        raise ValueError("component_resolved_cbs exponents are defined for the Q/5 pair only")
+    if (policy.low_cardinal, policy.high_cardinal) not in PAIR_EXPONENTS:
+        raise ValueError("component_resolved_cbs exponents are defined for the Q/5 and T/Q pairs only")
+    atoms = requests[0].atoms if requests else ()
+    if any(not _has_cardinal(el, policy.high_cardinal) for el in dict.fromkeys(atoms)):
+        # largest basis QZ for an element (X2C route): T/Q pair, wider spread target
+        policy = replace(policy, low_cardinal=3, high_cardinal=4,
+                         model_spread_target_ev=max(policy.model_spread_target_ev, TQ_MODEL_SPREAD_TARGET_EV))
     output_dir = Path(output_dir)
     record: dict[str, Any] = {
         "stage": "FROZEN_CORE_VALENCE_CBS", "policy": asdict(policy), "is_production_ea": False,
@@ -350,7 +369,9 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
                              ccsd_correlation_qz=p4["ccsd_correlation_hartree"],
                              ccsd_correlation_5z=p5["ccsd_correlation_hartree"],
                              triples_qz=p4["triples_correction_hartree"], triples_5z=p5["triples_correction_hartree"])
-        return extrapolate_species(pair, model_name="PRIMARY", exponents=PRIMARY_EXPONENTS).total_cbs_hartree
+        return extrapolate_species(pair, model_name="PRIMARY",
+                                   exponents=PAIR_EXPONENTS[(policy.low_cardinal, policy.high_cardinal)][0],
+                                   cardinals=(policy.low_cardinal, policy.high_cardinal)).total_cbs_hartree
 
     # Competitor re-ranking at CBS (fail closed when order is lost or unknown).
     ranking, order_ok = [], True
@@ -377,7 +398,8 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
                - selected["anion"]["points"][diffuse_label]["ccsd_t_total_hartree"]) * HARTREE_TO_EV
     cbs = resolve_cbs(points=points, daug_fixed_ea_ev=daug_ea, full_pec_aug5_ea_ev=None,
                       diffuse_residual_estimate_ev=None,
-                      model_spread_target_ev=policy.model_spread_target_ev).to_dict()
+                      model_spread_target_ev=policy.model_spread_target_ev,
+                      cardinals=(policy.low_cardinal, policy.high_cardinal), basis_labels=(low, high)).to_dict()
     # Two ROHF reference branches of one state: their single-basis offset is not
     # recomputed at CBS and widens the interval on both sides (as in the EA stage).
     sensitivity = float(electronic_ea.get("reference_sensitivity_ev") or 0.0)

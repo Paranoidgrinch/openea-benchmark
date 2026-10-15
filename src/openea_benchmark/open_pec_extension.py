@@ -26,7 +26,7 @@ unchanged.  No experimental data are read.
 """
 from __future__ import annotations
 
-from .heavy_elements import mole_basis_kwargs
+from .heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass
@@ -79,7 +79,7 @@ class OpenPECExtensionPolicy:
 def _dft_mean_field(mol, functional: str, grid_level: int, conv_tol: float, max_cycle: int):
     from pyscf import dft
 
-    mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+    mf = apply_hamiltonian(dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol))
     mf.xc = functional
     mf.grids.level = grid_level
     mf.conv_tol = conv_tol

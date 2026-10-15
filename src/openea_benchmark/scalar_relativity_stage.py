@@ -79,6 +79,10 @@ def run_scalar_relativity_stage(*, electronic_ea: Mapping[str, Any], requests: S
         return done(status="NOT_ATTEMPTED", reason=states)
     record["states"] = {role: {k: v for k, v in asdict(s).items() if k != "irrep_nelec"}
                         for role, s in states.items()}
+    from .heavy_elements import requires_x2c
+    if requires_x2c(states["neutral"].atoms):  # every stage already runs sfX2C (heavy_elements)
+        return done(status="SCALAR_RELATIVITY_CLEARED", reason="INCLUDED_IN_MODEL_HAMILTONIAN",
+                    delta_sr_ev=0.0, delta_sr_bound_ev=0.0)
     built = basis_specs_for(states["neutral"].atoms, policy, element_series=sr_element_series,
                             rule_id=BASIS_RULE_ID,
                             make_spec=_sr_spec)

@@ -22,7 +22,7 @@ estimated storage exceeds ``q_memory_limit_mb`` the layer reports
 """
 from __future__ import annotations
 
-from .heavy_elements import mole_basis_kwargs
+from .heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
@@ -83,7 +83,7 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     from pyscf import scf
     open_shell = spec.spin_2s > 0
     mol = _mol(spec, basis, spec.point_group or False, policy.max_memory_mb)
-    mf = scf.ROHF(mol) if open_shell else scf.RHF(mol)
+    mf = apply_hamiltonian(scf.ROHF(mol) if open_shell else scf.RHF(mol))
     if spec.irrep_nelec is not None:
         mf.irrep_nelec = ({k: (int(v[0]), int(v[1])) for k, v in spec.irrep_nelec.items()} if open_shell
                           else {k: int(v[0]) + int(v[1]) for k, v in spec.irrep_nelec.items()})
@@ -93,7 +93,7 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     if not mf.converged:
         raise RuntimeError(f"symmetry-block SCF not converged ({basis})")
     mol1 = _mol(spec, basis, "C1", policy.max_memory_mb)
-    mf1 = scf.ROHF(mol1) if open_shell else scf.RHF(mol1)
+    mf1 = apply_hamiltonian(scf.ROHF(mol1) if open_shell else scf.RHF(mol1))
     mf1.conv_tol, mf1.max_cycle, mf1.max_memory = policy.scf_conv_tol, 50, policy.max_memory_mb
     mf1.kernel(dm0=mf.make_rdm1())
     if not mf1.converged or abs(mf1.e_tot - mf.e_tot) > policy.c1_energy_tolerance_hartree:

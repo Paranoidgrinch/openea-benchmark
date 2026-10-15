@@ -22,7 +22,7 @@ for converged sigma/pi/delta orbitals).  For a determinant:
 """
 from __future__ import annotations
 
-from .heavy_elements import mole_basis_kwargs
+from .heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -215,6 +215,7 @@ def run_block_scf(mol, occupation: BlockOccupation, *, method: str = "HF", xc: s
         mf.xc = xc
         if grid_level is not None:
             mf.grids.level = grid_level
+    mf = apply_hamiltonian(mf)
     occ = occupation.as_dict()
     mf.irrep_nelec = {k: (v if target.two_s else v[0] + v[1]) for k, v in occ.items()}
     mf.max_cycle, mf.conv_tol = max_cycle, conv_tol

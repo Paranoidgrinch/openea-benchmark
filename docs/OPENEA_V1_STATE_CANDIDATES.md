@@ -208,9 +208,7 @@ Term-gap validation with cache v6 (ten measured T0): O2 a 0.954 (0.977), O2 b 1.
 
 * Route: Z <= 36 all-electron as before; Z > 36 the PSEUDOPOTENTIAL route when the
   aug-cc-pV{T,Q,5}Z-PP series loads (PySCF library, else Basis Set Exchange) —
-  Y-Xe and Hf-Rn.  Fail closed (`final_verdict` ELEMENT_NOT_SUPPORTED, written before
-  any computation) for open 4f/5f shells (La-Lu, Ac-Lr) and for Rb, Sr, Cs, Ba (no
-  PP cardinal series in BSE).
+  Y-Xe and Hf-Rn.  (Step 1b below covers the rest up to Lr.)
 * ECPs travel with basis *names*: `mole_basis_kwargs` resolves every heavy element's
   named basis together with its ECP at each `gto.M` (scout, Stage 3, atoms, MR blocks
   and curves, post-CC, open-PEC DFT).  Heavy elements given as bare shells raise:
@@ -232,3 +230,32 @@ Term-gap validation with cache v6 (ten measured T0): O2 a 0.954 (0.977), O2 b 1.
 
 Open (step 2): spin-orbit coupling of 5p/6p elements is not a small correction
 (I 0.94 eV, Bi ~1.9 eV atomic splittings); Lambda-S labels then lose meaning.
+
+## Patch 57 — all-electron X2C route: Rb, Sr, Cs, Ba, lanthanides, actinides (step 1b)
+
+Every element H-Lr now has a route; only Z > 103 fails closed (ELEMENT_NOT_SUPPORTED).
+
+* Route ALL_ELECTRON_X2C for elements without a PP series: X2C-contracted
+  cc-pV{D,T,Q}Z-X2C / cc-pwCV{D,T,Q}Z-X2C (BSE: all of Rb, Sr, Cs, Ba, La-Lu, Ac-Lr).
+  aug- where published (Rb, Sr, Cs, Ba), else "e-aug-": one even-tempered diffuse
+  primitive per l, the same construction as d-aug.  Stage names map centrally
+  (`mole_basis_kwargs`): def2-XZVPPD -> augmented X2C set of the same cardinal.
+* Hamiltonian: spin-free X2C in every stage for the whole molecule *and its fragments*
+  (`set_model_hamiltonian` fixes it per run via OPENEA_MODEL_HAMILTONIAN; an O atom
+  computed nonrelativistically next to sfX2C LaO would shift the asymptote by O's
+  relativistic energy).  The SR layer reports INCLUDED_IN_MODEL_HAMILTONIAN (0 eV).
+* CBS: the largest X2C basis is QZ, so the pair becomes T/Q (Neese-Valeev exponents,
+  primary cc 5.46/3.05, sensitivity def2 7.88/2.97, model-spread target 0.02 eV);
+  light and PP molecules keep Q/5 unchanged.
+* Correlation spaces: frozen core Rb/Sr [Kr], Cs/Ba [Xe], lanthanides [Kr]4d10
+  (5s5p with 4f5d6s), actinides [Xe]4f14 5d10 (6s6p with 5f6d7s).  All-electron
+  members never correlate the deep core a small-core ECP would replace
+  (`deep_core_orbitals`), so CV correlates the outer core (La 4s4p4d).
+* Active space: 6s 5d 4f / 7s 6d 5f per f atom (13 orbitals), 5s5p / 6s6p inactive;
+  spaces beyond 5e7 determinants return None (MR layers fail closed: GdO, UO).
+* Atomic states: (n-2)f -> (n-1)d promotions of one and two electrons (La 5d1 6s2,
+  Gd 4f7 5d1 6s2, Th 6d2 7s2).
+
+Open (step 3): open-f molecules give hundreds of atomic terms (Gd: 267) and very
+large candidate lists; the scout needs energy screening, the MR layer larger
+spaces (RAS/DMRG/selected CI).  SOC is large (step 2).

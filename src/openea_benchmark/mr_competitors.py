@@ -33,7 +33,7 @@ cannot be computed stays unresolved.
 """
 from __future__ import annotations
 
-from .heavy_elements import mole_basis_kwargs, pyscf_valence_space
+from .heavy_elements import apply_hamiltonian, mole_basis_kwargs, pyscf_valence_space
 
 from dataclasses import asdict, dataclass
 import json
@@ -208,7 +208,7 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
         mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, float(r)))], **mole_basis_kwargs(atoms, policy.basis),
                     charge=charge,
                     spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
-        mf = (scf.ROHF(mol) if spin_2s else scf.RHF(mol)).run()
+        mf = apply_hamiltonian(scf.ROHF(mol) if spin_2s else scf.RHF(mol)).run()
         ncas, nelecas = sum(space["ras2"]), space["active_electrons"]
         ras2 = {k: v for k, v in zip(C2V_IRREPS, space["ras2"]) if v}
         inactive = {k: v for k, v in zip(C2V_IRREPS, space["inactive"]) if v}
@@ -254,7 +254,7 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
             try:
                 hs = gto.M(atom=mol.atom, **mole_basis_kwargs(atoms, policy.basis), charge=charge, spin=spin_2s + 2, unit="Angstrom",
                            symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
-                mf_hs = scf.ROHF(hs).run()
+                mf_hs = apply_hamiltonian(scf.ROHF(hs)).run()
                 if mf_hs.converged:
                     guesses.append(("high_spin_rohf", mf_hs.mo_coeff))
             except (RuntimeError, ValueError):

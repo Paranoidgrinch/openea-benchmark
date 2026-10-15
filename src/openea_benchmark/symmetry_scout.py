@@ -21,6 +21,8 @@ state selection, Stage-3 planning and the EA stages run unchanged.
 """
 from __future__ import annotations
 
+from .heavy_elements import apply_hamiltonian
+
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
@@ -72,7 +74,7 @@ def _reference_orbitals(atoms, r, charge, two_s, policy):
     """Symmetric (abelian subgroup) reference SCF; returns alpha orbital table and (n_alpha, n_beta)."""
     from pyscf import dft
     mol = build_symmetric_molecule(atoms, r, basis=policy.basis, charge=charge, two_s=two_s)
-    mf = dft.RKS(mol) if two_s == 0 else dft.UKS(mol)
+    mf = apply_hamiltonian(dft.RKS(mol) if two_s == 0 else dft.UKS(mol))
     mf.xc, mf.verbose, mf.max_cycle = policy.functional, 0, 200
     mf.grids.level = policy.grid_level
     mf.kernel()

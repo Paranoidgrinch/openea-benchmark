@@ -41,6 +41,17 @@ SENSITIVITY_EXPONENTS = {
     "triples": 3.3723,
 }
 
+# Elements whose largest basis is QZ (all-electron X2C route: cc-pVXZ-X2C ends at Q)
+# use the T/Q pair.  Primary: Neese & Valeev, JCTC 7, 33 (2011), cc-pV{T,Q}Z
+# (SCF 5.46, correlation 3.05); sensitivity: their def2-{T,Q}ZVPP values (SCF 7.88,
+# correlation 2.97).  T/Q extrapolation is less certain than Q/5, so its model-spread
+# target is wider (0.02 eV); the interval always carries the full spread.
+TQ_PRIMARY_EXPONENTS = {"scf": 5.46, "ccsd_correlation": 3.05, "triples": 3.05}
+TQ_SENSITIVITY_EXPONENTS = {"scf": 7.88, "ccsd_correlation": 2.97, "triples": 2.97}
+TQ_MODEL_SPREAD_TARGET_EV = 0.02
+PAIR_EXPONENTS = {(4, 5): (PRIMARY_EXPONENTS, SENSITIVITY_EXPONENTS),
+                  (3, 4): (TQ_PRIMARY_EXPONENTS, TQ_SENSITIVITY_EXPONENTS)}
+
 
 class CBSStatus(str, Enum):
     CLEARED = "CLEARED"
@@ -188,20 +199,23 @@ def extrapolate_species(
     *,
     model_name: str,
     exponents: Mapping[str, float],
+    cardinals: tuple[int, int] = (4, 5),
 ) -> SpeciesCBSComponents:
+    """``pair`` fields named qz/5z hold the low/high members of ``cardinals``."""
+    lo_x, hi_x = cardinals
     scf = inverse_power_cbs(
         pair.scf_qz, pair.scf_5z,
-        low_cardinal=4, high_cardinal=5,
+        low_cardinal=lo_x, high_cardinal=hi_x,
         exponent=float(exponents["scf"]),
     )
     ccsd = inverse_power_cbs(
         pair.ccsd_correlation_qz, pair.ccsd_correlation_5z,
-        low_cardinal=4, high_cardinal=5,
+        low_cardinal=lo_x, high_cardinal=hi_x,
         exponent=float(exponents["ccsd_correlation"]),
     )
     triples = inverse_power_cbs(
         pair.triples_qz, pair.triples_5z,
-        low_cardinal=4, high_cardinal=5,
+        low_cardinal=lo_x, high_cardinal=hi_x,
         exponent=float(exponents["triples"]),
     )
     return SpeciesCBSComponents(
@@ -243,19 +257,20 @@ def combined_correlation_sanity(
     *,
     scf_exponent: float = PRIMARY_EXPONENTS["scf"],
     correlation_exponent: float = 3.0,
+    cardinals: tuple[int, int] = (4, 5),
 ) -> float:
     species = {}
     for role, p in pairs.items():
         scf = inverse_power_cbs(
             p.scf_qz, p.scf_5z,
-            low_cardinal=4, high_cardinal=5,
+            low_cardinal=cardinals[0], high_cardinal=cardinals[1],
             exponent=scf_exponent,
         )
         corr4 = p.ccsd_correlation_qz + p.triples_qz
         corr5 = p.ccsd_correlation_5z + p.triples_5z
         corr = inverse_power_cbs(
             corr4, corr5,
-            low_cardinal=4, high_cardinal=5,
+            low_cardinal=cardinals[0], high_cardinal=cardinals[1],
             exponent=correlation_exponent,
         )
         species[role] = scf + corr
@@ -292,28 +307,36 @@ def resolve_cbs(
     full_pec_aug5_ea_ev: float | None,
     diffuse_residual_estimate_ev: float | None,
     model_spread_target_ev: float = 0.005,
+    cardinals: tuple[int, int] = (4, 5),
+    basis_labels: tuple[str, str] = ("aug-cc-pvqz", "aug-cc-pv5z"),
 ) -> CBSResolvedResult:
-    pairs = build_component_pairs(points)
+    """Q/5 by default; ``cardinals=(3, 4)`` uses the T/Q exponents (PAIR_EXPONENTS)."""
+    pairs = build_component_pairs(points, qz_basis=basis_labels[0], z5_basis=basis_labels[1])
+    primary_exponents, sensitivity_exponents = PAIR_EXPONENTS[tuple(cardinals)]
+    primary_name = ("COMPONENT_SPECIFIC_AVQ5_PRIMARY" if tuple(cardinals) == (4, 5)
+                    else "COMPONENT_SPECIFIC_TQ_PRIMARY")
 
     primary_species = {
         role: extrapolate_species(
             pair,
-            model_name="COMPONENT_SPECIFIC_AVQ5_PRIMARY",
-            exponents=PRIMARY_EXPONENTS,
+            model_name=primary_name,
+            exponents=primary_exponents,
+            cardinals=cardinals,
         )
         for role, pair in pairs.items()
     }
     primary = ea_from_species(
         primary_species["neutral"],
         primary_species["anion"],
-        model_name="COMPONENT_SPECIFIC_AVQ5_PRIMARY",
+        model_name=primary_name,
     )
 
     sensitivity_species = {
         role: extrapolate_species(
             pair,
             model_name="COMPONENT_SPECIFIC_SENSITIVITY",
-            exponents=SENSITIVITY_EXPONENTS,
+            exponents=sensitivity_exponents,
+            cardinals=cardinals,
         )
         for role, pair in pairs.items()
     }
@@ -323,7 +346,7 @@ def resolve_cbs(
         model_name="COMPONENT_SPECIFIC_SENSITIVITY",
     )
 
-    combined = combined_correlation_sanity(pairs)
+    combined = combined_correlation_sanity(pairs, scf_exponent=primary_exponents["scf"], cardinals=cardinals)
     model_bound = max(
         abs(primary.ea_cbs_aug_ev - sensitivity.ea_cbs_aug_ev),
         abs(primary.ea_cbs_aug_ev - combined),
@@ -331,7 +354,7 @@ def resolve_cbs(
 
     aug5_fixed = fixed_basis_ea_from_points(
         points,
-        basis="aug-cc-pv5z",
+        basis=basis_labels[1],
     )
     diffuse_correction = float(daug_fixed_ea_ev) - aug5_fixed
 
@@ -348,7 +371,7 @@ def resolve_cbs(
 
     half_width = model_bound
     evidence = [
-        "QZ_5Z_COMPONENT_EVIDENCE_COMPLETE",
+        "QZ_5Z_COMPONENT_EVIDENCE_COMPLETE" if tuple(cardinals) == (4, 5) else "TZ_QZ_COMPONENT_EVIDENCE_COMPLETE",
         "SCF_CCSD_TRIPLES_EXTRAPOLATED_SEPARATELY",
         "INDEPENDENT_COMBINED_CORRELATION_SANITY_CHECK",
         "DAUG_MINUS_AUG_DIFFUSE_CORRECTION_SEPARATE",

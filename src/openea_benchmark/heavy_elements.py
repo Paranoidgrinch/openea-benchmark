@@ -10,9 +10,12 @@ Route (``element_route``):
   aug-cc-pV{T,Q,5}Z-PP loads for the element (PySCF library, else Basis Set
   Exchange).  The ECP replaces the inner core and carries scalar relativity; the
   def2 bases of the scout/MR stages come with their own def2 ECPs.
-* None - fail closed with a reason: open 4f/5f shells (La-Lu, Ac-Lr: strongly
-  multireference, outside the CCSD(T)-based chain) and elements without a PP
-  cardinal series (Rb, Sr, Cs, Ba have no aug-cc-pVXZ-PP in BSE).
+* ALL_ELECTRON_X2C - Z > 36 without a PP series (Rb, Sr, Cs, Ba, La-Lu, Ac-Lr):
+  all electrons, spin-free X2C Hamiltonian for the whole molecule in every stage
+  (``apply_hamiltonian``), X2C-contracted cc-pVXZ-X2C / cc-pwCVXZ-X2C bases (D, T, Q;
+  aug- where BSE has it, else the even-tempered "e-aug-" extension).  Scalar
+  relativity is then part of the model, not a correction.
+* None - fail closed with a reason: no basis series for the element.
 
 Frozen core (``valence_core_orbitals``) counts all-electron spatial orbitals of the
 conventional valence frozen core (Peterson's cc-pVXZ-PP practice): 4d metals
@@ -29,17 +32,21 @@ from typing import Any, Sequence
 
 ROUTE_ALL_ELECTRON = "ALL_ELECTRON"
 ROUTE_PSEUDOPOTENTIAL = "PSEUDOPOTENTIAL"
-OPEN_F_BLOCK = frozenset(range(57, 72)) | frozenset(range(89, 104))
+ROUTE_X2C = "ALL_ELECTRON_X2C"
+F_BLOCK = frozenset(range(57, 72)) | frozenset(range(89, 104))
+X2C_ROUTE_SERIES = "cc-pV{x}Z-X2C"
+X2C_ROUTE_CARDINALS = (2, 3, 4)
 PP_ROUTE_SERIES = "aug-cc-pV{x}Z-PP"
 PP_ROUTE_CARDINALS = (3, 4, 5)
 CARDINAL_LETTER = {2: "D", 3: "T", 4: "Q", 5: "5", 6: "6"}
 
 # Core shells in the order they are frozen; cumulative counts give the core sizes.
 _CORE_SHELLS = ((1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2), (4, 0), (4, 1), (4, 2),
-                (5, 0), (5, 1), (4, 3), (5, 2))
-# (last Z of the range, frozen spatial orbitals); open f block handled separately.
+                (5, 0), (5, 1), (4, 3), (5, 2), (6, 0), (6, 1))
+# (last Z of the range, frozen spatial orbitals).  Lanthanides [Kr]4d10 (5s5p correlated
+# with 4f 5d 6s), actinides [Xe]4f14 5d10 (6s6p correlated with 5f 6d 7s).
 _FROZEN_CORE_BY_RANGE = ((2, 0), (10, 1), (18, 5), (30, 9), (36, 14), (48, 18), (54, 23),
-                         (56, 27), (80, 34), (86, 39))
+                         (56, 27), (71, 23), (80, 34), (86, 39), (88, 43), (103, 39))
 # Valence shells of the full-valence CAS, by C2v irrep (a1, b1, b2, a2).
 VALENCE_S, VALENCE_SP, VALENCE_SD = (1, 0, 0, 0), (2, 1, 1, 0), (3, 1, 1, 1)
 
@@ -50,9 +57,7 @@ def _z(element: str) -> int:
 
 
 def valence_core_orbitals(z: int) -> int | None:
-    """All-electron spatial orbitals of the valence frozen core, None for open f shells."""
-    if z in OPEN_F_BLOCK or z > 86:
-        return None
+    """All-electron spatial orbitals of the valence frozen core (None beyond Lr)."""
     for last, n in _FROZEN_CORE_BY_RANGE:
         if z <= last:
             return n
@@ -87,10 +92,22 @@ def core_irreps_c2v(n_core: int) -> tuple[int, int, int, int] | None:
     return tuple(counts) if total == n_core else None
 
 
+VALENCE_SDF = (5, 3, 3, 2)  # ns (n-1)d (n-2)f
+
+
 def valence_shells_c2v(z: int) -> tuple[int, int, int, int]:
     if z <= 2:
         return VALENCE_S
+    if z in F_BLOCK:
+        return VALENCE_SDF
     return VALENCE_SD if is_d_block(z) else VALENCE_SP
+
+
+def cas_core_orbitals(z: int) -> int | None:
+    """Inactive orbitals of the full-valence CAS: the frozen core, plus for the f block
+    the outer (n-1)s(n-1)p shells that CC correlates but the CAS keeps doubly occupied."""
+    n = valence_core_orbitals(z)
+    return None if n is None else n + (4 if z in F_BLOCK else 0)
 
 
 # Shells an ECP replaces: ECP28 = [Ar]3d10, ECP60 = [Kr]4d10 4f14 (5s5p stay explicit).
@@ -121,21 +138,34 @@ def full_valence_space(atoms: Sequence[str], charge: int, *,
     inactive, ras2, valence_electrons, d_block = [0, 0, 0, 0], [0, 0, 0, 0], 0, False
     for el in atoms:
         z = _z(el)
-        ncore = valence_core_orbitals(z)
+        ncore = cas_core_orbitals(z)
         core = None if ncore is None else core_irreps_c2v(ncore)
         removed = ecp_core_irreps_c2v((ecp_electrons or {}).get(el, 0))
         if core is None or removed is None:
             return None
         core = tuple(a - b for a, b in zip(core, removed))
-        d_block |= is_d_block(z)
+        d_block |= is_d_block(z) or z in F_BLOCK
         inactive = [a + b for a, b in zip(inactive, core)]
         ras2 = [a + b for a, b in zip(ras2, valence_shells_c2v(z))]
         valence_electrons += z - 2 * ncore
     nact = valence_electrons - charge
     if not 0 < nact < 2 * sum(ras2):
         return None
+    if determinant_count(sum(ras2), nact) > MAX_CAS_DETERMINANTS:
+        return None  # beyond conventional CASSCF; fail closed in the MR layers
     return {"inactive": tuple(inactive), "ras2": tuple(ras2), "active_electrons": nact,
             "rule": "FULL_VALENCE_NS_NP_ND" if d_block else "FULL_VALENCE_NS_NP"}
+
+
+# Low-spin determinant count above which the full-valence CAS is not attempted
+# (f-element molecules: 13 valence orbitals per f atom).
+MAX_CAS_DETERMINANTS = 5.0e7
+
+
+def determinant_count(norb: int, nelec: int) -> float:
+    from math import comb
+    na = (nelec + 1) // 2
+    return float(comb(norb, na) * comb(norb, nelec - na))
 
 
 # ------------------------------------------------------------------ basis + ECP
@@ -202,10 +232,13 @@ def element_route(element: str) -> dict:
     if z <= 36:
         return {"route": ROUTE_ALL_ELECTRON, "reason": "Z<=36", "ecp_electrons": 0}
     if valence_core_orbitals(z) is None:
-        return {"route": None, "reason": "OPEN_F_SHELL_OR_BEYOND_RN", "ecp_electrons": None}
+        return {"route": None, "reason": "BEYOND_LR", "ecp_electrons": None}
     loaded = [load_basis(PP_ROUTE_SERIES.format(x=CARDINAL_LETTER[x]), element) for x in PP_ROUTE_CARDINALS]
     if any(b is None or b.ecp is None for b in loaded):
-        return {"route": None, "reason": f"NO_{PP_ROUTE_SERIES.format(x='X')}_SERIES", "ecp_electrons": None}
+        x2c = [load_basis(X2C_ROUTE_SERIES.format(x=CARDINAL_LETTER[x]), element) for x in X2C_ROUTE_CARDINALS]
+        if all(b is not None and b.ecp is None for b in x2c):
+            return {"route": ROUTE_X2C, "reason": "NO_PP_SERIES_X2C_SERIES_AVAILABLE", "ecp_electrons": 0}
+        return {"route": None, "reason": "NO_PP_OR_X2C_SERIES", "ecp_electrons": None}
     nelec = {b.ecp_electrons for b in loaded}
     if len(nelec) != 1 or frozen_orbitals(element, loaded[0].ecp_electrons) is None:
         return {"route": None, "reason": "INCONSISTENT_ECP_CORE", "ecp_electrons": None}
@@ -231,14 +264,42 @@ def molecule_basis(atoms: Sequence[str], name_by_element: dict[str, str]) -> dic
 
 # ------------------------------------------------------------ basis names + PySCF
 
+_DEF2_CARDINAL = {"def2-svpd": "D", "def2-tzvppd": "T", "def2-qzvppd": "Q",
+                  "def2-svp": "D", "def2-tzvpp": "T", "def2-qzvpp": "Q"}
+
+
+def _x2c_member(element: str, family: str) -> str:
+    """X2C-route member of a family name: aug-cc-pVQZ -> aug-cc-pVQZ-X2C (or the
+    even-tempered e-aug-cc-pVQZ-X2C where BSE has no aug- set), def2-XZVPPD -> the
+    augmented X2C set of the same cardinal."""
+    low = family.lower()
+    if low.endswith(("-x2c", "-dk3")):
+        return family
+    if low in _DEF2_CARDINAL:
+        family = f"aug-cc-pV{_DEF2_CARDINAL[low]}Z"
+        low = family.lower()
+    prefix = ""
+    if low.startswith("d-"):
+        prefix, family, low = "d-", family[2:], low[2:]
+    if not low.startswith(("aug-cc-p", "cc-p")):
+        return prefix + family
+    name = family + "-X2C"
+    if low.startswith("aug-") and load_basis(name, element) is None:
+        name = "e-" + name  # even-tempered augmentation of cc-pVXZ-X2C
+    return prefix + name
+
+
 def basis_name_for(element: str, family: str) -> str:
-    """Element-specific member of a correlation-consistent family.
+    """Element-specific member of a basis family name.
 
     PP elements take the -PP variant of an aug-/cc- family name (aug-cc-pVQZ ->
-    aug-cc-pVQZ-PP, aug-cc-pwCVTZ -> aug-cc-pwCVTZ-PP); def2 and other names are
-    returned unchanged (def2 carries its own ECPs).
+    aug-cc-pVQZ-PP); def2 keeps its own ECPs.  X2C-route elements take the
+    X2C-contracted all-electron member (``_x2c_member``).  Light elements: unchanged.
     """
-    if element_route(element)["route"] != ROUTE_PSEUDOPOTENTIAL:
+    route = element_route(element)["route"]
+    if route == ROUTE_X2C:
+        return _x2c_member(element, family)
+    if route != ROUTE_PSEUDOPOTENTIAL:
         return family
     low = family.lower()
     if low.startswith(("aug-cc-p", "cc-p", "d-aug-cc-p")) and not low.endswith("-pp"):
@@ -251,14 +312,18 @@ def resolve_named_basis(name: str, element: str) -> LoadedBasis | None:
     """``load_basis`` plus the d-aug construction (one more even-tempered diffuse
     primitive per angular momentum) for a ``d-`` name that no library has."""
     loaded = load_basis(name, element)
-    if loaded is not None or not name.lower().startswith("d-"):
+    low = name.lower()
+    if loaded is not None or not low.startswith(("d-", "e-aug-")):
         return loaded
-    base = load_basis(name[2:], element)
+    # d-NAME: NAME plus one even-tempered diffuse primitive per l; e-aug-cc-X: the
+    # same extension of cc-X (no published aug- set for the element).
+    base = resolve_named_basis(name[2:] if low.startswith("d-") else name[len("e-aug-"):], element)
     if base is None:
         return None
     from .cbs_stage import _even_tempered_extra_diffuse
+    tag = "d-" if low.startswith("d-") else "e-aug-"
     return LoadedBasis(_even_tempered_extra_diffuse(base.shells), base.ecp, base.ecp_electrons,
-                       f"d-{base.provenance}(EVEN_TEMPERED_CONSTRUCTED)")
+                       f"{tag}{base.provenance}(EVEN_TEMPERED_CONSTRUCTED)")
 
 
 def mole_basis_kwargs(atoms: Sequence[str], basis: Any) -> dict:
@@ -280,6 +345,8 @@ def mole_basis_kwargs(atoms: Sequence[str], basis: Any) -> dict:
         spec = per_element.get(el)
         if not isinstance(spec, str):
             raise ValueError(f"heavy element {el} needs a named basis to attach its ECP, got {type(spec).__name__}")
+        if element_route(el)["route"] == ROUTE_X2C:
+            spec = _x2c_member(el, spec)  # generic stage names (def2-TZVPPD, aug-cc-pVQZ) -> X2C set
         loaded = resolve_named_basis(spec, el)
         if loaded is None:
             raise ValueError(f"basis {spec!r} not available for {el}")
@@ -305,7 +372,18 @@ def implicit_core_orbitals(mol: Any) -> int:
             route = element_route(el)
             if route["route"] == ROUTE_PSEUDOPOTENTIAL:
                 n += route["ecp_electrons"] // 2
+            elif route["route"] == ROUTE_X2C:
+                n += deep_core_orbitals(z)
     return n
+
+
+def deep_core_orbitals(z: int) -> int:
+    """X2C-route atoms: the shells a small-core ECP would replace, never correlated
+    (all-electron members correlate the outer core above them): Rb, Sr [Ar]3d10;
+    Cs, Ba [Kr]4d10; lanthanides [Ar]3d10; actinides [Kr]4d10 4f14."""
+    if z in F_BLOCK:
+        return 14 if z <= 71 else 30
+    return 14 if z <= 38 else 23
 
 
 def named_series(element: str, cardinals: Sequence[int], family: str) -> dict[int, tuple[str, str]] | None:
@@ -317,7 +395,7 @@ def named_series(element: str, cardinals: Sequence[int], family: str) -> dict[in
     out = {}
     for x in cardinals:
         name = family.format(x=CARDINAL_LETTER[x], n=x)
-        loaded = load_basis(name, element)
+        loaded = resolve_named_basis(name, element)
         if loaded is None or (family.lower().endswith("-pp") and loaded.ecp is None):
             return None
         if loaded.ecp is not None and loaded.ecp_electrons != element_route(element)["ecp_electrons"]:
@@ -336,3 +414,40 @@ def pyscf_valence_space(atoms: Sequence[str], charge: int, basis: str) -> dict |
                 return None
             ecp[el] = loaded.ecp_electrons
     return full_valence_space(atoms, charge, ecp_electrons=ecp)
+
+
+# ------------------------------------------------------------------ Hamiltonian
+
+def requires_x2c(atoms: Sequence[str]) -> bool:
+    """True when an X2C-route element is present: the whole molecule then uses sfX2C."""
+    return any(_z(el) > 36 and element_route(el)["route"] == ROUTE_X2C for el in dict.fromkeys(atoms))
+
+
+MODEL_HAMILTONIAN_ENV = "OPENEA_MODEL_HAMILTONIAN"
+
+
+def set_model_hamiltonian(atoms: Sequence[str]) -> str:
+    """Fix the run's Hamiltonian from the molecule (inherited by point-pool workers).
+
+    Fragments must use the molecule's Hamiltonian: an O atom computed
+    nonrelativistically next to an sfX2C LaO would shift the asymptote by O's
+    relativistic energy (~1 eV).
+    """
+    import os
+    value = "SFX2C1E" if requires_x2c(atoms) else "NONE"
+    os.environ[MODEL_HAMILTONIAN_ENV] = value
+    return value
+
+
+def apply_hamiltonian(mf: Any) -> Any:
+    """``mf`` with the chain's Hamiltonian: spin-free X2C when the run's molecule
+    contains an X2C-route element (``set_model_hamiltonian``) or this system does
+    (idempotent); unchanged otherwise."""
+    import os
+    mol = mf.mol
+    if hasattr(mf, "with_x2c"):
+        return mf
+    if os.environ.get(MODEL_HAMILTONIAN_ENV) == "SFX2C1E" or requires_x2c(
+            [mol.atom_pure_symbol(i) for i in range(mol.natm)]):
+        return mf.sfx2c1e()
+    return mf

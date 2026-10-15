@@ -2169,6 +2169,8 @@ def _run_symmetry_auto(args) -> int:
         _write_json(args.output / f"{atom_a}{atom_b}" / "final_verdict.json", verdict)
         print("[SYMMETRY AUTO] " + json.dumps(verdict), flush=True)
         return 2
+    from .heavy_elements import set_model_hamiltonian
+    print(f"[SYMMETRY AUTO] model Hamiltonian {set_model_hamiltonian((atom_a, atom_b))}", flush=True)
     from .compute_threads import set_compute_threads
     from .point_pool import configure_point_pool
     set_compute_threads(args.threads)

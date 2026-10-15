@@ -25,7 +25,7 @@ def test_core_irreps_match_the_existing_light_element_table():
 
 
 @pytest.mark.parametrize("z, n", [(1, 0), (8, 1), (17, 5), (22, 9), (35, 14), (39, 18), (47, 18),
-                                  (53, 23), (55, 27), (79, 34), (83, 39), (57, None), (92, None)])
+                                  (53, 23), (55, 27), (79, 34), (83, 39), (57, 23), (88, 43), (92, 39), (104, None)])
 def test_valence_frozen_core(z, n):
     assert valence_core_orbitals(z) == n
 
@@ -44,7 +44,9 @@ def test_full_valence_space_heavy():
     assert agO["inactive"] == (10, 4, 4, 1) and agO["ras2"] == (5, 2, 2, 1)
     assert agO["active_electrons"] == 11 + 6 + 1 and agO["rule"] == "FULL_VALENCE_NS_NP_ND"
     assert full_valence_space(("I", "O"), 0)["ras2"] == (4, 2, 2, 0)
-    assert full_valence_space(("La", "O"), 0) is None
+    la_o = full_valence_space(("La", "O"), 0)  # 6s 5d 4f, [Xe] inactive
+    assert la_o["inactive"] == (14, 6, 6, 2) and la_o["ras2"] == (7, 4, 4, 2) and la_o["active_electrons"] == 9
+    assert full_valence_space(("Gd", "O"), 0) is None  # beyond MAX_CAS_DETERMINANTS
 
 
 def test_routes():
@@ -53,8 +55,8 @@ def test_routes():
         r = element_route(el)
         assert r["route"] == ROUTE_PSEUDOPOTENTIAL and r["ecp_electrons"] == nelec
         assert frozen_orbitals(el, nelec) == frozen
-    assert element_route("Cs")["route"] is None     # no aug-cc-pVXZ-PP series
-    assert element_route("Ce")["reason"] == "OPEN_F_SHELL_OR_BEYOND_RN"
+    for el in ("Rb", "Cs", "Ba", "La", "Ce", "Gd", "Lu", "Th", "U", "Lr"):
+        assert element_route(el)["route"] == "ALL_ELECTRON_X2C"
 
 
 def test_ecp_basis_never_loses_its_ecp():
@@ -118,6 +120,63 @@ def test_closed_d_shell_promotion():
 def test_unsupported_element_fails_before_computing(tmp_path):
     import json
     from openea_benchmark.workflow import main
-    assert main(["--mode", "symmetry-auto", "--atoms", "Ce", "O", "--output", str(tmp_path)]) == 2
-    verdict = json.loads((tmp_path / "CeO" / "final_verdict.json").read_text())
+    assert main(["--mode", "symmetry-auto", "--atoms", "Rf", "O", "--output", str(tmp_path)]) == 2
+    verdict = json.loads((tmp_path / "RfO" / "final_verdict.json").read_text())
     assert verdict["final_verdict"] == "ELEMENT_NOT_SUPPORTED"
+
+
+def test_x2c_route_basis_names():
+    from openea_benchmark.heavy_elements import basis_name_for
+    assert basis_name_for("Cs", "def2-TZVPPD") == "aug-cc-pVTZ-X2C"
+    assert basis_name_for("La", "def2-QZVPPD") == "e-aug-cc-pVQZ-X2C"   # no published aug- set
+    assert basis_name_for("La", "d-aug-cc-pVQZ") == "d-e-aug-cc-pVQZ-X2C"
+    assert basis_name_for("U", "cc-pvdz") == "cc-pvdz-X2C"
+
+
+def test_x2c_route_molecule_and_hamiltonian(monkeypatch):
+    from pyscf import gto, scf
+    from openea_benchmark.heavy_elements import (MODEL_HAMILTONIAN_ENV, apply_hamiltonian, implicit_core_orbitals,
+                                                 mole_basis_kwargs, set_model_hamiltonian)
+    monkeypatch.delenv(MODEL_HAMILTONIAN_ENV, raising=False)
+    kw = mole_basis_kwargs(("La", "O"), "def2-TZVPPD")
+    assert kw["ecp"] == {}
+    mol = gto.M(atom="La 0 0 0; O 0 0 1.83", **kw, spin=1, verbose=0)
+    assert mol.nelectron == 65 and implicit_core_orbitals(mol) == 14
+    assert hasattr(apply_hamiltonian(scf.ROHF(mol)), "with_x2c")
+    o_atom = gto.M(atom="O 0 0 0", basis="def2-TZVPPD", spin=2, verbose=0)
+    assert not hasattr(apply_hamiltonian(scf.ROHF(o_atom)), "with_x2c")
+    assert set_model_hamiltonian(("La", "O")) == "SFX2C1E"  # fragments follow the molecule
+    assert hasattr(apply_hamiltonian(scf.ROHF(o_atom)), "with_x2c")
+    assert set_model_hamiltonian(("O", "H")) == "NONE"
+    assert not hasattr(apply_hamiltonian(scf.ROHF(o_atom)), "with_x2c")
+
+
+def test_x2c_route_stage_rules():
+    from openea_benchmark.cbs_stage import _has_cardinal, element_basis
+    from openea_benchmark.core_valence_basis import core_orbital_count, cv_element_series
+    assert not _has_cardinal("La", 5) and _has_cardinal("Ag", 5)   # La: T/Q CBS pair
+    assert element_basis("Cs", 4)[0] == "aug-cc-pVQZ-X2C"
+    assert core_orbital_count("La") == 9                            # 4s4p4d outer core
+    assert cv_element_series("Ba", (3, 4))[3][0] == "aug-cc-pwCVTZ-X2C"
+
+
+def test_tq_extrapolation_pair():
+    from openea_benchmark.attachment.component_resolved_cbs import inverse_power_cbs, resolve_cbs
+    pts = []
+    for role, shift in (("neutral", 0.0), ("anion", -0.05)):
+        for basis, x in (("aug-cc-pvtz", 3), ("aug-cc-pvqz", 4)):
+            pts.append({"role": role, "basis": basis, "reusable": True, "scf_energy_hartree": -100.0 + shift,
+                        "ccsd_correlation_hartree": -0.3 * (1 - x ** -3.05), "triples_correction_hartree": -0.01,
+                        "ccsd_t_total_hartree": -100.31 + shift})
+    res = resolve_cbs(points=pts, daug_fixed_ea_ev=1.3606, full_pec_aug5_ea_ev=None,
+                      diffuse_residual_estimate_ev=None, cardinals=(3, 4),
+                      basis_labels=("aug-cc-pvtz", "aug-cc-pvqz"), model_spread_target_ev=0.02)
+    assert abs(res.primary_model.ea_cbs_aug_ev - 0.05 * 27.211386245988) < 1e-9
+    assert "TZ_QZ_COMPONENT_EVIDENCE_COMPLETE" in res.evidence
+
+
+def test_f_block_ground_configurations():
+    from openea_benchmark.state_candidates import atomic_states
+    configs = {el: {s.configuration.split()[-1] if el != "Th" else " ".join(s.configuration.split()[-2:])
+                    for s in atomic_states(el, 0)} for el in ("La", "Th")}
+    assert "5d1" in configs["La"] and "7s2 6d2" in configs["Th"]

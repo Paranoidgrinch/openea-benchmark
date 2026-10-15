@@ -17,7 +17,7 @@ turn a smoke-test threshold into production dissociation evidence.
 """
 from __future__ import annotations
 
-from ..heavy_elements import mole_basis_kwargs
+from ..heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -221,6 +221,7 @@ def _run_atomic_fragment_pyscf(
         mf = scf.RHF(mol)
     else:
         mf = scf.ROHF(mol)
+    mf = apply_hamiltonian(mf)
 
     mf.conv_tol = settings.scf_conv_tol
     mf.conv_tol_grad = settings.scf_conv_tol_grad

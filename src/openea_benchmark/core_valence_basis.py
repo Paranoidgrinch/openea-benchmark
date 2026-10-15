@@ -30,10 +30,14 @@ CV_FAMILIES = ("aug-cc-pwCV{x}Z", "cc-pwCV{x}Z", "aug-cc-pCV{x}Z", "cc-pCV{x}Z")
 def core_orbital_count(element: str) -> int:
     """Frozen-core orbitals the CV layer correlates in addition (beyond an ECP core)."""
     from pyscf import gto
-    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route, frozen_orbitals
+    from .heavy_elements import (ROUTE_PSEUDOPOTENTIAL, ROUTE_X2C, deep_core_orbitals, element_route,
+                                 frozen_orbitals, valence_core_orbitals)
     route = element_route(element)
     if route["route"] == ROUTE_PSEUDOPOTENTIAL:
         return frozen_orbitals(element, route["ecp_electrons"])
+    if route["route"] == ROUTE_X2C:  # outer core between the deep core and the valence frozen core
+        z = gto.charge(element)
+        return valence_core_orbitals(z) - deep_core_orbitals(z)
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
     z = gto.charge(element)
     mol = gto.M(atom=f"{element} 0 0 0", basis="sto-3g", spin=z % 2, verbose=0)
@@ -123,6 +127,11 @@ PP_CV_FAMILY = "aug-cc-pwCV{x}Z-PP"
 PP_SR_PAIR = ("dyall-av{n}z", "aug-cc-pV{x}Z-PP")
 
 
+def _x2c_route(element: str) -> bool:
+    from .heavy_elements import ROUTE_X2C, element_route
+    return element_route(element)["route"] == ROUTE_X2C
+
+
 def _pp_route(element: str) -> bool:
     from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route
     return element_route(element)["route"] == ROUTE_PSEUDOPOTENTIAL
@@ -133,6 +142,10 @@ def cv_element_series(element: str, cardinals: tuple[int, ...]) -> dict[int, tup
     if _pp_route(element):
         from .heavy_elements import named_series
         return named_series(element, cardinals, PP_CV_FAMILY)
+    if _x2c_route(element):
+        from .heavy_elements import basis_name_for, named_series
+        family = basis_name_for(element, "aug-cc-pwCVTZ").replace("TZ", "{x}Z")
+        return named_series(element, cardinals, family)
     if core_orbital_count(element) == 0:
         series = element_series(element, cardinals, ("aug-cc-pV{x}Z",))
         return None if series is None else {x: (spec, prov + " NO_CORE_ELECTRONS")

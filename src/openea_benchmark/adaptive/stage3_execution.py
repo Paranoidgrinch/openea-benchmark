@@ -42,7 +42,7 @@ Scientific invariants
 """
 from __future__ import annotations
 
-from ..heavy_elements import mole_basis_kwargs
+from ..heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -459,6 +459,7 @@ def _broken_symmetry_uhf_probe(
     uhf = scf.UHF(rhf.mol)
     if settings.scalar_relativistic == "SFX2C1E":
         uhf = uhf.sfx2c1e()
+    uhf = apply_hamiltonian(uhf)
     uhf.conv_tol = settings.scf_conv_tol
     uhf.conv_tol_grad = settings.scf_conv_tol_grad
     uhf.max_cycle = settings.scf_max_cycle
@@ -561,6 +562,7 @@ def _run_stage3_point_pyscf(
         # Spin-free one-electron X2C.  PySCF propagates the transformed
         # Hamiltonian into post-SCF methods built from this mean-field object.
         mf = mf.sfx2c1e()
+    mf = apply_hamiltonian(mf)  # X2C-route elements: sfX2C is the model Hamiltonian
 
     high_level_checkpoint: Path | None = None
     if settings.artifact_dir is not None:
