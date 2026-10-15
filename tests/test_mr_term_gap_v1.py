@@ -63,7 +63,7 @@ def test_term_gap_follows_the_lambda_root(tmp_path):
     assert res["gap_e_tz_ev"] == pytest.approx(1.0, abs=1e-3)  # not the 0.5 eV Sigma- root
     assert res["basis_shift_ev"] == pytest.approx(-0.02, abs=1e-6)
     assert abs(res["delta_zpe_ev"]) < 1e-3  # same Morse shape
-    assert res["gap0_half_width_ev"] == pytest.approx(0.02 + 0.15, abs=1e-3)
+    assert res["gap0_half_width_ev"] == pytest.approx(0.02 + 0.10, abs=1e-3)
 
 
 def test_stage_runs_only_open_candidates(tmp_path):
@@ -145,7 +145,7 @@ def test_term_gap_adds_spin_orbit_of_open_shell_states(tmp_path):
     res = term_gap(atoms=("Ti", "O"), charge=0, reference=P, state=T, r_start=1.2, policy=MRTermGapPolicy(),
                    cache_dir=tmp_path, block_fn=blocks, soc_fn=soc)
     assert res["status"] == "COMPLETED" and calls == ["3Delta"]
-    assert res["delta_so_ev"] == -0.012 and res["gap0_half_width_ev"] > 0.15 + 0.004 - 1e-9
+    assert res["delta_so_ev"] == -0.012 and res["gap0_half_width_ev"] > 0.10 + 0.004 - 1e-9
     out = apply_mr_term_gaps(ADIABATIC, {"gaps": [{**gap("anion", "q=-1 3Delta", -0.4, 0.15),
                                                    "spin_orbit": res["spin_orbit"]}]})
     assert out["status"] == "CLEARED"  # SOC included: no longer blocking

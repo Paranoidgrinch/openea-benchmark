@@ -172,3 +172,32 @@ flags the S2 1Delta kink (ZPE fit spread 0.014 eV).
 - Tested and not adopted for the term gap (O2 a1Delta_g, measured Te 0.982 eV):
   MRCI+Q/aug-cc-pVTZ 1.030; DEA-EOMCC(3p-1h)/aug-cc-pVTZ 0.792; with a (4p-2h)
   cc-pVDZ increment 1.067. NEVPT2/QZ gives 0.958; it stays the method.
+
+## Patch 55b — fixes found in the validation reruns
+
+- Block cache v4 replaced "intruder" roots by the median NEVPT2 correction. High
+  roots (2-3 eV up) legitimately carry larger corrections, so the median moved and
+  the physical low roots were replaced: NH a1Delta came out at -1.2 eV. Reverted
+  (v5): the deviation from the lowest root's correction is only recorded.
+- v6: when CASSCF mixes pi_g and pi_u (both b1 in C2v), the D2h orbital labels fail
+  and g/u was unknown (O2 a1Delta_g lost at 1.225 A). The parity of each root now
+  comes from the CI vector under the inversion operator in the active-orbital basis
+  (`root_parity_general`, AO inversion: swap atoms, (-1)^l).
+
+## MR-only adiabatic EA (checked, not adopted)
+
+A fallback EA from SC-NEVPT2 curves alone (full valence, def2-TZVPPD minima,
+def2-QZVPPD, harmonic ZPE; `scripts/openea_mr_ea_validation.py`) against the nine
+measured EAs of the benchmark set: OH 1.483 (1.828), CN 3.509 (3.862), NO -0.217
+(0.026), O2 0.101 (0.448), MgH 0.531 (0.90), SiC 2.154 (2.396), C2 3.005 (3.269),
+AlO 2.170 (2.60), ClO 1.899 (2.276) eV: mean error -0.33, range -0.24 to -0.43 eV.
+Full-valence NEVPT2 misses most of the extra electron's dynamic correlation; the
+same-charge term gaps (errors <= 0.07 eV) do not suffer from this. Strong MR
+character of the SR states therefore stays in the CC hierarchy (CCSDT, CCSDTQ
+increments of the post-CCSD(T) layer, whose size is the uncertainty).
+
+Term-gap validation with cache v6 (ten measured T0): O2 a 0.954 (0.977), O2 b 1.582
+(1.627), NH a 1.491 (1.558), NF a 1.360 (1.418), SO a 0.764 (0.728), S2 a 0.574
+(0.545), NH b 2.643 (2.629), NF b 2.346 (2.341), SO b 1.271 (1.303), S2 b 1.024
+(0.990) eV: mean -0.011, RMS 0.039, max 0.067 eV. The method term is now 0.10 eV
+(1.5 x the largest error), replacing the pilot 0.15 eV.

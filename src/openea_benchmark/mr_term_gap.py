@@ -53,7 +53,8 @@ class MRTermGapPolicy:
     comparison_basis: str = "def2-QZVPPD"
     step_angstrom: float = 0.025
     max_walk_steps: int = 40
-    method_uncertainty_ev: float = 0.15
+    # 1.5 x the largest error of ten measured term energies (RMS 0.039, max 0.067 eV).
+    method_uncertainty_ev: float = 0.10
     zpe_relative_uncertainty: float = 0.25
     max_memory_mb: int = 16000
 

@@ -98,3 +98,22 @@ def test_root_classification_helpers():
     assert root_parity(c, 2, (1, 1), [1, -1]) == -1
     c = np.zeros((2, 2)); c[0, 0] = c[0, 1] = 2 ** -0.5  # mixed -> unassigned
     assert root_parity(c, 2, (1, 1), [1, -1]) is None
+
+
+def test_inversion_parity_from_ci_vector():
+    """g/u of a CI root when the active orbitals themselves mix g and u (Patch 55b)."""
+    import numpy as np
+    from pyscf import gto
+    from openea_benchmark.mr_competitors import inversion_matrix_active, root_parity_general
+    mol = gto.M(atom="H 0 0 0; H 0 0 0.74", basis="sto-3g", verbose=0)
+    s = mol.intor("int1e_ovlp")
+    g = np.array([1.0, 1.0]) / np.sqrt(2 + 2 * s[0, 1])
+    u = np.array([1.0, -1.0]) / np.sqrt(2 - 2 * s[0, 1])
+    mixed = np.column_stack([g + u, g - u]) / np.sqrt(2)  # localized: neither g nor u
+    inv = inversion_matrix_active(mol, mixed)
+    # sigma_g^2 in the localized basis: (|aa> + |bb> + |ab> + |ba>)/2 is gerade
+    ci_g = np.array([[0.5, 0.5], [0.5, 0.5]])
+    assert root_parity_general(ci_g, 2, (1, 1), inv) == 1
+    # open-shell 1Sigma_u+ (sigma_g sigma_u singlet) = (|aa> - |bb>)/sqrt2 is ungerade
+    ci_u = np.array([[1.0, 0.0], [0.0, -1.0]]) / np.sqrt(2)
+    assert root_parity_general(ci_u, 2, (1, 1), inv) == -1

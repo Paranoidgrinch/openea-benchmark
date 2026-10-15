@@ -45,8 +45,10 @@ from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
 from .spin_orbit_stage import D2H_TO_C2V, full_valence_space
 
 # Version of the per-root Lambda / g-u classification; older block caches are recomputed.
-# 3: high-spin ROHF start orbitals tried as well; 4: borrowed CASSCF orbitals, NEVPT2 intruder check
-ROOT_CLASSIFICATION = 4
+# 3: high-spin ROHF start orbitals tried as well; 4: borrowed CASSCF orbitals + median
+# intruder replacement (wrong, NH 1Delta); 5: borrowed orbitals, deviation recorded only;
+# 6: g/u from the CI vector when active orbitals mix g and u
+ROOT_CLASSIFICATION = 6
 LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
 
@@ -64,8 +66,6 @@ class MRCompetitorPolicy:
     # CASCI roots classified by Lambda (0 = no classification, old behaviour).
     classify_roots: int = 6
     lambda_tolerance: float = 0.25
-    # A root whose NEVPT2 correction differs from the block median by more is an intruder.
-    max_nevpt2_deviation_hartree: float = 0.1
     max_memory_mb: int = 16000
 
 
@@ -94,6 +94,36 @@ def active_orbital_parities(atoms, r, basis, mo_active) -> list[int] | None:
     except ValueError:
         return None
     return [1 if str(x).endswith("g") else -1 for x in labels]
+
+
+def inversion_matrix_active(mol, mo_active):
+    """<phi_p| i |phi_q> over the active orbitals for a homonuclear diatomic.
+
+    Inversion through the bond midpoint swaps the two atoms and multiplies each
+    real spherical AO by (-1)^l; both atoms carry the same basis in the same order."""
+    nao_atom = mol.nao // 2
+    t = np.zeros((mol.nao, mol.nao))
+    for ib in range(mol.nbas):
+        if mol.bas_atom(ib) != 0:
+            continue
+        l = mol.bas_angular(ib)
+        start = mol.ao_loc_nr()[ib]
+        for k in range(mol.ao_loc_nr()[ib + 1] - start):
+            t[start + nao_atom + k, start + k] = t[start + k, start + nao_atom + k] = (-1) ** l
+    s = mol.intor("int1e_ovlp")
+    return mo_active.T @ s @ t @ mo_active
+
+
+def root_parity_general(civec, ncas, nelecas, inversion, tolerance: float = 0.1) -> int | None:
+    """<inversion> of a CI root for active orbitals of mixed g/u character (Patch 55b):
+    CASSCF in C2v may mix pi_g and pi_u (both b1), so orbital labels fail
+    (O2 1Delta_g at 1.225 A), while the many-electron state keeps its parity."""
+    from pyscf.fci import addons
+    c = np.asarray(civec)
+    na, nb = nelecas if isinstance(nelecas, (tuple, list)) else ((nelecas + 1) // 2, nelecas // 2)
+    ci_inv = addons.transform_ci(c, (na, nb), inversion)
+    val = float(np.dot(c.ravel(), np.asarray(ci_inv).ravel()) / np.dot(c.ravel(), c.ravel()))
+    return 1 if val > 1 - tolerance else (-1 if val < -1 + tolerance else None)
 
 
 def root_parity(civec, ncas, nelecas, orbital_parity, tolerance: float = 0.1) -> int | None:
@@ -286,23 +316,25 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
         civecs = [np.array(v) for v in (ci.ci if len(e_casci) > 1 else [ci.ci])]
         mo_ci = np.array(ci.mo_coeff)
         orb_par = active_orbital_parities(atoms, r, policy.basis, mo_ci[:, ci.ncore:ci.ncore + ncas])
+        inv_act = (inversion_matrix_active(mol, mo_ci[:, ci.ncore:ci.ncore + ncas])
+                   if atoms[0] == atoms[1] and orb_par is None else None)
         roots = []
         for i in range(len(e_casci)):
             lz2 = active_lz2(mol, mo_ci, ci.ncore, ncas, ci.fcisolver, civecs[i], ci.nelecas)
             roots.append({"casci_index": i, "lz2": lz2, "lambda": root_lambda(lz2, policy.lambda_tolerance, irrep),
-                          "parity": None if orb_par is None else root_parity(civecs[i], ncas, ci.nelecas, orb_par)})
+                          "parity": None if atoms[0] != atoms[1] else (
+                              root_parity(civecs[i], ncas, ci.nelecas, orb_par) if orb_par is not None
+                              else root_parity_general(civecs[i], ncas, ci.nelecas, inv_act))})
         for i, root in enumerate(roots):
             root["e_casci_hartree"] = float(e_casci[i])
             root["nevpt2_hartree"] = float(mrpt.NEVPT(ci, root=i).kernel())
-        # Intruder check: valence NEVPT2 corrections of states in one block differ by
-        # tenths of an eV, not by Hartrees (NH high roots: -1.7 vs -0.16 Eh).  An outlier
-        # root keeps its CASCI energy plus the median correction, and is flagged.
-        corr = np.array([x["nevpt2_hartree"] for x in roots])
-        med = float(np.median(corr))
+        # Diagnostic only: roots whose NEVPT2 correction deviates strongly from the
+        # lowest root's.  Not corrected - high roots legitimately carry larger
+        # corrections, and replacing them by a median corrupted NH 1Delta (cache v4).
+        c0 = roots[int(np.argmin([x["e_casci_hartree"] for x in roots]))]["nevpt2_hartree"]
         for root in roots:
-            root["nevpt2_intruder"] = abs(root["nevpt2_hartree"] - med) > policy.max_nevpt2_deviation_hartree
-            root["e_hartree"] = root["e_casci_hartree"] + (med if root["nevpt2_intruder"] else root["nevpt2_hartree"])
-        record["nevpt2_intruder_roots"] = sum(x["nevpt2_intruder"] for x in roots)
+            root["e_hartree"] = root["e_casci_hartree"] + root["nevpt2_hartree"]
+            root["nevpt2_deviation_hartree"] = root["nevpt2_hartree"] - c0
         roots.sort(key=lambda x: x["e_hartree"])
         record.update(status="COMPLETED", energies_hartree=[x["e_hartree"] for x in roots], roots=roots,
                       root_classification=ROOT_CLASSIFICATION)
