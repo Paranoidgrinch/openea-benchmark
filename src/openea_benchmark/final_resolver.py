@@ -16,7 +16,9 @@ Requirements for ``EA`` (each missing item is one blocking reason):
    bound, interval entirely above zero);
 4. core-valence, scalar-relativity, spin-orbit and post-CCSD(T) corrections all
    included (a first-order-zero spin-orbit result counts as included);
-5. MR-only competitor states excluded (or none listed).
+5. MR-only competitor states excluded (or none listed), or every one that the
+   lower bound could not exclude computed by the term-gap route (Patch 54); the
+   adiabatic EA then already takes the lower of SR and MR state per charge.
 
 Multireference screening values above the usual thresholds are reported as a
 warning, not a blocker: the MR layer decides state questions, and the post-CCSD(T)
@@ -37,7 +39,8 @@ CORRECTION_FLAGS = (("includes_core_valence", "core_valence_status", "core-valen
 def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mapping[str, Any] | None,
                           adiabatic: Mapping[str, Any] | None,
                           mr_competitors: Mapping[str, Any] | None,
-                          mr_only_labels: list[str] | tuple[str, ...] = ()) -> dict:
+                          mr_only_labels: list[str] | tuple[str, ...] = (),
+                          mr_term_gap: Mapping[str, Any] | None = None) -> dict:
     blocking: list[str] = []
     warnings: list[str] = []
 
@@ -50,8 +53,10 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
 
     if mr_only_labels:
         status = None if not mr_competitors else mr_competitors.get("status")
-        if status != "CLEARED":
-            blocking.append(f"MR-only competitor states: {status or 'NOT_COMPUTED'}")
+        gap_status = None if not mr_term_gap else mr_term_gap.get("status")
+        if status != "CLEARED" and gap_status != "CLEARED":
+            blocking.append(f"MR-only competitor states: {status or 'NOT_COMPUTED'}"
+                            + (f", term gap {gap_status}" if gap_status else ""))
 
     if cbs and cbs.get("multireference_exceeded"):
         warnings.append("multireference screening above thresholds: " + ", ".join(cbs["multireference_exceeded"]))

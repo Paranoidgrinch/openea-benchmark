@@ -105,3 +105,50 @@ included; if none of the computed roots qualifies, the highest computed root. Ca
 C2 (def2-TZVPPD): 3B1 roots a3Pi_u, d3Pi_g (2.4 eV), first possible 3Phi root 5.9 eV
 above X -> excluded. C2 cc-pVDZ checks: X1Sigma_g+ (A1: Lambda 0, g), B1Delta_g (A1 and A2:
 Lambda 2, g), C2- A2Pi_u (B1: Lambda 1, u).
+
+## Redesign step 5 — MR term-gap route for MR-only states (Patch 54)
+
+Until now an MR-only candidate (1Delta, 1Sigma-, open-shell singlets, ...) that the lower
+bound of step 4 could not exclude kept the run UNRESOLVED. Such a state can be the ground
+state of the neutral or the anion (likely for transition-metal diatomics), so the
+workflow must compute it. `mr_term_gap.py`:
+
+- gap0 = E0(MR state) - E0(selected SR state of the same charge), both followed as *the*
+  root of their Lambda (and g/u) in their own (spin, C2v) block
+  (`mr_competitors.block_energies`), never as the lowest root of a block;
+- each minimum: downhill walk on a 0.025 A grid from the competitor window, quartic
+  through five points; Delta ZPE harmonic at the two minima;
+- basis: gap at the TZ minima recomputed in def2-QZVPPD (central value; difference =
+  basis term); method term `method_uncertainty_ev` (pilot, see validation below);
+- E0(MR state) = E0(SR state, CCSD(T)/CBS + all corrections) + gap0. Per charge the
+  ground-state offset min(0, gap0) has the interval [min(0, lo), min(0, hi)], so an
+  overlapping gap widens the EA instead of forcing a choice;
+- corrections computed for the SR state (CV, SR, post-CCSD(T)) are transferred with
+  their full size as extra uncertainty when an MR state can be the ground state; an MR
+  state with S > 0 and Lambda > 0 that can be the ground state blocks (first-order
+  spin-orbit not computed);
+- final resolver: an open MR competitor block no longer blocks when the term-gap stage is
+  CLEARED. Only main-group atoms: `full_valence_space` has no d shells yet.
+
+Orbital start (block cache version 3, also for the competitor bounds): NH 1Delta landed at
+two R on a CASSCF solution with split pi orbitals (<Lz^2> 3.955 instead of 4, NEVPT2
+10 mEh too high, a kink in the curve). Each block now also starts from the ROHF two spins
+higher; among converged solutions, one whose lowest root has pure Lambda
+(|sqrt(<Lz^2>) - Lambda| < 0.005) wins, then the lower CASCI root.
+
+Validation (`scripts/openea_mr_term_gap_validation.py`, runs/mr_term_gap_validation;
+measured T0 after Huber & Herzberg, used only for this comparison; start R = sum of
+covalent radii):
+
+| state | gap0 (eV) | measured T0 | error | half-width |
+|---|---|---|---|---|
+| O2 a1Delta_g | 0.953 | 0.977 | -0.024 | 0.159 |
+| O2 b1Sigma_g+ | 1.582 | 1.627 | -0.045 | 0.162 |
+| NH a1Delta | 1.491 | 1.558 | -0.067 | 0.181 |
+| NF a1Delta | 1.360 | 1.418 | -0.058 | 0.194 |
+| SO a1Delta | 0.765 | 0.728 | +0.037 | 0.171 |
+| S2 a1Delta_g | 0.574 | 0.545 | +0.029 | 0.180 |
+
+Largest error 0.067 eV, below the pilot method term of 0.15 eV; every measured value lies
+inside its interval. Basis shifts TZ -> QZ: -0.007 to -0.043 eV. The seven-point check
+flags the S2 1Delta kink (ZPE fit spread 0.014 eV).

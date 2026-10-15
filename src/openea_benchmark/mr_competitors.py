@@ -45,7 +45,7 @@ from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
 from .spin_orbit_stage import D2H_TO_C2V, full_valence_space
 
 # Version of the per-root Lambda / g-u classification; older block caches are recomputed.
-ROOT_CLASSIFICATION = 2
+ROOT_CLASSIFICATION = 3  # 3: high-spin ROHF start orbitals tried as well
 LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
 
@@ -174,40 +174,82 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
                     spin=spin_2s, unit="Angstrom", symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
         mf = (scf.ROHF(mol) if spin_2s else scf.RHF(mol)).run()
         ncas, nelecas = sum(space["ras2"]), space["active_electrons"]
-        mo = mcscf.sort_mo_by_irrep(mcscf.CASSCF(mf, ncas, nelecas), mf.mo_coeff,
-                                    {k: v for k, v in zip(C2V_IRREPS, space["ras2"]) if v},
-                                    {k: v for k, v in zip(C2V_IRREPS, space["inactive"]) if v})
-        for n_avg in (policy.nroots, policy.nroots + 1, 1):
-            # A stalled two-root average is retried with three roots (a near-degenerate
-            # third state often causes the stall), then with the lowest root alone.
-            # A block may hold fewer states than requested in the active space.
-            mc = mcscf.CASSCF(mf, ncas, nelecas)
-            mc.fcisolver.wfnsym = irrep
-            mc.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
-            if n_avg > 1:
-                mc = mc.state_average_([1.0 / n_avg] * n_avg)
-            mc.max_cycle_macro = 200
+        ras2 = {k: v for k, v in zip(C2V_IRREPS, space["ras2"]) if v}
+        inactive = {k: v for k, v in zip(C2V_IRREPS, space["inactive"]) if v}
+
+        def optimize(mo):
+            for n_avg in (policy.nroots, policy.nroots + 1, 1):
+                # A stalled two-root average is retried with three roots (a near-degenerate
+                # third state often causes the stall), then with the lowest root alone.
+                # A block may hold fewer states than requested in the active space.
+                mc = mcscf.CASSCF(mf, ncas, nelecas)
+                mc.fcisolver.wfnsym = irrep
+                mc.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
+                if n_avg > 1:
+                    mc = mc.state_average_([1.0 / n_avg] * n_avg)
+                mc.max_cycle_macro = 200
+                try:
+                    mc.kernel(mo)
+                except ValueError:  # fewer states in the block than averaged roots
+                    continue
+                if mc.converged:
+                    return mc, n_avg
+            return None, None
+
+        def casci(orbitals):
+            for n_ci in sorted({max(policy.nroots, policy.classify_roots), policy.nroots}, reverse=True):
+                ci = mcscf.CASCI(mf, ncas, nelecas)
+                ci.fcisolver.wfnsym = irrep
+                ci.fcisolver.nroots = n_ci
+                ci.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
+                try:
+                    return ci, np.atleast_1d(ci.kernel(orbitals)[0])
+                except (ValueError, IndexError):  # fewer states in the block than requested roots
+                    continue
+            raise RuntimeError("CASCI found no root in the block")
+
+        # Start orbitals (ORBITAL_GUESS 2): the block's own SCF, and the ROHF two
+        # spins higher.  A closed-shell or low-spin SCF can split degenerate pi
+        # orbitals (NH 1Delta: 0.29 eV too high); the high-spin ROHF occupies
+        # them equally.  The CASSCF solution with the lowest variational CASCI
+        # ground root is kept, so the lower-bound property only improves.
+        guesses = [("block_scf", mf.mo_coeff)]
+        if spin_2s + 2 <= min(nelecas, 2 * ncas - nelecas):  # room for two more unpaired active electrons
             try:
-                mc.kernel(mo)
-            except ValueError:  # fewer states in the block than averaged roots
+                hs = gto.M(atom=mol.atom, basis=policy.basis, charge=charge, spin=spin_2s + 2, unit="Angstrom",
+                           symmetry="C2v", verbose=0, max_memory=policy.max_memory_mb)
+                mf_hs = scf.ROHF(hs).run()
+                if mf_hs.converged:
+                    guesses.append(("high_spin_rohf", mf_hs.mo_coeff))
+            except (RuntimeError, ValueError):
+                pass
+        best, tried = None, []
+        for name, coeff in guesses:
+            try:
+                mo = mcscf.sort_mo_by_irrep(mcscf.CASSCF(mf, ncas, nelecas), coeff, ras2, inactive)
+                mc, n_avg = optimize(mo)
+                orbitals = mo if mc is None else mc.mo_coeff
+                ci, e_casci = casci(orbitals)
+            except Exception:  # noqa: BLE001 - this start fails; the other may not
+                if name == guesses[-1][0] and best is None:
+                    raise
                 continue
-            if mc.converged:
-                break
-        else:
-            mc = None  # orbital optimization diverges: CASCI on the SCF orbitals (weaker evidence)
-        record["averaged_roots"] = None if mc is None else n_avg
+            v0 = np.array(ci.ci[0] if len(e_casci) > 1 else ci.ci)
+            lz2_0 = active_lz2(mol, np.array(ci.mo_coeff), ci.ncore, ncas, ci.fcisolver, v0, ci.nelecas)
+            pure = root_lambda(lz2_0, 0.005, irrep) is not None
+            tried.append({"guess": name, "casscf_converged": mc is not None, "e_casci_hartree": float(e_casci[0]),
+                          "lz2_lowest_root": lz2_0, "pure_lambda": pure})
+            # Converged CASSCF beats CASCI on SCF orbitals; then orbitals of pure Lambda
+            # (eigenstates of a linear molecule; split pi orbitals are an artefact);
+            # then the lower ground root.
+            rank = (mc is None, not pure, float(e_casci[0]))
+            if best is None or rank < best[0]:
+                best = (rank, name, mc, n_avg, ci, e_casci)
+        _, guess_name, mc, n_avg, ci, e_casci = best
+        record["orbital_guess"] = guess_name
+        record["orbital_guesses_tried"] = tried
+        record["averaged_roots"] = n_avg
         record["casci_only"] = mc is None
-        orbitals = mo if mc is None else mc.mo_coeff
-        for n_ci in sorted({max(policy.nroots, policy.classify_roots), policy.nroots}, reverse=True):
-            ci = mcscf.CASCI(mf, ncas, nelecas)
-            ci.fcisolver.wfnsym = irrep
-            ci.fcisolver.nroots = n_ci
-            ci.fix_spin_(ss=0.5 * spin_2s * (0.5 * spin_2s + 1))
-            try:
-                e_casci = np.atleast_1d(ci.kernel(orbitals)[0])
-                break
-            except (ValueError, IndexError):  # fewer states in the block than requested roots
-                continue
         # Classify every root before NEVPT2: it rotates the active orbitals and CI
         # vectors of the CASCI object to a semicanonical, reordered basis.
         civecs = [np.array(v) for v in (ci.ci if len(e_casci) > 1 else [ci.ci])]

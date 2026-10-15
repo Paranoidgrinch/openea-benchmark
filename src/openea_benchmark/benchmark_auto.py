@@ -483,6 +483,14 @@ def run_benchmark_acquisition(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
             mr_only_labels=mr_labels, output_dir=output_dir / "mr_competitors")
 
+    # Patch 54: MR-only candidates the lower bound could not exclude are computed
+    # relative to the SR state of their charge (term gap); the EA uses the lower one.
+    mr_term_gap = None
+    if mr_competitors is not None and mr_competitors.get("status") == "UNRESOLVED_MR_COMPETITOR":
+        from .mr_term_gap import run_mr_term_gap_stage
+        mr_term_gap = run_mr_term_gap_stage(mr_competitors=mr_competitors, output_dir=output_dir / "mr_term_gap",
+                                            competitor_blocks_dir=output_dir / "mr_competitors" / "blocks")
+
     nuclear = adiabatic = None
     if electronic_ea is not None and settings.zpe_stage:
         from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
@@ -492,10 +500,15 @@ def run_benchmark_acquisition(
         adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, core_valence=core_valence,
                                           spin_orbit=spin_orbit, scalar_relativity=scalar_relativity,
                                           post_ccsd_t=post_ccsd_t, output_dir=output_dir)
+        if mr_term_gap is not None and mr_term_gap.get("status") == "CLEARED":
+            from .mr_term_gap import apply_mr_term_gaps
+            adiabatic = apply_mr_term_gaps(adiabatic, mr_term_gap)
+            _save(output_dir / "adiabatic_ea_mr.json", adiabatic)
 
     from .final_resolver import resolve_final_verdict
     final_verdict = resolve_final_verdict(electronic_ea=electronic_ea, cbs=cbs, adiabatic=adiabatic,
-                                          mr_competitors=mr_competitors, mr_only_labels=mr_labels)
+                                          mr_competitors=mr_competitors, mr_only_labels=mr_labels,
+                                          mr_term_gap=mr_term_gap)
     outcome = final_verdict["outcome"]
     state = {
         "system": system, **identity, "outcome": outcome, "final_verdict": final_verdict,
@@ -515,6 +528,10 @@ def run_benchmark_acquisition(
             "status": mr_competitors.get("status"), "reason": mr_competitors.get("reason"),
             "blocks": [{k: b[k] for k in ("charge", "mult", "irrep_c2v", "lower_bound_margin_ev", "status")}
                        for b in mr_competitors.get("blocks", ())]},
+        "mr_term_gap": None if mr_term_gap is None else {
+            "status": mr_term_gap.get("status"),
+            "gaps": [{k: g.get(k) for k in ("charge", "label", "status", "gap0_ev", "gap0_lower_ev",
+                                            "gap0_upper_ev")} for g in mr_term_gap.get("gaps", ())]},
         "charge_groups": open_state,
         "candidate_job_count": len(jobs),
         "stage3_pec_reviews": {key: v["status"] for key, v in pec_reviews.items()},
