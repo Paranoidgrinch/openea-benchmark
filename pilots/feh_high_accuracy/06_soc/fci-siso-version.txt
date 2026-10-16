@@ -1,2 +1,0 @@
-Repository: https://github.com/hczhai/fci-siso
-Commit: e0f103104f45d10881d8a3526e1f654559142141

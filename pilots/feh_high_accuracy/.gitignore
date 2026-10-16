@@ -1,7 +1,0 @@
-*.chk
-*.log
-*.out
-*.h5
-*.hdf5
-__pycache__/
-external/

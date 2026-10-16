@@ -5,35 +5,55 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
 
-# Virtual environments
-.venv/
+# Virtual environments (directory or symlink in worktrees)
+.venv
 venv/
 env/
 
-# Local environment / credentials
+# Local environment / credentials / tool config
 .env
 .env.*
 *.key
 *.pem
-
-# Build / packaging
-build/
-dist/
-.coverage
-htmlcov/
+.claude/
+.mcp.json
+.worktrees/
 
 # External source/build trees
 external/
 
-# Runtime scratch / checkpoints
+# Calculation output, caches and scratch: never in the repository
+runs/
 scratch/
 checkpoints/
+/openea_*/
 *.chk
+*.h5
 *.pkl
+*.npy
+*.npz
 *.tmp
 *.log
+*.out
 nohup.out
+# OpenMolcas work files
+*.JobIph
+*.JobMix
+*.RasOrb
+*.ScfOrb
+*.GssOrb
+xmldump
+
+# Archives and result bundles
+*.zip
+*.tar
+*.tar.gz
+*.tgz
 
 # Local backups
 *.bak
@@ -44,27 +64,3 @@ nohup.out
 .idea/
 .DS_Store
 Thumbs.db
-
-# Local benchmark result bundles
-*_results.tar.gz
-runs/
-
-# --- OpenEA local/runtime artifacts ---
-.venv/
-runs/
-
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
-*_overlay.zip
-oh_frozen_core_cbs.json
-nohup.out
-
-# Experimental external checkout; not part of OpenEA v1
-external/pymbe/
-# --- end OpenEA local/runtime artifacts ---
