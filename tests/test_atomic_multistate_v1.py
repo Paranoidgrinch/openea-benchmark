@@ -24,6 +24,8 @@ def test_roots_follow_the_determinant_configuration():
 def test_trigger_only_for_d_and_f_atoms():
     assert needs_atomic_multistate("La") and needs_atomic_multistate("Ti") and needs_atomic_multistate("Ag")
     assert not needs_atomic_multistate("O") and not needs_atomic_multistate("I")
+    # an empty d shell only in excited configurations does not count
+    assert not any(needs_atomic_multistate(el) for el in ("Ar", "K", "Kr", "Xe", "Rn", "Zn", "Ga"))
 
 
 def test_block_and_rassi_inputs():

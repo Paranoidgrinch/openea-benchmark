@@ -185,9 +185,19 @@ def _atomic_electrons(symbol: str, charge: int) -> int:
 
 
 def needs_atomic_multistate(element: str) -> bool:
-    """d/f atoms (an active d or f subshell): several configurations and 2S compete."""
-    from .atomic_multistate import active_shells
-    return any(l >= 2 for _, l in active_shells(element))
+    """d/f atoms: the aufbau ground configuration of the neutral atom or the anion has an
+    open d or f subshell, so several configurations and 2S compete.  (An empty d shell
+    that only appears in excited configurations, as for Ar-, K or Kr-, does not count.)"""
+    from .state_candidates import atomic_states
+    for charge in (0, -1):
+        for state in atomic_states(element, charge):
+            if state.configuration_kind != "GROUND_AUFBAU":
+                continue
+            for token in state.configuration.split():
+                l, k = "spdf".index(token[1]), int(token[2:])
+                if l >= 2 and 0 < k < 2 * (2 * l + 1):
+                    return True
+    return False
 
 
 def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3ExecutionSettings,
@@ -205,8 +215,11 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
                 fid = f"{element}_q{charge:+d}_2S{spin_2s}"
                 path = cache_dir / f"{fid}__{basis}.json"
                 rec = json.loads(path.read_text()) if path.exists() else None
-                if rec is not None and runner is None and "configuration_candidates" not in rec:
-                    rec = None  # single-guess record from before configuration control (Patch 60)
+                if (rec is not None and runner is None and "configuration_candidates" not in rec
+                        and needs_atomic_multistate(element)):
+                    # single-guess record from before configuration control (Patch 60): only d/f
+                    # atoms have competing configurations a single guess can miss
+                    rec = None
                 if rec is None:
                     result = run_atomic_fragment(
                         AtomicFragmentRequest(fid, element, charge, spin_2s, basis, state_label=None),

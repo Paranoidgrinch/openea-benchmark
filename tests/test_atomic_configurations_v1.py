@@ -1,4 +1,5 @@
 """Configuration control for atomic fragments (Patch 60)."""
+from dataclasses import replace
 import numpy as np
 from pyscf import gto, scf
 
@@ -50,3 +51,31 @@ def test_configuration_label_and_scan_light_atom():
     assert sols and sols[0]["label"] == "p2"
     res = run_atomic_fragment(req, settings=st)
     assert res.status.value == "COMPLETED" and res.configuration_label == "p2" and res.configuration_candidates
+
+
+def test_pre_patch60_fragment_records_stay_valid_for_light_atoms(tmp_path, monkeypatch):
+    import json
+    import openea_benchmark.electronic_ea_stage as stage
+    from openea_benchmark.adaptive.stage3_execution import Stage3ExecutionSettings
+    policy = replace(stage.ElectronicEAStagePolicy(), max_atomic_2s=2, atomic_multistate=False)
+    for element, charges in (("O", (0, -1)), ("Ti", (0, -1))):
+        for q in charges:
+            n = stage._atomic_electrons(element, q)
+            for s in range(n % 2, min(n, 2) + 1, 2):
+                rec = {"fragment_id": f"{element}_q{q:+d}_2S{s}", "status": "COMPLETED", "element": element,
+                       "charge": q, "spin_2s": s, "ccsd_t_total_hartree": -1.0 - s}  # no configuration_candidates
+                (tmp_path / f"{element}_q{q:+d}_2S{s}__b.json").write_text(json.dumps(rec))
+    recomputed = []
+
+    def fake_run(request, settings, runner=None):
+        recomputed.append(request.element)
+        raise RuntimeError("stop")
+    monkeypatch.setattr(stage, "run_atomic_fragment", fake_run)
+    stage.scan_atomic_fragments(atoms=("O", "O"), basis="b", settings=Stage3ExecutionSettings(),
+                                policy=policy, cache_dir=tmp_path)
+    assert recomputed == []                      # light atom: old records reused
+    import pytest
+    with pytest.raises(RuntimeError):
+        stage.scan_atomic_fragments(atoms=("Ti", "Ti"), basis="b", settings=Stage3ExecutionSettings(),
+                                    policy=policy, cache_dir=tmp_path)
+    assert recomputed == ["Ti"]                  # d atom: recomputed with configuration control
