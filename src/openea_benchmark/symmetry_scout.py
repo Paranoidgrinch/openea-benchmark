@@ -30,7 +30,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .point_pool import run_parallel
+from .point_pool import core_slot, run_parallel
 from .state_candidates import candidate_spin_sectors, enumerate_state_candidates
 from .symmetry_states import (
     BlockOccupation, build_symmetric_molecule, enumerate_block_occupations, orbital_table, run_block_scf,
@@ -223,7 +223,8 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
     for charge in charges:
         entry = record["charges"].setdefault(str(charge), {"blocks": {}})
         if "plan" not in entry:
-            plan = plan_blocks(atom_a, atom_b, charge, r0, policy, reference)
+            with core_slot():  # reference DFT per spin sector: one machine-wide core slot
+                plan = plan_blocks(atom_a, atom_b, charge, r0, policy, reference)
             entry["plan"] = {"candidate_labels": plan["candidate_labels"],
                              "mr_only_or_outside_window": plan["mr_only_or_outside_window"],
                              "blocks": [{"label": o.symmetry.label, "two_s": o.symmetry.two_s,

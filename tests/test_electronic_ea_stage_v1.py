@@ -117,3 +117,50 @@ def test_coupled_cluster_failed_candidate_separated_by_reference_gap():
     assert _competition("anion", [low, near], 1.0, 3.0)["status"] == "UNRESOLVED"
     # Without converged references the state still blocks.
     assert _competition("anion", [low, entry("g", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED")], 1.0, 3.0)["status"] == "UNRESOLVED"
+
+
+def test_atomic_fragments_run_inside_a_core_slot(tmp_path, monkeypatch):
+    # Every atomic calculation holds a machine-wide core slot (core and memory budget);
+    # before, fragment CCSD(T) and the scout's reference DFT ran outside it.
+    from contextlib import contextmanager
+    import openea_benchmark.point_pool as pool
+    held = {"now": 0, "calls": []}
+
+    @contextmanager
+    def slot(reserve_mb=None):
+        held["now"] += 1
+        try:
+            yield
+        finally:
+            held["now"] -= 1
+    monkeypatch.setattr(pool, "core_slot", slot)
+    fake = _fake_fragment({("H", 0, 1): -0.5, ("H", -1, 0): -0.52})
+
+    def runner(request, settings):
+        held["calls"].append(held["now"])
+        return fake(request, settings)
+    scan_atomic_fragments(atoms=("H", "H"), basis="sto-3g", settings=Stage3ExecutionSettings(),
+                          policy=ElectronicEAStagePolicy(), cache_dir=tmp_path, runner=runner)
+    assert held["calls"] and all(n == 1 for n in held["calls"])
+
+
+def test_symmetry_scout_reference_dft_runs_inside_a_core_slot(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import openea_benchmark.symmetry_scout as scout
+    held = {"now": 0, "plans": []}
+
+    @contextmanager
+    def slot(reserve_mb=None):
+        held["now"] += 1
+        try:
+            yield
+        finally:
+            held["now"] -= 1
+
+    def plan(*args, **kwargs):
+        held["plans"].append(held["now"])
+        return {"blocks": [], "mr_only_or_outside_window": [], "candidate_labels": []}
+    monkeypatch.setattr(scout, "core_slot", slot)
+    monkeypatch.setattr(scout, "plan_blocks", plan)
+    scout.run_symmetry_scout("H", "H", output_dir=tmp_path)
+    assert held["plans"] == [1, 1]  # one plan per charge, each inside a slot

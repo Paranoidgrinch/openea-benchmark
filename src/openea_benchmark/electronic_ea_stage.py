@@ -221,9 +221,11 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
                     # atoms have competing configurations a single guess can miss
                     rec = None
                 if rec is None:
-                    result = run_atomic_fragment(
-                        AtomicFragmentRequest(fid, element, charge, spin_2s, basis, state_label=None),
-                        settings=settings, runner=runner)
+                    from .point_pool import core_slot
+                    with core_slot():  # every atomic calculation counts against the core/memory budget
+                        result = run_atomic_fragment(
+                            AtomicFragmentRequest(fid, element, charge, spin_2s, basis, state_label=None),
+                            settings=settings, runner=runner)
                     rec = {k: (v.value if hasattr(v, "value") else v) for k, v in asdict(result).items()}
                     _save_json(path, rec)
                 scanned.append(rec)
@@ -233,11 +235,13 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
             multistate = None
             if best is not None and runner is None and policy.atomic_multistate and needs_atomic_multistate(element):
                 from .atomic_multistate import atomic_multistate
-                multistate = atomic_multistate(
-                    element=element, charge=charge,
-                    cc_by_spin={r["spin_2s"]: r["ccsd_t_total_hartree"] for r in completed},
-                    labels={r["spin_2s"]: r.get("configuration_label") for r in completed},
-                    workdir=Path(cache_dir).resolve().parent.parent / "atomic_multistate" / f"{element}{charge:+d}")
+                from .point_pool import core_slot
+                with core_slot():
+                    multistate = atomic_multistate(
+                        element=element, charge=charge,
+                        cc_by_spin={r["spin_2s"]: r["ccsd_t_total_hartree"] for r in completed},
+                        labels={r["spin_2s"]: r.get("configuration_label") for r in completed},
+                        workdir=Path(cache_dir).resolve().parent.parent / "atomic_multistate" / f"{element}{charge:+d}")
             if multistate is not None and multistate.get("status") == "CLEARED":
                 # Lowest spin-free level: another 2S may lie below the CCSD(T) anchor
                 # at XMS-CASPT2; both gaps enter, less the method term (conservative:

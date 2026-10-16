@@ -254,17 +254,20 @@ def run_spin_orbit_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence
         if req is None:
             return done(status="NOT_ATTEMPTED", reason=f"{role}: no request template for {job_id}")
         print(f"[SOC] {req.system} {role} {req.symmetry_label}", flush=True)
+        from .point_pool import core_slot
         from .spin_orbit_multistate import applies, state_multistate_shift
         if applies(req.atoms):  # beyond Kr: multistate SO-XMS-CASPT2 (heavy-element step 2)
             record["stage"] = "SPIN_ORBIT_MULTISTATE"
-            states[role] = state_multistate_shift(
-                atoms=req.atoms, r_angstrom=float(cand["r_central_angstrom"]), charge=req.charge,
-                symmetry_label=req.symmetry_label, workdir=output_dir / role / "multistate")
+            with core_slot():
+                states[role] = state_multistate_shift(
+                    atoms=req.atoms, r_angstrom=float(cand["r_central_angstrom"]), charge=req.charge,
+                    symmetry_label=req.symmetry_label, workdir=output_dir / role / "multistate")
             continue
-        states[role] = state_spin_orbit_shift(
-            atoms=req.atoms, r_angstrom=float(cand["r_central_angstrom"]), charge=req.charge,
-            symmetry_label=req.symmetry_label, irrep_nelec=req.irrep_nelec, workdir=output_dir / role,
-            policy=policy)
+        with core_slot():
+            states[role] = state_spin_orbit_shift(
+                atoms=req.atoms, r_angstrom=float(cand["r_central_angstrom"]), charge=req.charge,
+                symmetry_label=req.symmetry_label, irrep_nelec=req.irrep_nelec, workdir=output_dir / role,
+                policy=policy)
     record["states"] = states
     if any(s.get("delta_so_ev") is None for s in states.values()):
         return done(status="SOC_UNRESOLVED", delta_ea_so_ev=None, bound_ev=None)
