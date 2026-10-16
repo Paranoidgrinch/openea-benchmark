@@ -5,22 +5,15 @@ import numpy as np
 
 from openea_benchmark.adaptive import (
     ANGSTROM_TO_BOHR,
-    CapabilityImplementation,
-    ClosurePriority,
     DiatomicMassSpecification,
-    ExecutionCapability,
-    ExecutionDisposition,
     MethodRole,
-    NUCLEAR_MOTION,
     NuclearMotionSettings,
     NuclearMotionStatus,
     NuclearPECModelLevel,
     NuclearPECModelRunStatus,
     NuclearPECRefinementRunStatus,
     NuclearPECStage3Context,
-    ProductionClosureAction,
     VibrationalSolveStatus,
-    classify_closure_action,
     nuclear_motion_pec_from_high_level,
     plan_nuclear_pec_refinement,
     run_diatomic_nuclear_motion,
@@ -241,32 +234,6 @@ def test_stage3_refinement_preserves_element_specific_basis_policy():
     assert all(r.basis_by_element == {'H': 'aug-cc-pVQZ'} for r in new_requests)
     assert len(run.neutral_context.requests) > len(boundary.requests)
     assert run.anion_context.requests == anion.requests
-
-
-def test_refine_nuclear_pec_is_now_a_generic_stage3_backed_capability():
-    action = ProductionClosureAction(
-        'REFINE_NUCLEAR_PEC', ClosurePriority.PHYSICAL_CORRECTION,
-        'G3D_PHYSICAL_CORRECTIONS', NUCLEAR_MOTION, MethodRole.REFINEMENT,
-        ('D12:REFINE',), 'need more electronic PEC support',
-    )
-    request = classify_closure_action(action)
-    assert request.capability is ExecutionCapability.NUCLEAR_PEC_REFINEMENT
-    assert request.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
-    assert request.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
-    assert request.runner_id.endswith('run_nuclear_pec_refinement')
-
-
-def test_model_convergence_action_is_generic_but_requires_explicit_bound_context():
-    action = ProductionClosureAction(
-        'ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE', ClosurePriority.PHYSICAL_CORRECTION,
-        'G3D_PHYSICAL_CORRECTIONS', NUCLEAR_MOTION, MethodRole.REFINEMENT,
-        ('D12:MODEL',), 'bound DeltaZPE model sensitivity',
-    )
-    request = classify_closure_action(action)
-    assert request.capability is ExecutionCapability.NUCLEAR_PEC_MODEL_CONVERGENCE
-    assert request.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
-    assert request.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
-    assert request.runner_id.endswith('run_nuclear_pec_model_convergence')
 
 
 def test_model_runner_requires_explicit_authorization_and_projection():

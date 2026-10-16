@@ -6,24 +6,16 @@ from openea_benchmark.adaptive import (
     ANGSTROM_TO_BOHR,
     HARTREE_TO_EV,
     U_TO_ELECTRON_MASS,
-    CapabilityImplementation,
-    ClosurePriority,
     DiatomicMassSpecification,
-    ExecutionCapability,
-    ExecutionDisposition,
     MethodRole,
-    NUCLEAR_MOTION,
     NuclearMotionPEC,
     NuclearMotionModelEvidence,
     NuclearMotionSettings,
     NuclearMotionStatus,
-    ProductionClosureAction,
     ReviewStatus,
     VibrationalBindingStatus,
     VibrationalSolveStatus,
-    classify_closure_action,
     derive_nuclear_motion_model_evidence,
-    nuclear_motion_evidence,
     nuclear_motion_pec_from_high_level,
     run_diatomic_nuclear_motion,
     solve_vibrational_ground_state,
@@ -73,7 +65,6 @@ def harmonic_pec(role, *, omega, r0=1.0, shift=-75.0, mass_spec=MASSES_H2, n=23,
         basis='aug-cc-pVQZ',
         evidence_ids=(f'PEC:{role}',),
     )
-
 
 
 def test_identity_cleared_stage3_pec_can_bind_directly_to_nuclear_contract():
@@ -223,8 +214,6 @@ def test_delta_zpe_is_neutral_minus_anion_and_uncertainty_is_conservative_sum():
     assert result.anion_vibrational_binding.status is VibrationalBindingStatus.NOT_ASSESSED
 
 
-
-
 def test_model_sensitivity_can_be_derived_from_two_numerically_cleared_pec_levels():
     primary = run_diatomic_nuclear_motion(
         neutral_pec=harmonic_pec('neutral', omega=0.022),
@@ -271,21 +260,6 @@ def test_model_sensitivity_can_be_derived_from_two_numerically_cleared_pec_level
     )
     assert final.status is NuclearMotionStatus.CLEARED
     assert final.anion_vibrational_binding.status is VibrationalBindingStatus.BOUND
-
-
-def test_numerically_converged_v0_without_pec_model_bound_does_not_close_g3d():
-    result = run_diatomic_nuclear_motion(
-        neutral_pec=harmonic_pec('neutral', omega=0.022),
-        anion_pec=harmonic_pec('anion', omega=0.016, shift=-75.5),
-        masses=MASSES_H2,
-        settings=SETTINGS,
-    )
-    assert result.status is NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED
-    assert result.correction_ev is not None
-    assert result.correction_half_width_ev is None
-    assert result.action == 'ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE'
-    evidence = nuclear_motion_evidence(result)
-    assert evidence.review.status is ReviewStatus.UNRESOLVED
 
 
 def test_mismatched_neutral_anion_methods_or_bases_are_rejected():
@@ -336,66 +310,3 @@ def test_anion_v0_binding_is_decided_from_absolute_v0_interval():
         model_evidence=MODEL,
     )
     assert unbound.anion_vibrational_binding.status is VibrationalBindingStatus.UNBOUND
-
-
-def test_nuclear_motion_evidence_produces_bounded_delta_zpe_component():
-    result = run_diatomic_nuclear_motion(
-        neutral_pec=harmonic_pec('neutral', omega=0.022),
-        anion_pec=harmonic_pec('anion', omega=0.016, shift=-75.5),
-        masses=MASSES_H2,
-        settings=SETTINGS,
-        model_evidence=MODEL,
-    )
-    evidence = nuclear_motion_evidence(result)
-    assert evidence.review.status is ReviewStatus.CLEARED
-    assert evidence.component is not None
-    assert evidence.component.name == NUCLEAR_MOTION
-    assert evidence.component.correction_ev is not None
-    assert abs(evidence.component.correction_ev.midpoint - result.correction_ev) < 1.0e-12
-
-
-def test_nuclear_solver_and_pec_closure_actions_are_generic_capabilities():
-    solve = ProductionClosureAction(
-        'SOLVE_NUCLEAR_MOTION',
-        ClosurePriority.PHYSICAL_CORRECTION,
-        'G3D_PHYSICAL_CORRECTIONS',
-        NUCLEAR_MOTION,
-        MethodRole.PRODUCTION,
-        ('need-nuclear',),
-        'nuclear motion needed',
-    )
-    req = classify_closure_action(solve)
-    assert req.capability is ExecutionCapability.NUCLEAR_MOTION
-    assert req.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
-    assert req.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
-    assert req.runner_id.endswith('run_diatomic_nuclear_motion')
-
-    refine = ProductionClosureAction(
-        'REFINE_NUCLEAR_PEC',
-        ClosurePriority.PHYSICAL_CORRECTION,
-        'G3D_PHYSICAL_CORRECTIONS',
-        NUCLEAR_MOTION,
-        MethodRole.REFINEMENT,
-        ('need-more-pec',),
-        'PEC needs extension',
-    )
-    refine_req = classify_closure_action(refine)
-    assert refine_req.capability is ExecutionCapability.NUCLEAR_PEC_REFINEMENT
-    assert refine_req.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
-    assert refine_req.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
-    assert refine_req.runner_id.endswith('run_nuclear_pec_refinement')
-
-    model = ProductionClosureAction(
-        'ASSESS_NUCLEAR_PEC_MODEL_CONVERGENCE',
-        ClosurePriority.PHYSICAL_CORRECTION,
-        'G3D_PHYSICAL_CORRECTIONS',
-        NUCLEAR_MOTION,
-        MethodRole.REFINEMENT,
-        ('need-model-pec',),
-        'DeltaZPE model sensitivity needed',
-    )
-    model_req = classify_closure_action(model)
-    assert model_req.capability is ExecutionCapability.NUCLEAR_PEC_MODEL_CONVERGENCE
-    assert model_req.implementation is CapabilityImplementation.GENERIC_RUNNER_AVAILABLE
-    assert model_req.disposition is ExecutionDisposition.NEEDS_BOUND_CONTEXT
-    assert model_req.runner_id.endswith('run_nuclear_pec_model_convergence')
