@@ -47,14 +47,14 @@ lanthanides) are the next validation step.
 
 ```mermaid
 flowchart LR
-  A[two atoms] --> B[symmetry scout<br/>candidate states]
-  B --> C[fragment asymptotes]
-  C --> D[CCSD(T) curves<br/>def2-TZVPPD]
-  D --> E[electronic EA<br/>state competition]
-  E --> F[CBS limit<br/>aug-cc-pV Q/5 Z]
-  F --> G[corrections<br/>CV · SR · SO · post-CCSD(T) · MR]
-  G --> H[zero-point<br/>vibration]
-  H --> I[final verdict]
+  A["two atoms"] --> B["symmetry scout<br/>candidate states"]
+  B --> C["fragment asymptotes"]
+  C --> D["CCSD(T) curves<br/>def2-TZVPPD"]
+  D --> E["electronic EA<br/>state competition"]
+  E --> F["CBS limit<br/>aug-cc-pV Q/5 Z"]
+  F --> G["corrections<br/>CV · SR · SO · post-CCSD(T) · MR"]
+  G --> H["zero-point<br/>vibration"]
+  H --> I["final verdict"]
 ```
 
 | # | Layer | What it decides | Module |
