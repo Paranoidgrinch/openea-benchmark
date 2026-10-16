@@ -15,14 +15,11 @@ Run within the established OpenEA `.venv` (PySCF 2.14.0) with reduced HPC
 scheduling priority (`nice -n 19`):
 
 ```bash
-nice -n 19 python -m openea_benchmark.workflow \
-  /srv/storage/homes/analysis/dschmid/photodetachment/openea_diverse_ea_validation_v1/benchmark/wave0_legacy_dft_scout_compat.yaml \
-  --mode benchmark-auto --system OH \
-  --output /srv/storage/homes/analysis/dschmid/photodetachment/openea_diverse_wave0_scout \
-  --resume --threads 4 --max-stage3-points 100
+nice -n 19 python -m openea_benchmark.workflow --atoms O H \
+  --output ../openea_two_atom_v2 --threads 4 --max-stage3-points 100
 ```
 
-`--mode benchmark-auto` performs/reuses the DFT scout, composes Stage-2 state
+The acquisition step (called by `workflow.py` after the symmetry scout) composes Stage-2 state
 selection and the canonical adaptive Stage-3 bridge, and writes complete plan,
 review, and numerical-execution records. It executes all reproducibly linked
 bracketed PEC seeds as **provisional data-acquisition points**, even if the

@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openea-benchmark"
 version = "0.1.0.dev0"
-description = "Open-source adaptive benchmark workflow for high-accuracy diatomic electron affinities"
+description = "Electron affinity of a diatomic molecule from its two atoms, fully automatic (open-source quantum chemistry)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-only"
 dependencies = [
     "numpy==2.5.3",
     "pyscf==2.14.0",
-    "PyYAML>=6.0.2,<7",
 ]
 
 [project.optional-dependencies]

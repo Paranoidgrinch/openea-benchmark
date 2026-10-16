@@ -59,12 +59,8 @@ reference-free OH manifest and directory:
 ```bash
 cd /srv/storage/homes/analysis/dschmid/photodetachment/openea-benchmark
 source .venv/bin/activate
-ROOT=/srv/storage/homes/analysis/dschmid/photodetachment
-MANIFEST="$ROOT/openea_diverse_ea_validation_v1/benchmark/wave0_legacy_dft_scout_compat.yaml"
-nice -n 19 python -m openea_benchmark.workflow "$MANIFEST" \
-    --mode benchmark-auto --system OH \
-    --output "$ROOT/openea_diverse_wave0_scout" \
-    --resume --auto-dry-run --threads 4 --max-stage3-points 0
+nice -n 19 python -m openea_benchmark.workflow --atoms O H \
+    --output ../openea_two_atom_v2 --auto-dry-run --threads 4 --max-stage3-points 0
 ```
 
 This command reads cached Stage-3 point records, recomputes **only** identity,
