@@ -48,9 +48,9 @@ def fixture(tmp_path, open_highspin=True):
     return summary, manifest
 
 
-def test_cli_exposes_one_command_mode():
-    args = build_parser().parse_args(["m.yaml", "--mode", "benchmark-auto", "--system", "HX"])
-    assert args.mode == "benchmark-auto"
+def test_cli_defaults_to_symmetry_auto():
+    args = build_parser().parse_args(["--atoms", "H", "F"])
+    assert args.mode == "symmetry-auto"
     assert args.max_stage3_points == 100
 
 
@@ -138,23 +138,6 @@ def test_rejects_unblinded_summary(tmp_path):
     summary["validation_metadata_used_in_computation"] = True
     with pytest.raises(ValueError, match="validation isolation"):
         run_benchmark_acquisition(summary=summary, manifest=manifest, output_dir=tmp_path / "output")
-
-
-def test_cli_uses_previous_scout_and_writes_plan(monkeypatch, tmp_path):
-    import openea_benchmark.workflow as workflow
-    summary, manifest = fixture(tmp_path)
-    manifest["benchmark"] = {"name": "test_benchmark"}
-    root = tmp_path / "run"
-    (root / "HX").mkdir(parents=True)
-    (root / "HX" / "summary.json").write_text(json.dumps(summary))
-    monkeypatch.setattr(workflow, "load_manifest", lambda _path: manifest)
-    monkeypatch.setattr(workflow, "run_system_dft_scout", lambda **kwargs: pytest.fail("Unexpected DFT rescout"))
-    rc = workflow.main(["dummy.yaml", "--mode", "benchmark-auto", "--system", "HX",
-                        "--output", str(root), "--auto-dry-run"])
-    assert rc == 0
-    state = json.loads((root / "HX" / "benchmark_auto" / "auto_state.json").read_text())
-    assert state["point_request_count"] == 6
-    assert state["outcome"] == "UNRESOLVED"
 
 
 def test_source_checkpoint_change_invalidates_point_cache(tmp_path):

@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 from math import isfinite
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Sequence
 
 from .stage3_execution import (
     PointExecutionStatus,

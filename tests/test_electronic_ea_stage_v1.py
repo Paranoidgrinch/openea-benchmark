@@ -71,7 +71,7 @@ def test_atomic_scan_picks_lowest_spin_and_builds_channels(tmp_path):
 
 
 def test_cli_runs_electronic_ea_by_default():
-    args = build_parser().parse_args(["m.yaml", "--mode", "benchmark-auto"])
+    args = build_parser().parse_args(["--atoms", "H", "F"])
     assert args.no_electronic_ea is False
 
 

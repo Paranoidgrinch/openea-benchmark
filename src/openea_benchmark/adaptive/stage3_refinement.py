@@ -24,8 +24,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 from math import isfinite
-from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from .stage3_execution import Stage3ExecutionRequest, Stage3PointResult
 from .stage3_naming import refinement_request_id

@@ -46,8 +46,9 @@ from openea_benchmark.state_identity import (
 )
 
 from .stage3_axial_symmetry import (
-    AxialSymmetryEvidence, AxialSymmetryPolicy,
-    compare_initializations_under_axial_symmetry, axial_subspace_alignment,
+    AxialSymmetryPolicy,
+    compare_initializations_under_axial_symmetry,
+    axial_subspace_alignment,
 )
 
 from .stage3_execution import (

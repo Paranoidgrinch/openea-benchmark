@@ -18,7 +18,6 @@ from math import isfinite
 from typing import Any
 
 from .model import DiagnosticID, DiagnosticRecord, Interval, Review, ReviewStatus
-from .repository_bridge import state_completeness_gate
 
 
 @dataclass(frozen=True)
@@ -439,14 +438,3 @@ def bridge_state_selection_report(
     )
 
 
-def g1_from_state_selection_bridge(
-    *,
-    state_search_review: Review,
-    bridge: StateSelectionBridgeResult,
-) -> Review:
-    """Compose G1 using the existing fail-closed three-part G1 policy."""
-    return state_completeness_gate(
-        state_search_review=state_search_review,
-        state_competition_review=bridge.state_competition.review,
-        pec_asymptote_review=bridge.pec_asymptotes.review,
-    )

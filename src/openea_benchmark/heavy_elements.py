@@ -245,23 +245,6 @@ def element_route(element: str) -> dict:
     return {"route": ROUTE_PSEUDOPOTENTIAL, "reason": "PP_SERIES_AVAILABLE", "ecp_electrons": nelec.pop()}
 
 
-def molecule_basis(atoms: Sequence[str], name_by_element: dict[str, str]) -> dict | None:
-    """PySCF ``basis``/``ecp`` keyword arguments for the named basis per element.
-
-    None if a basis is missing or a heavy element's basis has no ECP (fail closed).
-    """
-    basis, ecp, provenance = {}, {}, {}
-    for el in dict.fromkeys(atoms):
-        loaded = load_basis(name_by_element[el], el)
-        if loaded is None or (_z(el) > 36 and loaded.ecp is None):
-            return None
-        basis[el] = loaded.shells
-        provenance[el] = loaded.provenance
-        if loaded.ecp is not None:
-            ecp[el] = loaded.ecp
-    return {"basis": basis, "ecp": ecp, "provenance": provenance}
-
-
 # ------------------------------------------------------------ basis names + PySCF
 
 _DEF2_CARDINAL = {"def2-svpd": "D", "def2-tzvppd": "T", "def2-qzvppd": "Q",

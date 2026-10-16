@@ -5,7 +5,6 @@ from openea_benchmark.adaptive.model import Interval, Review, ReviewStatus
 from openea_benchmark.adaptive.pec_selection_bridge import (
     CandidateEnergyEvidence,
     bridge_state_selection_report,
-    g1_from_state_selection_bridge,
 )
 
 
@@ -125,36 +124,6 @@ def test_inconsistent_bracketed_label_triggers_audit():
     )
     assert result.pec_asymptotes.review.status is ReviewStatus.CONFIRMED
     assert result.pec_asymptotes.recommended_branch == "audit_state_selection_report"
-
-
-def test_g1_requires_search_d04_and_d09_clearance():
-    bridge = bridge_state_selection_report(
-        report(),
-        evidence_id="selection-1",
-        higher_level_competition_review=cleared("cc-state-comparison"),
-        asymptote_review=cleared("large-r-review"),
-    )
-    g1 = g1_from_state_selection_bridge(
-        state_search_review=unresolved("search"), bridge=bridge
-    )
-    assert g1.status is ReviewStatus.UNRESOLVED
-    assert "STATE_SEARCH=UNRESOLVED" in g1.rationale
-
-
-def test_g1_can_clear_when_all_three_independent_requirements_clear():
-    bridge = bridge_state_selection_report(
-        report(),
-        evidence_id="selection-1",
-        higher_level_competition_review=cleared("cc-state-comparison"),
-        asymptote_review=cleared("large-r-review"),
-    )
-    g1 = g1_from_state_selection_bridge(
-        state_search_review=cleared("search"), bridge=bridge
-    )
-    assert g1.status is ReviewStatus.CLEARED
-    assert set(g1.evidence_ids) == {
-        "search", "selection-1", "cc-state-comparison", "large-r-review"
-    }
 
 
 def test_direct_group_sequence_contract_is_supported():

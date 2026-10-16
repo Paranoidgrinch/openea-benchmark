@@ -26,7 +26,7 @@ from .heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Any, Mapping, Sequence
+from typing import Sequence
 
 import numpy as np
 

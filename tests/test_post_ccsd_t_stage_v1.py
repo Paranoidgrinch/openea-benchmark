@@ -2,7 +2,10 @@
 from types import SimpleNamespace
 
 from openea_benchmark import post_ccsd_t_stage
-from openea_benchmark.post_ccsd_t_stage import PostCCSDTStagePolicy, quadruples_storage_mb, run_post_ccsd_t_stage
+from openea_benchmark.post_ccsd_t_stage import (
+    PostCCSDTStagePolicy,
+    run_post_ccsd_t_stage,
+)
 from openea_benchmark.vibrational_stage import assemble_adiabatic_ea
 
 from test_cbs_stage_v1 import ea_record, request
@@ -51,11 +54,6 @@ def test_no_affordable_quadruples_applies_nothing(tmp_path, monkeypatch):
     nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
     out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, post_ccsd_t=res)
     assert not out["includes_post_ccsd_t"] and out["ea0_ev"] == 1.0
-
-
-def test_storage_estimate_grows_with_basis():
-    spec = SimpleNamespace(atoms=("O", "H"), r_angstrom=0.97, charge=-1, spin_2s=0)
-    assert quadruples_storage_mb(spec, "aug-cc-pvdz") > quadruples_storage_mb(spec, "cc-pvdz") > 0
 
 
 def test_point_files_are_distinct_per_method():

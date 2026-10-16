@@ -22,12 +22,10 @@ from ..heavy_elements import apply_hamiltonian, mole_basis_kwargs
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from enum import Enum
-from math import isfinite
 from typing import Any, Callable
 
 from openea_benchmark.adaptive.stage3_execution import Stage3ExecutionSettings
 
-from .asymptote import DissociationChannel
 
 
 class FragmentExecutionStatus(str, Enum):
@@ -702,40 +700,3 @@ def run_atomic_fragment(
     return result
 
 
-def build_validation_dissociation_channel(
-    *,
-    channel_id: str,
-    fragment_a: AtomicFragmentResult,
-    fragment_b: AtomicFragmentResult,
-) -> DissociationChannel:
-    """Build a non-production scalar threshold from two completed fragments."""
-    if not channel_id.strip():
-        raise ValueError("channel_id must be non-empty")
-    for result in (fragment_a, fragment_b):
-        if result.status is not FragmentExecutionStatus.COMPLETED:
-            raise ValueError(
-                f"{result.fragment_id}: fragment calculation is not COMPLETED"
-            )
-        if result.ccsd_t_total_hartree is None:
-            raise ValueError(
-                f"{result.fragment_id}: missing CCSD(T) total energy"
-            )
-        if not isfinite(float(result.ccsd_t_total_hartree)):
-            raise ValueError(
-                f"{result.fragment_id}: non-finite CCSD(T) total energy"
-            )
-
-    threshold = (
-        float(fragment_a.ccsd_t_total_hartree)
-        + float(fragment_b.ccsd_t_total_hartree)
-    )
-    return DissociationChannel(
-        channel_id=channel_id,
-        fragment_a=fragment_a.fragment_id,
-        fragment_b=fragment_b.fragment_id,
-        asymptotic_energy_hartree=threshold,
-        source=(
-            "VALIDATION_ONLY_CCSD(T)_ATOMIC_FRAGMENTS;"
-            "EXPLICIT_ATOMIC_STATES;STATE_MANIFOLD_NOT_RESOLVED"
-        ),
-    )

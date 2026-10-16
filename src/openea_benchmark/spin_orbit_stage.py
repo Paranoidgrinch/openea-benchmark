@@ -70,17 +70,6 @@ def parse_term_symbol(label: str) -> tuple[int, int] | None:
     return None if m is None else (int(m.group(1)), LAMBDA_OF[m.group(2)])
 
 
-def c2v_occupation(irrep_nelec: Mapping[str, Sequence[int]]) -> dict[str, tuple[int, int]]:
-    out = {k: [0, 0] for k in MOLCAS_C2V_ORDER}
-    for irrep, (na, nb) in irrep_nelec.items():
-        target = D2H_TO_C2V.get(irrep, irrep)
-        if target not in out:
-            raise ValueError(f"irrep {irrep} has no C2v image")
-        out[target][0] += int(na)
-        out[target][1] += int(nb)
-    return {k: (v[0], v[1]) for k, v in out.items()}
-
-
 # Frozen cores (orbitals per C2v irrep, Molcas order a1 b1 b2 a2): noble gases, and
 # [Ar]3d for Ga-Kr (d: a1 a1 b1 b2 a2).
 CORE_ORBITALS_BY_COUNT = {0: (0, 0, 0, 0), 1: (1, 0, 0, 0), 5: (3, 1, 1, 0), 9: (5, 2, 2, 0),

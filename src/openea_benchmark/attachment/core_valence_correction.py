@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 class CoreValenceStatus(str, Enum):

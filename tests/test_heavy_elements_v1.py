@@ -4,8 +4,16 @@ from __future__ import annotations
 import pytest
 
 from openea_benchmark.heavy_elements import (
-    ROUTE_ALL_ELECTRON, ROUTE_PSEUDOPOTENTIAL, core_irreps_c2v, element_route, frozen_orbitals,
-    full_valence_space, load_basis, molecule_basis, shell_irreps_c2v, valence_core_orbitals)
+    ROUTE_ALL_ELECTRON,
+    ROUTE_PSEUDOPOTENTIAL,
+    core_irreps_c2v,
+    element_route,
+    frozen_orbitals,
+    full_valence_space,
+    load_basis,
+    shell_irreps_c2v,
+    valence_core_orbitals,
+)
 
 
 def test_shell_irreps_follow_lz_components():
@@ -57,16 +65,6 @@ def test_routes():
         assert frozen_orbitals(el, nelec) == frozen
     for el in ("Rb", "Cs", "Ba", "La", "Ce", "Gd", "Lu", "Th", "U", "Lr"):
         assert element_route(el)["route"] == "ALL_ELECTRON_X2C"
-
-
-def test_ecp_basis_never_loses_its_ecp():
-    loaded = load_basis("def2-TZVPPD", "Ag")
-    assert loaded.ecp_electrons == 28
-    kw = molecule_basis(("Ag", "O"), {"Ag": "aug-cc-pVTZ-PP", "O": "aug-cc-pVTZ"})
-    assert set(kw["ecp"]) == {"Ag"}
-    from pyscf import gto
-    mol = gto.M(atom="Ag 0 0 0; O 0 0 2.0", basis=kw["basis"], ecp=kw["ecp"], charge=-1, spin=0, verbose=0)
-    assert mol.nelectron == 47 - 28 + 8 + 1
 
 
 def test_basis_names_and_fail_closed_shells():

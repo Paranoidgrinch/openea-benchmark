@@ -53,7 +53,11 @@ from .adaptive.stage3_execution import (
     Stage3PointResult,
 )
 from .attachment.component_resolved_cbs import (
-    PAIR_EXPONENTS, PRIMARY_EXPONENTS, TQ_MODEL_SPREAD_TARGET_EV, extrapolate_species, ComponentPair, resolve_cbs,
+    PAIR_EXPONENTS,
+    TQ_MODEL_SPREAD_TARGET_EV,
+    extrapolate_species,
+    ComponentPair,
+    resolve_cbs,
 )
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner
 from .point_pool import run_parallel

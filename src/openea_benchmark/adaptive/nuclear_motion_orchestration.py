@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import isfinite
 from typing import Any, Callable, Mapping, Sequence
 
 from .nuclear_motion import (
@@ -63,13 +62,7 @@ from .stage3_naming import (
     nuclear_model_comparison_job_id,
     nuclear_model_comparison_request_id,
 )
-from .stage3_pec import (
-    HighLevelPEC,
-    HighLevelPECPoint,
-    HighLevelPECStatus,
-    HighLevelPointStatus,
-    IdentityReviewStatus,
-)
+from .stage3_pec import HighLevelPEC, HighLevelPECStatus, HighLevelPointStatus, IdentityReviewStatus
 from .stage3_refinement import (
     ProposedGeometry,
     RefinementAction,
@@ -214,15 +207,6 @@ class NuclearPECModelRun:
 
 def _dedup(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(x) for x in values if str(x).strip()))
-
-
-def _point_map(pec: HighLevelPEC) -> dict[str, HighLevelPECPoint]:
-    result = {}
-    for point in pec.points:
-        if point.status is not HighLevelPointStatus.ACCEPTED or point.canonical_request_id is None:
-            raise ValueError("Nuclear PEC orchestration requires all Stage-3 points to be accepted")
-        result[point.canonical_request_id] = point
-    return result
 
 
 def _role_result(assessment: NuclearMotionAssessment, role: str):
@@ -497,8 +481,6 @@ def run_nuclear_pec_refinement(
         batches, tuple(attempts), _dedup(evidence + ["D12_STAGE3_PEC_REFINEMENT_COMPLETED"]),
         "All D12-requested electronic PEC points completed and the updated neutral/anion PECs re-cleared Stage-3 identity/continuity review.",
     )
-
-
 
 
 def _canonical_basis_signature(

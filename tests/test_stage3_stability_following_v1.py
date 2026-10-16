@@ -31,7 +31,7 @@ def test_legacy_defaults_keep_fail_closed_behaviour():
 
 
 def test_cli_enables_following_and_separate_acquisition_dir():
-    args = build_parser().parse_args(["m.yaml", "--mode", "benchmark-auto"])
+    args = build_parser().parse_args(["--atoms", "H", "F"])
     assert args.stability_following_steps == 4
     assert args.rhf_external_instability == "RECORD_AND_CONTINUE"
     assert args.acquisition_dir == "benchmark_auto"

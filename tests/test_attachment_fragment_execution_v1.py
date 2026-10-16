@@ -7,7 +7,6 @@ from openea_benchmark.attachment.fragment_execution import (
     AtomicFragmentRequest,
     AtomicFragmentResult,
     FragmentExecutionStatus,
-    build_validation_dissociation_channel,
     run_atomic_fragment,
 )
 
@@ -81,45 +80,6 @@ def test_runner_exception_is_preserved_as_error_evidence():
     assert result.status is FragmentExecutionStatus.ERROR
     assert result.error_type == "OSError"
     assert "synthetic failure" in result.error_message
-
-
-def test_validation_channel_sums_completed_fragment_energies():
-    a_req = request("O_minus")
-    b_req = AtomicFragmentRequest(
-        "H",
-        "H",
-        0,
-        1,
-        "sto-3g",
-        state_label="2S",
-    )
-    a = completed(a_req, -74.5)
-    b = completed(b_req, -0.5)
-    channel = build_validation_dissociation_channel(
-        channel_id="O_minus_plus_H",
-        fragment_a=a,
-        fragment_b=b,
-    )
-    assert channel.asymptotic_energy_hartree == -75.0
-    assert "VALIDATION_ONLY" in channel.source
-    assert "STATE_MANIFOLD_NOT_RESOLVED" in channel.source
-
-
-def test_incomplete_fragment_cannot_be_promoted_to_threshold():
-    a_req = request("O_minus")
-    b_req = request("H")
-    a = completed(a_req)
-    b = replace(
-        completed(b_req, -0.5),
-        status=FragmentExecutionStatus.CCSD_NOT_CONVERGED,
-        ccsd_t_total_hartree=None,
-    )
-    with pytest.raises(ValueError):
-        build_validation_dissociation_channel(
-            channel_id="bad",
-            fragment_a=a,
-            fragment_b=b,
-        )
 
 
 def test_fragment_result_cannot_claim_production_threshold():

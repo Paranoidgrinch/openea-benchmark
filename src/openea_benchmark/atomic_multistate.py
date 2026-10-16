@@ -88,15 +88,6 @@ def _label_counts(label: str | None) -> dict[str, int] | None:
     return {l: int(k) for l, k in re.findall(r"([spdf])(\d+)", label)}
 
 
-def _unpaired_signature(configuration: str) -> dict[str, int]:
-    out = {}
-    for (n, l), k in _parse_configuration(configuration).items():
-        u = min(k, _CAPACITY[l] - k)
-        if u:
-            out["spdf"[l]] = out.get("spdf"[l], 0) + u
-    return out
-
-
 def roots_per_spin(element: str, charge: int, spins, max_roots: int,
                    labels: Mapping[int, str | None] | None = None) -> dict[int, int]:
     """Roots per 2S block: the components (2L+1) of the highest-L term with that 2S of the

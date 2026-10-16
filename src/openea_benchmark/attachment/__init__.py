@@ -1,8 +1,10 @@
 from .model import ElectronicState, PECBranch, AttachmentCandidate
 from .pairing import generate_attachment_candidates
 from .asymptote import (
-    BindingAssessment, BindingStatus, DissociationChannel,
-    evaluate_binding_interval, evaluate_binding_status,
+    BindingAssessment,
+    BindingStatus,
+    DissociationChannel,
+    evaluate_binding_interval,
 )
 from .decision import (
     EADecision, EADecisionStatus, EnergyInterval, PrecisionStatus, decide_ea,
@@ -19,6 +21,7 @@ from .workflow import (
     ElectronicEAWorkflowResult, ElectronicEAWorkflowStatus,
     evaluate_stage3_electronic_ea,
 )
+
 __all__ = [
     "ElectronicState",
     "PECBranch",
@@ -28,7 +31,6 @@ __all__ = [
     "BindingStatus",
     "DissociationChannel",
     "evaluate_binding_interval",
-    "evaluate_binding_status",
     "EADecision",
     "EADecisionStatus",
     "EnergyInterval",

@@ -43,8 +43,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
-from .mr_nuclear_curve import C2V_IRREPS, _c2v_counts
-from .spin_orbit_stage import D2H_TO_C2V
+from .mr_nuclear_curve import C2V_IRREPS
 
 # Version of the per-root Lambda / g-u classification; older block caches are recomputed.
 # 3: high-spin ROHF start orbitals tried as well; 4: borrowed CASSCF orbitals + median

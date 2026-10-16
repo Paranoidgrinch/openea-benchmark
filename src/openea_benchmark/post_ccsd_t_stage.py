@@ -145,11 +145,6 @@ def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
     return (OUT_OF_CORE_COPIES if diis_out_of_core(one) else AMPLITUDE_COPIES) * one
 
 
-def cc_scratch_mb(spec: Any, basis: str, method: str) -> float:
-    one = _amplitude_mb(spec, basis, method)
-    return DIIS_COPIES * one if diis_out_of_core(one) else 0.0
-
-
 def cached_diis_class():
     """CCpy's DIIS with the residual overlap matrix kept in memory.
 
@@ -221,10 +216,6 @@ def cc_scratch_dir():
     finally:
         tempfile.tempdir = previous
         shutil.rmtree(path, ignore_errors=True)
-
-
-def quadruples_storage_mb(spec: Any, basis: str) -> float:
-    return cc_storage_mb(spec, basis, "CCSDTQ")
 
 
 def _point_signature(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy) -> str:
