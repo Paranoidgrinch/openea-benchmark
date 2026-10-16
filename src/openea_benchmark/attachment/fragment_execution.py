@@ -506,26 +506,43 @@ def scan_scf_configurations(request: AtomicFragmentRequest, settings: Stage3Exec
             continue
         found.append({"guess": guess, "scf_energy_hartree": e, "label": configuration_label(mol, mf),
                       "dm0": mf.make_rdm1(), "mo_coeff": mf.mo_coeff, "mo_energy": mf.mo_energy})
+    # Configuration-targeted starts.  Orbital sets: the lowest solution and the
+    # Fock orbitals of the spherical atomic density (all valence shells present;
+    # the lowest solution may lack usable virtual d/f orbitals: La- 3F in aQZ).
+    bases = []
     if found:
-        base = min(found, key=lambda f: f["scf_energy_hartree"])
-        for config, occ in target_occupations(mol, base["mo_coeff"], base["mo_energy"], request.element,
-                                              request.charge, request.spin_2s):
+        low = min(found, key=lambda f: f["scf_energy_hartree"])
+        bases.append((low["mo_coeff"], low["mo_energy"]))
+    try:
+        ref = apply_hamiltonian(scf.RHF(mol))
+        fock = ref.get_fock(dm=ref.get_init_guess(key="atom"))
+        e_atom, c_atom = ref.eig(fock, ref.get_ovlp())
+        bases.append((c_atom, e_atom))
+    except Exception:
+        pass
+    targets: dict[str, list] = {}
+    for mo, mo_e in bases:
+        for config, occ in target_occupations(mol, mo, mo_e, request.element, request.charge, request.spin_2s):
+            targets.setdefault(config, []).append((mo, occ))
+    for config, starts in targets.items():
+        for mo, occ in starts:
             mf = apply_hamiltonian(scf.RHF(mol) if request.spin_2s == 0 else scf.ROHF(mol))
             mf.conv_tol, mf.conv_tol_grad = settings.scf_conv_tol, settings.scf_conv_tol_grad
-            mf.max_cycle, mf.max_memory = settings.scf_max_cycle, settings.max_memory_mb
-            mf = _maximum_overlap(mf, base["mo_coeff"], occ)
+            mf.max_cycle, mf.max_memory = max(settings.scf_max_cycle, 200), settings.max_memory_mb
+            mf = _maximum_overlap(mf, mo, occ)
             try:
-                mf.kernel(mf.make_rdm1(base["mo_coeff"], occ if request.spin_2s == 0 else occ[0] + occ[1]))
+                mf.kernel(mf.make_rdm1(mo, occ if request.spin_2s == 0 else occ[0] + occ[1]))
             except Exception:
                 continue
             if not mf.converged:
                 continue
             e = float(mf.e_tot)
-            if any(abs(e - f["scf_energy_hartree"]) < policy.distinct_energy_hartree for f in found):
-                continue
-            found.append({"guess": f"config:{config}", "scf_energy_hartree": e, "label": configuration_label(mol, mf),
-                          "mom_start": (mf.mo_coeff, _occupation_pattern(mf.mo_occ, request.spin_2s)),
-                          "dm0": None})
+            if not any(abs(e - f["scf_energy_hartree"]) < policy.distinct_energy_hartree for f in found):
+                found.append({"guess": f"config:{config}", "scf_energy_hartree": e,
+                              "label": configuration_label(mol, mf),
+                              "mom_start": (mf.mo_coeff, _occupation_pattern(mf.mo_occ, request.spin_2s)),
+                              "dm0": None})
+            break  # this configuration converged from one orbital set
     found.sort(key=lambda f: f["scf_energy_hartree"])
     return found
 
