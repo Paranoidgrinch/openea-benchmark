@@ -65,6 +65,14 @@ _EXTERNAL_INSTABILITY_POLICIES = frozenset({"FAIL", "RECORD_AND_CONTINUE"})
 RHF_EXTERNAL_INSTABILITY_WARNING = "RHF_EXTERNAL_INSTABILITY_RECORDED"
 STABILITY_FOLLOWED_WARNING = "INTERNAL_INSTABILITY_FOLLOWED"
 SCF_SOSCF_RESCUE_WARNING = "SCF_CONVERGED_BY_SOSCF_RESCUE"
+SCF_PROJECTED_SOSCF_WARNING = "SCF_STARTED_FROM_PROJECTED_SEED_ORBITALS_BY_SOSCF"
+# SCF start modes.  DIIS: density of the seed checkpoint projected into the new basis.
+# PROJECTED_SOSCF: the seed's orbitals projected into a basis that contains the seed
+# basis (d-aug from aug at the same cardinal) and second-order SCF from there: it starts
+# exactly at the seed energy and cannot leave the branch upwards, where DIIS in a nearly
+# linearly dependent diffuse basis jumps between solutions (LiH- d-aug-cc-pV5Z: three
+# DIIS runs 13-22 mEh above the aug-cc-pV5Z energy).
+SCF_START_MODES = ("DIIS", "PROJECTED_SOSCF")
 # Version tag of the SCF rescue; cached SCF failures without it are retried.
 # V2: the rescue also runs in every internal-stability following step.
 # V3: no rescue on seed-continuous reference branches.
@@ -94,8 +102,11 @@ class Stage3ExecutionSettings:
     artifact_dir: str | None = None
     stability_following_max_steps: int = 0
     rhf_external_instability_policy: str = "FAIL"
+    scf_start: str = "DIIS"
 
     def __post_init__(self) -> None:
+        if self.scf_start not in SCF_START_MODES:
+            raise ValueError(f"scf_start must be one of {SCF_START_MODES}")
         if self.stability_following_max_steps < 0:
             raise ValueError("stability_following_max_steps must be non-negative")
         if self.rhf_external_instability_policy not in _EXTERNAL_INSTABILITY_POLICIES:
@@ -117,6 +128,19 @@ class Stage3ExecutionSettings:
             )
         if self.artifact_dir is not None and not str(self.artifact_dir).strip():
             raise ValueError("artifact_dir must be non-empty when supplied")
+
+
+# Fields added after point caches existed: left out of cache fingerprints while at
+# their default, so existing caches stay valid.
+_FINGERPRINT_OMITTED_DEFAULTS = {"scf_start": "DIIS"}
+
+
+def settings_fingerprint(settings: "Stage3ExecutionSettings") -> dict:
+    out = asdict(settings)
+    for key, default in _FINGERPRINT_OMITTED_DEFAULTS.items():
+        if out.get(key) == default:
+            out.pop(key)
+    return out
 
 
 # SEED_CONTINUOUS: the reference converged from the seed is kept even when an
@@ -499,6 +523,25 @@ def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings
     return True
 
 
+def _projected_soscf(mf: Any, mol: Any, checkpoint: str, settings: Stage3ExecutionSettings) -> None:
+    """Second-order SCF from the checkpoint's orbitals projected into ``mol``'s basis."""
+    from pyscf import scf
+    from pyscf.lib import chkfile
+    mol0 = chkfile.load_mol(checkpoint)
+    seed = chkfile.load(checkpoint, "scf")
+    mo = seed["mo_coeff"]
+    project = (scf.addons.project_mo_nr2nr if getattr(mo, "ndim", 2) == 2
+               else lambda m0, c, m1: [scf.addons.project_mo_nr2nr(m0, x, m1) for x in c])
+    mo = project(mol0, mo, mol)
+    soscf = mf.newton()
+    soscf.max_cycle = settings.scf_max_cycle
+    soscf.conv_tol = settings.scf_conv_tol
+    soscf.conv_tol_grad = max(settings.scf_conv_tol_grad, SCF_RESCUE_CONV_TOL_GRAD)
+    soscf.kernel(mo, seed["mo_occ"])
+    mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
+    mf.e_tot, mf.converged = soscf.e_tot, bool(soscf.converged)
+
+
 def _run_stage3_point_pyscf(
     request: Stage3ExecutionRequest,
     settings: Stage3ExecutionSettings,
@@ -582,7 +625,12 @@ def _run_stage3_point_pyscf(
     # point; a second-order minimizer would leave it for the lower branch
     # (AlO X2Sigma+ refS beyond 1.69 A: SOSCF landed 14 mEh lower, on refF).
     # Such a point stays SCF_NOT_CONVERGED: the branch has ended there.
-    scf_rescued = _scf_kernel_with_rescue(mf, dm0, settings, allow_rescue=not seed_branch)
+    projected_start = settings.scf_start == "PROJECTED_SOSCF"
+    if projected_start:
+        _projected_soscf(mf, mol, request.source_checkpoint_path, settings)
+        scf_rescued = False
+    else:
+        scf_rescued = _scf_kernel_with_rescue(mf, dm0, settings, allow_rescue=not seed_branch)
     start_energy = float(mf.e_tot) if mf.e_tot is not None else None
 
     # D02: optionally follow internal instabilities within the same reference
@@ -619,6 +667,8 @@ def _run_stage3_point_pyscf(
     following_lowering = None
     if scf_rescued:
         warnings.append(SCF_SOSCF_RESCUE_WARNING)
+    if projected_start:
+        warnings.append(SCF_PROJECTED_SOSCF_WARNING)
     if following_steps:
         if start_energy is not None and mf.e_tot is not None:
             following_lowering = start_energy - float(mf.e_tot)

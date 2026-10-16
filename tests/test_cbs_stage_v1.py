@@ -18,9 +18,15 @@ def request(job, charge, two_s):
 def backend(req, settings):
     assert settings.frozen_core and settings.checkpoint_project
     assert req.reference_branch == "SEED_CONTINUOUS"
-    assert req.source_checkpoint_path.startswith("/hl/") or req.request_id.endswith("__RESEED")
-    if FAIL_DAUG_FROM_TZ and req.job_id == "A" and req.basis.startswith("d-") and "__RESEED" not in req.request_id:
+    assert req.source_checkpoint_path.startswith("/hl/") or req.request_id.endswith(("__RESEED", "__PROJECTED_SOSCF"))
+    assert (settings.scf_start == "PROJECTED_SOSCF") == req.request_id.endswith("__PROJECTED_SOSCF")
+    daug_anion = req.job_id == "A" and req.basis.startswith("d-")
+    if daug_anion and (FAIL_DAUG_FROM_TZ and "__" not in req.request_id.split("__CBS__")[1]
+                       or DAUG_FAILS_ALWAYS):
         return _empty_result(req, PointExecutionStatus.SCF_NOT_CONVERGED, reference_warnings=())
+    if daug_anion and DAUG_WRONG_SOLUTION_BY_DIIS and settings.scf_start == "DIIS":
+        return _empty_result(req, PointExecutionStatus.COMPLETED, scf_energy_hartree=0.0, ccsd_t_total_hartree=0.0,
+                             reference_warnings=(), high_level_checkpoint_path=f"/cbs/{req.request_id}")
     key = req.job_id[0]
     if "MRDIAG" in req.request_id:
         t1 = MR_T1.get(key, 0.01)
@@ -42,6 +48,8 @@ def backend(req, settings):
 
 
 FAIL_DAUG_FROM_TZ = False
+DAUG_FAILS_ALWAYS = False
+DAUG_WRONG_SOLUTION_BY_DIIS = False
 MR_T1: dict = {}
 DAUG_SHIFT = 0.0005
 
@@ -105,6 +113,32 @@ def test_failed_point_reseeded_from_previous_basis(tmp_path, monkeypatch):
     reseed = anion["points"]["d-aug-cc-pv5z"]["reseeded"]
     assert reseed["first_status"] == "SCF_NOT_CONVERGED"
     assert reseed["seed_checkpoint"] == "/cbs/A__CBS__aug-cc-pv5z"
+    assert reseed["scf_start"] == "PROJECTED_SOSCF"  # d-aug contains aug: orbitals projected
+
+
+def test_daug_scf_above_aug_is_recomputed_from_projected_orbitals(tmp_path, monkeypatch):
+    # DIIS converges on a solution above the aug energy: impossible for the superset basis.
+    monkeypatch.setattr(__import__(__name__), "DAUG_WRONG_SOLUTION_BY_DIIS", True)
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "CLEARED"
+    anion = next(s for s in res["states"] if s["job_id"] == "A")
+    point = anion["points"]["d-aug-cc-pv5z"]
+    assert point["reseeded"]["first_status"] == "COMPLETED" and point["reseeded"]["scf_start"] == "PROJECTED_SOSCF"
+    assert point["status"] == "COMPLETED" and point["scf_energy_hartree"] < -75.0
+    assert abs(res["cbs"]["diffuse_correction_ev"] - 0.0005 / H) < 1e-9
+
+
+def test_missing_daug_widens_interval_instead_of_blocking(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "DAUG_FAILS_ALWAYS", True)
+    res = run(tmp_path, gap=2.0)
+    assert res["status"] == "CLEARED"
+    assert res["diffuse_check"]["status"] == "MISSING"
+    assert res["diffuse_check"]["missing"] == ["anion:d-aug-cc-pv5z"]
+    assert res["cbs"]["diffuse_correction_ev"] == 0.0
+    residual = res["diffuse_check"]["residual_estimate_ev"]
+    assert residual >= CBSStagePolicy().missing_diffuse_floor_ev
+    assert res["cbs"]["diffuse_residual_estimate_ev"] == residual
+    assert res["ea_cbs_upper_ev"] - res["ea_cbs_lower_ev"] >= 2 * residual
 
 
 def test_error_results_are_not_cached(tmp_path):
@@ -238,3 +272,27 @@ def test_seed_branch_points_rescued_by_older_policy_are_recomputed(tmp_path):
         path.write_text(json.dumps({**json.loads(path.read_text()), "scf_rescue_policy": "SOSCF_V2"}))
         runner(req, Stage3ExecutionSettings())
         assert len(calls) == expected_calls
+
+
+def test_scf_start_field_does_not_change_existing_cache_fingerprints():
+    from dataclasses import asdict
+    from openea_benchmark.adaptive.stage3_execution import settings_fingerprint
+    default = Stage3ExecutionSettings()
+    old = {k: v for k, v in asdict(default).items() if k != "scf_start"}  # fields before the rescue
+    assert settings_fingerprint(default) == old
+    assert settings_fingerprint(replace(default, scf_start="PROJECTED_SOSCF"))["scf_start"] == "PROJECTED_SOSCF"
+
+
+def test_projected_soscf_starts_at_the_subset_basis_energy(tmp_path):
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.stage3_execution import _projected_soscf
+    geom = [("O", (0, 0, 0)), ("H", (0, 0, 0.97))]
+    small = gto.M(atom=geom, basis="aug-cc-pvdz", charge=-1, verbose=0)
+    ref = scf.RHF(small)
+    ref.chkfile = str(tmp_path / "aug.chk")
+    ref.kernel()
+    big = gto.M(atom=geom, basis="d-aug-cc-pvdz", charge=-1, verbose=0)
+    mf = scf.RHF(big)
+    _projected_soscf(mf, big, ref.chkfile, Stage3ExecutionSettings())
+    assert mf.converged
+    assert ref.e_tot - 1e-3 < mf.e_tot <= ref.e_tot + 1e-8

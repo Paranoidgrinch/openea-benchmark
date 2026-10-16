@@ -65,6 +65,8 @@ from .point_pool import run_parallel
 MR_DIAGNOSTIC_LABEL = "MRDIAG_STAGE3_BASIS"
 CARDINAL_LETTER = {2: "d", 3: "t", 4: "q", 5: "5", 6: "6"}
 TIGHT_D_ELEMENTS = frozenset({"Al", "Si", "P", "S", "Cl", "Ar"})
+# Superset-basis variational check (d-aug vs aug at one cardinal): projection noise is ~1e-8 Eh.
+SUBSET_BASIS_SCF_TOLERANCE_HARTREE = 1.0e-6
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,10 @@ class CBSStagePolicy:
     t1_open_shell_threshold: float = 0.044
     d1_threshold: float = 0.05
     max_t2_threshold: float = 0.1
+    # Diffuse check impossible (d-aug points not obtained): no d-aug correction, and the
+    # aug-QZ -> aug-5Z change of the fixed-basis EA (at least this floor) is added to the
+    # interval as the unknown diffuse residual.
+    missing_diffuse_floor_ev: float = 0.01
 
 
 def family_label(cardinal: int, *, daug: bool = False) -> str:
@@ -226,23 +232,48 @@ def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]
     """One state's basis series in order.  A point that fails from the projected TZ
     reference is retried once, seeded from the last completed larger-basis reference of
     the same state (same irrep occupation, no following) and with doubled SCF/CC cycles;
-    the retry is recorded, never silent."""
+    the retry is recorded, never silent.
+
+    A d-aug point contains the previous (aug) basis of the same cardinal, so its SCF
+    energy cannot lie above that one.  When it fails or lies above (DIIS in a nearly
+    linearly dependent diffuse basis jumps to another solution), it is recomputed by
+    second-order SCF from the aug orbitals projected into the d-aug basis; a result
+    still above the aug energy is rejected (``rejected`` in the retry record)."""
     out: list[tuple[Any, dict | None]] = []
-    previous_checkpoint = None
+    previous = None  # (basis label, completed result)
+
+    def above(result, ref):
+        return (ref is not None and result.status is PointExecutionStatus.COMPLETED
+                and result.scf_energy_hartree is not None
+                and result.scf_energy_hartree > ref.scf_energy_hartree + SUBSET_BASIS_SCF_TOLERANCE_HARTREE)
+
     for req in requests:
+        superset_ref = (previous[1] if previous is not None and str(req.basis) == "d-" + previous[0]
+                        and previous[1].high_level_checkpoint_path else None)
         result, reseed = runner(req, settings), None
-        if result.status is not PointExecutionStatus.COMPLETED:
-            seed = previous_checkpoint or req.source_checkpoint_path
-            retry = replace(req, request_id=req.request_id + "__RESEED", source_checkpoint_path=str(seed),
-                            source_link_status=("CBS_BASIS_CONTINUATION_FROM_PREVIOUS_CARDINAL"
-                                                if previous_checkpoint else req.source_link_status))
-            retry_settings = replace(settings, scf_max_cycle=2 * settings.scf_max_cycle,
-                                     cc_max_cycle=2 * settings.cc_max_cycle)
-            reseed = {"first_status": result.status.value, "seed_checkpoint": str(seed),
+        if result.status is not PointExecutionStatus.COMPLETED or above(result, superset_ref):
+            first = {"first_status": result.status.value, "first_scf_energy_hartree": result.scf_energy_hartree}
+            if superset_ref is not None:
+                seed = superset_ref.high_level_checkpoint_path
+                retry = replace(req, request_id=req.request_id + "__PROJECTED_SOSCF", source_checkpoint_path=str(seed),
+                                source_link_status="CBS_SUBSET_BASIS_ORBITALS_PROJECTED")
+                retry_settings = replace(settings, scf_start="PROJECTED_SOSCF",
+                                         cc_max_cycle=2 * settings.cc_max_cycle)
+            else:
+                seed = previous[1].high_level_checkpoint_path if previous is not None else req.source_checkpoint_path
+                retry = replace(req, request_id=req.request_id + "__RESEED", source_checkpoint_path=str(seed),
+                                source_link_status=("CBS_BASIS_CONTINUATION_FROM_PREVIOUS_CARDINAL"
+                                                    if previous is not None else req.source_link_status))
+                retry_settings = replace(settings, scf_max_cycle=2 * settings.scf_max_cycle,
+                                         cc_max_cycle=2 * settings.cc_max_cycle)
+            reseed = {**first, "seed_checkpoint": str(seed), "scf_start": retry_settings.scf_start,
                       "scf_max_cycle": retry_settings.scf_max_cycle}
             result = runner(retry, retry_settings)
-        if result.status is PointExecutionStatus.COMPLETED and result.high_level_checkpoint_path:
-            previous_checkpoint = result.high_level_checkpoint_path
+            if above(result, superset_ref):
+                reseed["rejected"] = "SCF_ABOVE_SUBSET_BASIS"
+        if (result.status is PointExecutionStatus.COMPLETED and result.high_level_checkpoint_path
+                and not (reseed or {}).get("rejected")):
+            previous = (str(req.basis), result)
         out.append((result, reseed))
     return out
 
@@ -344,7 +375,7 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
             state["mr_diagnostic"] = _mr_diagnostic(res, policy)
             continue
         state["points"][label] = {
-            "status": res["status"], "basis_by_element": prov, "reseeded": reseed,
+            "status": (reseed or {}).get("rejected") or res["status"], "basis_by_element": prov, "reseeded": reseed,
             "scf_energy_hartree": res["scf_energy_hartree"],
             "ccsd_correlation_hartree": res["ccsd_correlation_hartree"],
             "triples_correction_hartree": res["triples_correction_hartree"],
@@ -360,6 +391,12 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     daug = family_label(policy.high_cardinal, daug=True)
     selected = {s["role"]: s for s in computed if s["selected"]}
     needed = [low, high] + ([daug] if policy.diffuse_correction else [])
+    diffuse_missing = [f"{role}:{daug}" for role, s in selected.items()
+                       if policy.diffuse_correction and not ok(s, daug)]
+    if diffuse_missing:
+        needed = [low, high]
+        record["diffuse_check"] = {"status": "MISSING", "missing": diffuse_missing,
+                                   "reason": "d-aug SCF not obtained on the aug branch"}
     missing = [f"{role}:{label}" for role, s in selected.items() for label in needed if not ok(s, label)]
     if missing:
         record.update(status="UNRESOLVED", reason="missing CBS points: " + ", ".join(missing))
@@ -397,11 +434,18 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
               for role, s in selected.items() for label in (low, high)]
     # Without the d-aug points the diffuse correction is zero by construction
     # (resolve_cbs forms it as EA[d-aug] - EA[aug] at the high cardinal).
-    diffuse_label = daug if policy.diffuse_correction else high
-    daug_ea = (selected["neutral"]["points"][diffuse_label]["ccsd_t_total_hartree"]
-               - selected["anion"]["points"][diffuse_label]["ccsd_t_total_hartree"]) * HARTREE_TO_EV
+    diffuse_label = daug if policy.diffuse_correction and not diffuse_missing else high
+
+    def fixed_ea(label):
+        return (selected["neutral"]["points"][label]["ccsd_t_total_hartree"]
+                - selected["anion"]["points"][label]["ccsd_t_total_hartree"]) * HARTREE_TO_EV
+    daug_ea = fixed_ea(diffuse_label)
+    residual = None
+    if diffuse_missing:
+        residual = max(abs(fixed_ea(high) - fixed_ea(low)), policy.missing_diffuse_floor_ev)
+        record["diffuse_check"]["residual_estimate_ev"] = residual
     cbs = resolve_cbs(points=points, daug_fixed_ea_ev=daug_ea, full_pec_aug5_ea_ev=None,
-                      diffuse_residual_estimate_ev=None,
+                      diffuse_residual_estimate_ev=residual,
                       model_spread_target_ev=policy.model_spread_target_ev,
                       cardinals=(policy.low_cardinal, policy.high_cardinal), basis_labels=(low, high)).to_dict()
     # Two ROHF reference branches of one state: their single-basis offset is not

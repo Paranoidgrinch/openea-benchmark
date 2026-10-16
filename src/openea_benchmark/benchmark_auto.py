@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive.stage3_bridge import build_adaptive_stage3_plan, Stage3ReleaseStatus
 from .adaptive.stage3_execution import (
+    settings_fingerprint,
     PointExecutionStatus, Stage3ExecutionRequest, Stage3ExecutionSettings,
     Stage3PointResult, build_stage3_execution_requests,
 )
@@ -264,7 +265,7 @@ def run_benchmark_acquisition(
         stability_following_max_steps=settings.stability_following_max_steps,
         rhf_external_instability_policy=settings.rhf_external_instability_policy,
     )
-    signature = _digest({"source": identity, "settings": asdict(stage3_settings), "purpose": stage3_purpose})
+    signature = _digest({"source": identity, "settings": settings_fingerprint(stage3_settings), "purpose": stage3_purpose})
     point_dir = output_dir / "points"
     point_dir.mkdir(parents=True, exist_ok=True)
     completed = []

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive.stage3_execution import (
+    settings_fingerprint,
     SCF_RESCUE_POLICY, SCF_SOSCF_RESCUE_WARNING, SEED_CONTINUOUS_BRANCH, PointExecutionStatus,
     Stage3ExecutionRequest, Stage3ExecutionSettings, Stage3PointResult,
     run_stage3_point,
@@ -150,7 +151,7 @@ class CachedPointRunner:
         self.backend = backend
 
     def __call__(self, request: Stage3ExecutionRequest, settings: Stage3ExecutionSettings) -> Stage3PointResult:
-        fingerprint = sha256(json.dumps({"request": request.to_dict(), "settings": asdict(settings),
+        fingerprint = sha256(json.dumps({"request": request.to_dict(), "settings": settings_fingerprint(settings),
                                          "batch": self.settings_signature}, sort_keys=True, default=str)
                              .encode()).hexdigest()
         path = self.cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
