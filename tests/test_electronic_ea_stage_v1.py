@@ -103,3 +103,17 @@ def test_collapsed_candidate_excluded_only_by_reference_gap():
     res = _competition("neutral", [low, near], 1.0, 3.0)
     assert res["status"] == "UNRESOLVED" and res["blocking"][0]["status"] == "MULTIREFERENCE_METHOD_REQUIRED"
     assert _competition("neutral", [low, {**far, "scf_lowest_hartree": None}], 1.0, 3.0)["status"] == "UNRESOLVED"
+
+
+def test_coupled_cluster_failed_candidate_separated_by_reference_gap():
+    # TiO- 6Pi: CCSD not converged at any point, reference determinant 4.6 eV above.
+    low = {**entry("x", center=-1.0, lo=-1.0001, hi=-0.9999), "scf_lowest_hartree": -0.6}
+    failed = {**entry("f", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED"), "scf_only_evidence": True,
+              "scf_lowest_hartree": -0.6 + 4.6 * H}
+    res = _competition("anion", [low, failed], 1.0, 3.0)
+    assert res["status"] == "CLEARED"
+    assert res["multireference_only_excluded"][0]["evidence"] == "SCF_ONLY_COUPLED_CLUSTER_NOT_CONVERGED"
+    near = {**failed, "scf_lowest_hartree": -0.6 + 2.0 * H}
+    assert _competition("anion", [low, near], 1.0, 3.0)["status"] == "UNRESOLVED"
+    # Without converged references the state still blocks.
+    assert _competition("anion", [low, entry("g", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED")], 1.0, 3.0)["status"] == "UNRESOLVED"

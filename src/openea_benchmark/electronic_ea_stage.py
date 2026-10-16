@@ -298,19 +298,22 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
     for e in entries:
         if e is lowest:
             continue
-        if e["equilibrium_status"] == "SINGLE_REFERENCE_COLLAPSED":
-            # Its CCSD(T) energies are not energies of this state (no floor).
+        floor = e["energy_lower_hartree"] if e["equilibrium_status"] == "RESOLVED" else e["lowest_sampled_hartree"]
+        if e["equilibrium_status"] == "SINGLE_REFERENCE_COLLAPSED" or (floor is None and e.get("scf_only_evidence")):
+            # Its CCSD(T) energies are not energies of this state (collapse) or
+            # do not exist (coupled cluster not converged at any point): no floor.
             # Only the reference determinant energy can separate it.
             ref, low_ref = e.get("scf_lowest_hartree"), lowest.get("scf_lowest_hartree")
             scf_gap_ev = None if ref is None or low_ref is None else (ref - low_ref) * HARTREE_TO_EV
             item = {"job_id": e["job_id"], "scf_gap_ev": scf_gap_ev,
-                    "status": "MULTIREFERENCE_METHOD_REQUIRED"}
+                    "status": "MULTIREFERENCE_METHOD_REQUIRED",
+                    "evidence": ("COLLAPSED_CCSD(T)" if e["equilibrium_status"] == "SINGLE_REFERENCE_COLLAPSED"
+                                 else "SCF_ONLY_COUPLED_CLUSTER_NOT_CONVERGED")}
             if scf_gap_ev is not None and scf_gap_ev > collapsed_scf_margin_ev:
                 multireference_only.append({**item, "basis": "REFERENCE_DETERMINANT_SCF_GAP"})
             else:
                 blocking.append(item)
             continue
-        floor = e["energy_lower_hartree"] if e["equilibrium_status"] == "RESOLVED" else e["lowest_sampled_hartree"]
         if floor is None:
             blocking.append({"job_id": e["job_id"], "reason": "no energy evidence"})
             continue
@@ -424,6 +427,12 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                  "reference_branch": job_reqs[0].reference_branch}
         scf = [point_records[r.request_id]["scf_energy_hartree"] for r in done
                if point_records[r.request_id].get("scf_energy_hartree") is not None]
+        if not done:
+            # No CCSD(T) point (e.g. CCSD not converged anywhere): the converged
+            # reference determinants are the only energy evidence of this state.
+            scf = [rec["scf_energy_hartree"] for rec in (point_records.get(r.request_id) or {} for r in job_reqs)
+                   if rec.get("scf_converged") and rec.get("scf_energy_hartree") is not None]
+            entry["scf_only_evidence"] = bool(scf)
         entry["scf_lowest_hartree"] = min(scf) if scf else None
         label = "neutral" if entry["charge"] == 0 else "anion"
         entries[label].append(entry)
