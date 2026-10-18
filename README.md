@@ -1,7 +1,5 @@
 # OpenEA
 
-**Two atoms in, electron affinity out.**
-
 OpenEA computes the adiabatic electron affinity EA₀ of a diatomic molecule from nothing but
 its two element symbols. It finds the electronic states of the neutral molecule and the
 anion, decides which methods and corrections are needed, runs them, and returns an
@@ -38,7 +36,7 @@ settings:
 | C₂  | strong multireference | 3.286 (3.267–3.306) | 3.269 | +0.017 |
 | MgH | | 0.877 (0.872–0.881) | 0.90 ± 0.05 | −0.02 |
 | LiH | diffuse anion | 0.334 (0.331–0.337) | 0.342 ± 0.012 | −0.008 |
-| N₂  | unbound anion | `UNBOUND` | unbound | ✓ |
+| N₂  | unbound anion | `UNBOUND` | unbound | agrees |
 
 Transition-metal and heavy-element molecules (3d, 4d/5d with pseudopotentials,
 lanthanides) are the next validation step.
@@ -73,15 +71,15 @@ flowchart LR
 | 12 | Zero-point vibration | Vibrational levels on the curves: EA₀ = EA_e + ΔZPE | `vibrational_stage` |
 | 13 | Final verdict | `EA` with interval, `UNBOUND`, or `UNRESOLVED` with the blocking reason | `final_resolver` |
 
-**Principles**
+### Principles
 
-- **Fail closed.** A layer that cannot prove its part reports a status (`UNRESOLVED`,
+- Fail closed. A layer that cannot prove its part reports a status (`UNRESOLVED`,
   `NEED_MORE_EVIDENCE_*`) instead of a number, and the final verdict names it.
-- **No reference data.** No experimental EAs, term energies or bond lengths enter the
+- No reference data. No experimental EAs, term energies or bond lengths enter the
   calculation; atomic states come from aufbau rules and computed energies.
-- **No per-molecule tuning.** Every rule is general; a problem found on one molecule
+- No per-molecule tuning. Every rule is general; a problem found on one molecule
   becomes a rule for all.
-- **Uncertainty from evidence.** Interval widths come from the computed sensitivities
+- Uncertainty from evidence. Interval widths come from the computed sensitivities
   (CBS model spread, reference branches, correction bounds), not from a fixed error bar.
 
 ## Elements
@@ -118,8 +116,8 @@ python -m venv .venv
 
 Python ≥ 3.11, PySCF 2.14. Optional but needed for heavier systems:
 
-- **CCpy** for post-CCSD(T) (importable as `ccpy`),
-- **OpenMolcas** for spin–orbit and multistate layers: set `OPENEA_MOLCAS` to the install
+- CCpy for post-CCSD(T) (importable as `ccpy`),
+- OpenMolcas for spin–orbit and multistate layers: set `OPENEA_MOLCAS` to the install
   directory containing `pymolcas` (default: `external/openmolcas-install-v26.06-serial-ilp64`).
 
 ## Running many molecules
@@ -137,14 +135,14 @@ Stop a batch with `kill -TERM -- -<pid>` (the pid is printed and stored in `runs
 
 ## Known limitations
 
-- **Heavy elements are not yet validated end to end.** The routes exist for every element
+- Heavy elements are not yet validated end to end. The routes exist for every element
   up to Lr; the first 3d (TiO) and 4d (Ag₂) molecules were interrupted before the final
   verdict.
-- **Configuration targeting of d/f atoms in large bases.** In aug-cc-pVQZ the La⁻ 5d²6s²
+- Configuration targeting of d/f atoms in large bases. In aug-cc-pVQZ the La⁻ 5d²6s²
   configuration is not yet reached (aug-cc-pVTZ works: La atomic EA 0.45 eV vs 0.56 eV).
-- **Open 4f/5f shells.** The atomic multistate layer becomes too expensive for atoms like
+- Open 4f/5f shells. The atomic multistate layer becomes too expensive for atoms like
   Gd or U (full 4f/5d/6s/6p active space); a smaller or selected-CI space is needed.
-- **Cost.** A light diatomic takes one to a few hours on one 80-core node; a molecule with 4d or 5d
+- Cost. A light diatomic takes one to a few hours on one 80-core node; a molecule with 4d or 5d
   atoms takes one to several days (5Z coupled cluster, multistate spin–orbit).
 
 ## Repository
@@ -169,11 +167,11 @@ kept in the tag `archive/pre-cleanup-2026-10-16`. See `CONTRIBUTING.md` for deve
 OpenEA grew out of the need for electron affinities in laser photodetachment for accelerator mass
 spectrometry, where most diatomic anions have never been measured. Its predecessors:
 
-- [DiatomicEA](https://github.com/Paranoidgrinch/diatomic-ea) — a released desktop app that estimates EAs
+- [DiatomicEA](https://github.com/Paranoidgrinch/diatomic-ea): a released desktop app that estimates EAs
   from a fixed DFT ensemble with calibrated prediction intervals. Fast, but limited by DFT.
-- [diatomic-ea-workflow](https://github.com/Paranoidgrinch/diatomic-ea-workflow) (v0.9) — explicit discovery
+- [diatomic-ea-workflow](https://github.com/Paranoidgrinch/diatomic-ea-workflow) (v0.9): explicit discovery
   and following of electronic states along the potential curve; its ideas became OpenEA's state layers.
 
 ## License
 
-GPL-3.0-only — see [LICENSE](LICENSE).
+GPL-3.0-only, see [LICENSE](LICENSE).
