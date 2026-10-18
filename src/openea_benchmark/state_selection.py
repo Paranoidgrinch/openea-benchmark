@@ -241,6 +241,7 @@ def build_state_selection_report(
                     "merged_into_bracketed_component",
                     "above_lowest_dissociation_limit",
                     "lambda_mixed_mr_route",  # MR competitor layer decides (symmetry_scout)
+                    "scf_failed_edge_mr_route",
                 )
                 and graph_resolved
                 and sector_status == "dft_scout_complete"

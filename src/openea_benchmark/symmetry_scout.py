@@ -178,6 +178,46 @@ def _minimum_lambda_mixed(points: Sequence[Mapping[str, Any]]) -> bool:
     return bool(ok) and min(ok, key=lambda p: p["energy_hartree"])["label"] is None
 
 
+SCF_EDGE_STATUS = "scf_failed_edge_mr_route"
+
+
+def _minimum_at_failed_edge(block: Mapping[str, Any]) -> bool:
+    ok = sorted((p for p in block["points"] if p["converged"]), key=lambda p: p["r_angstrom"])
+    if len(ok) < 2:
+        return False
+    i = min(range(len(ok)), key=lambda k: ok[k]["energy_hartree"])
+    side = block.get("side_status") or {}
+    return (i == 0 and side.get("lower_r") == "SCF_FAILED") or \
+        (i == len(ok) - 1 and side.get("higher_r") == "SCF_FAILED")
+
+
+def _symmetric_charge_delocalization(block: Mapping[str, Any], atomic: Mapping[str, Any], atom: str,
+                                     charge: int, two_s: int, tolerance_ev: float) -> dict | None:
+    """Like-atom ion still descending at the R limit below its charge-localized asymptote.
+
+    D2h symmetry forces half of the extra charge onto each atom; at large R this
+    delocalized state drops below X + X- (DFT delocalization error; verify_v1 Li2-,
+    Na2-, Ag2- 2Sigmag+: 0.20-0.56 eV below at 7.5 A and still falling).  A repulsive
+    curve toward X + X- carries no well of its own; the X + X- channel is handled by the
+    electronic EA stage's anion dissociation channels.
+    """
+    from .open_pec_extension import compatible_asymptote
+    ok = sorted((p for p in block["points"] if p["converged"]), key=lambda p: p["r_angstrom"])
+    if len(ok) < 3 or (block.get("side_status") or {}).get("higher_r") != "R_LIMIT":
+        return None
+    if min(range(len(ok)), key=lambda k: ok[k]["energy_hartree"]) != len(ok) - 1:
+        return None
+    asym = compatible_asymptote(atomic, atom, atom, charge, two_s)
+    if not asym:
+        return None
+    below_ev = (ok[-1]["energy_hartree"] - asym["energy_hartree"]) * HARTREE_TO_EV
+    if below_ev > tolerance_ev:
+        return None
+    return {"asymptote_channel": asym["channel"], "asymptote_hartree": asym["energy_hartree"],
+            "plateau_minus_asymptote_ev": below_ev, "r_last_angstrom": ok[-1]["r_angstrom"],
+            "basis": "SYMMETRIC_CHARGE_DELOCALIZATION_BELOW_LOCALIZED_ASYMPTOTE"}
+
+
 def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: str | None, target: str) -> str:
     """Scan status from the stored points (also re-applied to cached scout records)."""
     ok = [p for p in sorted(points, key=lambda p: p["r_angstrom"]) if p["converged"]]
@@ -513,6 +553,11 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                     block["points"], block.get("side_status", {}).get("higher_r"), block["label"])}
             status = _STATUS_MAP.get(block["status"], block["status"].lower())
             minimum_scout: dict[str, Any] = {"status": status, "component_id": bid, "candidates": []}
+            if block["status"] == "UNRESOLVED" and _minimum_at_failed_edge(block):
+                # Still descending into a geometry where the block SCF does not converge (also
+                # after half-step retries; verify_v1 NiO- 2Delta below 1.725 A): the single
+                # determinant cannot resolve this state.  MR competitor layer bounds its block.
+                minimum_scout = {**minimum_scout, "status": SCF_EDGE_STATUS}
             if block["status"] == "LABEL_CHANGED" and _minimum_lambda_mixed(block["points"]):
                 # The block determinant at its lowest point is not an Lz^2 eigenfunction
                 # (e.g. pi^1 delta^1 mixes Pi and Phi): no single-reference state of any
@@ -547,10 +592,20 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                                              (last["energy_center_hartree"] - asym["energy_hartree"]) * HARTREE_TO_EV}}
                 else:
                     minimum_scout["status"] = "plateau_not_on_computed_asymptote"
-            if minimum_scout["status"] == LAMBDA_MIXED_STATUS and not any(
+            if (atom_a == atom_b and charge != 0 and atomic and block["status"] == "UNRESOLVED"
+                    and minimum_scout["status"] == "unresolved"):
+                evidence = _symmetric_charge_delocalization(block, atomic, atom_a, charge, two_s,
+                                                            asymptote_tolerance_ev)
+                if evidence:
+                    minimum_scout = {"status": "dissociative_to_asymptote", "component_id": bid,
+                                     "candidates": [], "asymptote_evidence": evidence}
+            if minimum_scout["status"] in (LAMBDA_MIXED_STATUS, SCF_EDGE_STATUS) and not any(
                     m["charge"] == charge and m["label"] == block["label"] for m in mr_only):
                 mr_only.append({"charge": charge, "label": block["label"], "count": 1, "channels": [],
-                                "reason": "LAMBDA_MIXED_SINGLE_DETERMINANT", "component_id": bid})
+                                "reason": ("LAMBDA_MIXED_SINGLE_DETERMINANT"
+                                           if minimum_scout["status"] == LAMBDA_MIXED_STATUS
+                                           else "SCF_FAILS_ON_DESCENDING_EDGE"),
+                                "component_id": bid})
             symmetry_block = {"label": block["label"], "point_group": pg, "two_s": two_s,
                               "irrep_nelec": block["irrep_nelec"]}
             if block["status"] == "BRACKETED_RELABELLED":
@@ -560,8 +615,8 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
             sector["manifold_pec_scouts"].append({
                 "component_id": bid, "pec": {"component_id": bid, "points": pts}, "minimum_scout": minimum_scout,
                 "symmetry_block": symmetry_block})
-    for sector in sectors.values():
-        _merge_coincident_label_changed(sector)
+    for (charge, _), sector in sectors.items():
+        _merge_coincident_label_changed(sector, mr_only, charge)
     spins = {q: sorted({s for (c, s) in sectors if c == q}) for q in (0, -1)}
     return {
         "system": record["system"], "atoms": [atom_a, atom_b],
@@ -580,7 +635,7 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
 SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE = 1.0e-5
 
 
-def _merge_coincident_label_changed(sector: dict) -> None:
+def _merge_coincident_label_changed(sector: dict, mr_only: list | None = None, charge: int | None = None) -> None:
     """A label-changed block whose minimum and both neighbours coincide (same R, same
     energy) with points of a bracketed component of the same sector converged onto
     that state (verify_v1 FeO 5Sigma- -> 5Delta, VO 4Delta -> 4Sigma-): it is
@@ -588,8 +643,11 @@ def _merge_coincident_label_changed(sector: dict) -> None:
     from .open_pec_extension import MERGED_STATUS
     scouts = sector["manifold_pec_scouts"]
     # Blocks that kept their own label come first, so a relabelled duplicate merges into them.
-    bracketed = sorted((s for s in scouts if s["minimum_scout"]["status"] == "bracketed_single_minimum"),
-                       key=lambda s: "block_target_label" in s["symmetry_block"])
+    targets = (("bracketed_single_minimum", LAMBDA_MIXED_STATUS, SCF_EDGE_STATUS)
+               if mr_only is not None else ("bracketed_single_minimum",))
+    bracketed = sorted((s for s in scouts if s["minimum_scout"]["status"] in targets),
+                       key=lambda s: (s["minimum_scout"]["status"] != "bracketed_single_minimum",
+                                      "block_target_label" in s["symmetry_block"]))
     for scout in scouts:
         pts = sorted(scout["pec"]["points"], key=lambda p: p["r_angstrom"])
         relabelled = "block_target_label" in scout["symmetry_block"] \
@@ -599,7 +657,9 @@ def _merge_coincident_label_changed(sector: dict) -> None:
         i = min(range(len(pts)), key=lambda k: pts[k]["energy_center_hartree"])
         probe = pts[max(0, i - 1):i + 2]
         for other in bracketed:
-            if other is scout or other["minimum_scout"]["status"] != "bracketed_single_minimum":
+            if other is scout or other["minimum_scout"]["status"] not in targets:
+                continue
+            if relabelled and other["minimum_scout"]["status"] != "bracketed_single_minimum":
                 continue
             if relabelled and other["symmetry_block"]["label"] != scout["symmetry_block"]["label"]:
                 continue
@@ -613,6 +673,17 @@ def _merge_coincident_label_changed(sector: dict) -> None:
                     break
                 hits.append({"r_angstrom": p["r_angstrom"],
                              "delta_hartree": p["energy_center_hartree"] - ref["energy_center_hartree"]})
+            if len(hits) == len(probe) >= 2 and other["minimum_scout"]["status"] != "bracketed_single_minimum":
+                # Same SCF solution as a state routed to the MR layer: same route.
+                scout["minimum_scout"] = {**scout["minimum_scout"], "status": other["minimum_scout"]["status"],
+                                          "scout_status": "label_changed",
+                                          "coincident_with_component_id": other["component_id"]}
+                label = scout["symmetry_block"]["label"]
+                if not any(m["charge"] == charge and m["label"] == label for m in mr_only):
+                    mr_only.append({"charge": charge, "label": label, "count": 1, "channels": [],
+                                    "reason": "COINCIDES_WITH_MR_ROUTED_COMPONENT",
+                                    "component_id": scout["component_id"]})
+                break
             if len(hits) == len(probe) >= 2:
                 scout["minimum_scout"] = {**scout["minimum_scout"], "status": MERGED_STATUS,
                                           "scout_status": "bracketed_relabelled" if relabelled else "label_changed",

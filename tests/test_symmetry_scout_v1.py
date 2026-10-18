@@ -197,3 +197,27 @@ def test_scf_failure_is_retried_at_half_step(tmp_path):
     res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path, run)
     assert res["status"] == "BRACKETED_SINGLE_MINIMUM"
     assert any(abs(p["r_angstrom"] - 0.975) < 1e-9 for p in res["points"])
+
+
+def test_like_atom_anion_below_localized_asymptote_is_dissociative():
+    # verify_v1 Li2- 2Sigmag+: still falling at the R limit, 0.28 eV below Li + Li-.
+    from openea_benchmark.open_pec_extension import atom_key
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    atomic = {atom_key("Li", 0, 1): {"energy_hartree": -7.46705}, atom_key("Li", -1, 0): {"energy_hartree": -7.47936}}
+    block = _block("2Sigmag+", 1, [(5.0, -14.950), (6.0, -14.953), (7.0, -14.955), (7.75, -14.9565)],
+                   "UNRESOLVED", higher="R_LIMIT")
+    record = {"system": "LiLi", "atoms": ["Li", "Li"], "r0_angstrom": 2.6,
+              "policy": {"functional": "PBE0", "basis": "def2-TZVPPD"},
+              "charges": {"-1": {"plan": {"mr_only_or_outside_window": []}, "blocks": {"d": block}}}}
+    sc = to_legacy_summary(record, atomic=atomic)["sectors"][0]["manifold_pec_scouts"][0]
+    assert sc["minimum_scout"]["status"] == "dissociative_to_asymptote"
+    assert sc["minimum_scout"]["asymptote_evidence"]["basis"].startswith("SYMMETRIC_CHARGE")
+
+
+def test_descending_into_scf_failure_routes_to_mr_layer():
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    block = _block("2Delta", 1, [(1.725, -1.0), (1.75, -0.99), (1.8, -0.98)], "UNRESOLVED")
+    block["side_status"] = {"lower_r": "SCF_FAILED", "higher_r": "RISES"}
+    summary = to_legacy_summary(_record({"d": block}))
+    assert summary["sectors"][0]["manifold_pec_scouts"][0]["minimum_scout"]["status"] == "scf_failed_edge_mr_route"
+    assert any(m["label"] == "2Delta" and m["charge"] == 0 for m in summary["mr_only_candidates"])

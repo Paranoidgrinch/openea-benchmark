@@ -313,13 +313,17 @@ def run_benchmark_acquisition(
                 existing = _load(record_path)
                 if (existing.get("fingerprint") != fingerprint and existing.get("request_id") == req.request_id
                         and existing.get("request") == json.loads(json.dumps(req.to_dict(), default=str))
-                        and existing.get("purpose") == stage3_purpose
                         and _unchanged_since(req.source_checkpoint_path, record_path)):
-                    # Record from the former scout-summary-bound fingerprint (no checkpoint
-                    # hash stored): identical request and purpose, source checkpoint not
-                    # modified after the point was computed -> same calculation, migrate.
+                    # Same calculation (identical request, source checkpoint not modified after
+                    # the point was computed) under a former fingerprint: the scout-summary-bound
+                    # scheme, or a provisional purpose that became RELEASED once the scout
+                    # resolved every component.  Migrate and keep the provenance.
                     existing = {**existing, "fingerprint": fingerprint,
                                 "fingerprint_migrated_from": existing.get("fingerprint")}
+                    if existing.get("purpose") != stage3_purpose:
+                        existing["computed_under_purpose"] = existing.get("computed_under_purpose",
+                                                                          existing.get("purpose"))
+                        existing["purpose"] = stage3_purpose
                     _save(record_path, existing)
                 if existing.get("fingerprint") != fingerprint or existing.get("request_id") != req.request_id:
                     stored, now = existing.get("request") or {}, json.loads(json.dumps(req.to_dict(), default=str))
