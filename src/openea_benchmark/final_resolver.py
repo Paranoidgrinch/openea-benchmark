@@ -50,6 +50,13 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
         for role, comp in (electronic_ea.get("high_level_competition") or {}).items():
             if comp.get("status") != "CLEARED":
                 blocking.append(f"{role} state competition: {comp.get('status')}")
+    for role, comp in ((electronic_ea or {}).get("high_level_competition") or {}).items():
+        if comp.get("blocking_open_scout_components"):
+            blocking.append(f"{role}: {len(comp['blocking_open_scout_components'])} open scout component(s) "
+                            "at or below the selected state (no bracketed minimum)")
+        if comp.get("open_scout_components_without_energy"):
+            warnings.append(f"{role}: {len(comp['open_scout_components_without_energy'])} scout component(s) "
+                            "without any converged energy (not compared)")
 
     if mr_only_labels:
         status = None if not mr_competitors else mr_competitors.get("status")

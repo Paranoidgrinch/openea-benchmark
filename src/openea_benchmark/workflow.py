@@ -384,6 +384,18 @@ def _run_symmetry_auto(args) -> int:
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
     record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
     preliminary = to_legacy_summary(record)
+    if not preliminary["sectors"]:
+        # No single-determinant Lambda-eigenstate block in the frontier window for any
+        # charge (verify_v1 UO: open 5f shells): nothing to scan, only MR methods could
+        # represent the states.  Fail closed with an explicit verdict, not a crash.
+        verdict = {"system": f"{atom_a}{atom_b}",
+                   "final_verdict": {"outcome": "UNRESOLVED", "warnings": [],
+                                     "blocking": ["symmetry scout: no single-determinant block for any charge "
+                                                  "(MR-only coverage gap)"]},
+                   "mr_only_candidates": len(preliminary["mr_only_candidates"])}
+        _write_json(system_dir / "final_verdict.json", verdict)
+        print("[SYMMETRY AUTO] " + json.dumps(verdict), flush=True)
+        return 0
     extension = None
     if not args.no_open_pec_extension:
         print(f"[SYMMETRY AUTO] fragment asymptotes / open PECs {atom_a}{atom_b}", flush=True)

@@ -453,6 +453,21 @@ def _overlap_summary(values: tuple[float, ...]) -> tuple[float, float]:
     return float(array.min()), float(array.mean())
 
 
+def _loewdin_transport(left_mol: Any, right_mol: Any) -> np.ndarray:
+    """S_R^{-1/2} S_L^{1/2}: AO coefficients at the left geometry -> same Loewdin-AO
+    coefficients at the right geometry (orthonormal in S_R)."""
+    def powers(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        w, v = np.linalg.eigh(s)
+        if w.min() <= 0.0:
+            raise ValueError("AO overlap matrix is not positive definite")
+        return (v * np.sqrt(w)) @ v.T, (v / np.sqrt(w)) @ v.T
+    s_left = np.asarray(left_mol.intor_symmetric("int1e_ovlp"))
+    s_right = np.asarray(right_mol.intor_symmetric("int1e_ovlp"))
+    if s_left.shape != s_right.shape:
+        raise ValueError("Continuity comparison requires the same AO basis at both geometries")
+    return powers(s_right)[1] @ powers(s_left)[0]
+
+
 def _compare_high_level_geometry(
     left: _CheckpointEvidence,
     right: _CheckpointEvidence,
@@ -461,8 +476,6 @@ def _compare_high_level_geometry(
     axial_symmetry_policy: AxialSymmetryPolicy | None = None,
     symmetry_evidence: list[dict[str, Any]] | None = None,
 ) -> BranchComparison:
-    from pyscf import gto
-
     if left.root.molecule != right.root.molecule or left.root.charge != right.root.charge:
         raise ValueError("High-level continuity comparison context mismatch")
     if left.root.spin_2s != right.root.spin_2s or left.root.basis != right.root.basis:
@@ -470,9 +483,17 @@ def _compare_high_level_geometry(
     if left.root.reference != right.root.reference:
         raise ValueError("High-level continuity comparison reference mismatch")
 
-    cross_overlap = gto.intor_cross("int1e_ovlp", left.mol, right.mol)
-    alpha_sv = _principal_values(left.alpha_occ_coeff, right.alpha_occ_coeff, cross_overlap)
-    beta_sv = _principal_values(left.beta_occ_coeff, right.beta_occ_coeff, cross_overlap)
+    # Compare in Loewdin-orthogonalized AOs that move with the nuclei: the left
+    # orbitals keep their Loewdin coefficients and are expressed at the right
+    # geometry.  The raw cross-geometry AO overlap is not translation invariant:
+    # tight core shells on a displaced nucleus lose overlap even for the same
+    # state (verify_v1: LiCl 0.91, S2 0.92, Cu2 0.77 at dR = 0.025 A).
+    transport = _loewdin_transport(left.mol, right.mol)
+    left_alpha = transport @ np.asarray(left.alpha_occ_coeff)
+    left_beta = transport @ np.asarray(left.beta_occ_coeff)
+    cross_overlap = np.asarray(right.mol.intor_symmetric("int1e_ovlp"))
+    alpha_sv = _principal_values(left_alpha, right.alpha_occ_coeff, cross_overlap)
+    beta_sv = _principal_values(left_beta, right.beta_occ_coeff, cross_overlap)
     alpha_min, alpha_mean = _overlap_summary(alpha_sv)
     beta_min, beta_mean = _overlap_summary(beta_sv)
     dr = abs(float(right.root.r_angstrom) - float(left.root.r_angstrom))
@@ -490,7 +511,7 @@ def _compare_high_level_geometry(
     if relation is not BranchRelation.CONTINUOUS and axial_symmetry_policy is not None:
         rotated = axial_subspace_alignment(
             left_mol=left.mol, right_mol=right.mol,
-            left_alpha=left.alpha_occ_coeff, left_beta=left.beta_occ_coeff,
+            left_alpha=left_alpha, left_beta=left_beta,
             right_alpha=right.alpha_occ_coeff, right_beta=right.beta_occ_coeff,
             cross_overlap=cross_overlap, policy=axial_symmetry_policy,
         )

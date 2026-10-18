@@ -75,6 +75,37 @@ def test_label_change_is_never_accepted(tmp_path):
     assert res["status"] == "LABEL_CHANGED"
 
 
+def _labelled_runner(shape, label_at):
+    def run(r, seed):
+        label = label_at(r)
+        return BlockSCFResult(symmetry=_symmetry_from_label(label) if label else None, target=_occ().symmetry,
+                              irrep_nelec={}, converged=True, energy_hartree=shape(r), stable_within_symmetry=True,
+                              symmetry_breaking_instability=False, checkpoint=f"{r}.chk")
+    return run
+
+
+def test_label_loss_at_scan_edge_keeps_bracketed_minimum(tmp_path):
+    # verify_v1 IO X2Pi: minimum and its neighbours are 2Pi, only a far edge point is
+    # not an Lz^2 eigenfunction (label None) -> the minimum is still bracketed.
+    res = scan_block(("I", "O"), 0, _occ(), 1.9, POLICY, tmp_path,
+                     _labelled_runner(lambda r: (r - 1.85) ** 2, lambda r: None if r < 1.8 else "2Pi"))
+    assert res["status"] == "BRACKETED_SINGLE_MINIMUM"
+
+
+def test_other_label_next_to_minimum_is_rejected(tmp_path):
+    res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path,
+                     _labelled_runner(lambda r: (r - 0.97) ** 2, lambda r: "2Sigma+" if r > 0.99 else "2Pi"))
+    assert res["status"] == "LABEL_CHANGED"
+
+
+def test_cached_record_is_reclassified_with_current_rule():
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    block = _block("2Pi", 1, [(1.775, -0.95), (1.85, -1.0), (1.9, -0.99), (2.0, -0.97)], "LABEL_CHANGED")
+    block["points"][0]["label"] = None
+    summary = to_legacy_summary(_record({"g": block}))
+    assert summary["sectors"][0]["manifold_pec_scouts"][0]["minimum_scout"]["status"] == "bracketed_single_minimum"
+
+
 def _record(blocks):
     return {"system": "OH", "atoms": ["O", "H"], "r0_angstrom": 0.97,
             "policy": {"functional": "PBE0", "basis": "def2-TZVPPD"},
@@ -84,7 +115,7 @@ def _record(blocks):
 
 def _block(label, two_s, energies, status, higher="RISES"):
     pts = [{"r_angstrom": r, "energy_hartree": e, "converged": True, "stable_within_symmetry": True,
-            "checkpoint": f"{r}.chk"} for r, e in energies]
+            "checkpoint": f"{r}.chk", "label": label} for r, e in energies]
     i = min(range(len(pts)), key=lambda k: pts[k]["energy_hartree"])
     return {"label": label, "two_s": two_s, "irrep_nelec": [["A1", [3, 3]], ["B1", [1, 1]], ["B2", [1, 0]]],
             "status": status, "side_status": {"lower_r": "RISES", "higher_r": higher},

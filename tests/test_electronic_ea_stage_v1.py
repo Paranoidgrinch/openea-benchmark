@@ -164,3 +164,25 @@ def test_symmetry_scout_reference_dft_runs_inside_a_core_slot(tmp_path, monkeypa
     monkeypatch.setattr(scout, "plan_blocks", plan)
     scout.run_symmetry_scout("H", "H", output_dir=tmp_path)
     assert held["plans"] == [1, 1]  # one plan per charge, each inside a slot
+
+
+def test_open_scout_component_below_seed_blocks_competition():
+    # verify_v1 IO: X2Pi had no bracketed scout minimum and never reached Stage 3;
+    # the cleared 4Sigma- competition gave an EA 1.8 eV too large.
+    from openea_benchmark.electronic_ea_stage import _block_on_open_scout_components
+    comp = {"status": "CLEARED", "selected_job_id": "IO__4Sigma-"}
+    _block_on_open_scout_components(comp, [
+        {"component_id": "q+0__2Pi__x", "observed_gap_to_bracketed_seed_ev_not_lower_bound": -1.82},
+        {"component_id": "q+0__4Pi__y", "observed_gap_to_bracketed_seed_ev_not_lower_bound": 2.5},
+        {"component_id": "q+0__2Delta__z", "observed_gap_to_bracketed_seed_ev_not_lower_bound": None}], 1.0)
+    assert comp["status"] == "UNRESOLVED" and comp["selected_job_id"] is None
+    assert [c["component_id"] for c in comp["blocking_open_scout_components"]] == ["q+0__2Pi__x"]
+    assert [c["component_id"] for c in comp["open_scout_components_without_energy"]] == ["q+0__2Delta__z"]
+
+
+def test_open_scout_components_far_above_seed_do_not_block():
+    from openea_benchmark.electronic_ea_stage import _block_on_open_scout_components
+    comp = {"status": "CLEARED", "selected_job_id": "j"}
+    _block_on_open_scout_components(comp, [
+        {"component_id": "a", "observed_gap_to_bracketed_seed_ev_not_lower_bound": 1.5}], 1.0)
+    assert comp["status"] == "CLEARED" and comp["selected_job_id"] == "j"

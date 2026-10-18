@@ -150,6 +150,13 @@ class AcquisitionSettings:
             raise ValueError("Unsupported scalar Hamiltonian")
 
 
+def _unchanged_since(source: str | None, record: Path) -> bool:
+    try:
+        return source is not None and Path(source).stat().st_mtime <= record.stat().st_mtime
+    except OSError:
+        return False
+
+
 def run_benchmark_acquisition(
     *, summary: Mapping[str, Any], manifest: Mapping[str, Any], output_dir: Path,
     settings: AcquisitionSettings = AcquisitionSettings(),
@@ -190,8 +197,14 @@ def run_benchmark_acquisition(
     state_path = output_dir / "auto_state.json"
     if state_path.exists():
         previous = _load(state_path)
-        if any(previous.get(k) != v for k, v in identity.items()):
-            raise ValueError("Existing acquisition uses a different manifest/scout summary; use a new output directory")
+        if previous.get("manifest_sha256") != identity["manifest_sha256"]:
+            raise ValueError("Existing acquisition uses a different manifest; use a new output directory")
+        if previous.get("scout_sha256") != identity["scout_sha256"]:
+            # The scout summary changed (e.g. a corrected classification rule).  Stage-3
+            # points are validated individually by their full request below, so the
+            # acquisition resumes; the superseded state is kept for provenance.
+            digest = str(previous.get("scout_sha256", "unknown"))[:12]
+            os.replace(state_path, state_path.with_name(f"auto_state.superseded_{digest}.json"))
 
     _save(output_dir / "state_selection_report.json", selection)
     _save(output_dir / "stage3_plan.json", bridge.stage3_plan)
@@ -265,7 +278,9 @@ def run_benchmark_acquisition(
         stability_following_max_steps=settings.stability_following_max_steps,
         rhf_external_instability_policy=settings.rhf_external_instability_policy,
     )
-    signature = _digest({"source": identity, "settings": settings_fingerprint(stage3_settings), "purpose": stage3_purpose})
+    # A point is defined by its request (geometry, occupation, source checkpoint),
+    # the execution settings and the purpose, not by the rest of the scout summary.
+    signature = _digest({"settings": settings_fingerprint(stage3_settings), "purpose": stage3_purpose})
     point_dir = output_dir / "points"
     point_dir.mkdir(parents=True, exist_ok=True)
     completed = []
@@ -296,8 +311,22 @@ def run_benchmark_acquisition(
                                    "source_checkpoint_sha256": checkpoint_hashes.get(req.source_checkpoint_path)})
             if record_path.exists():
                 existing = _load(record_path)
+                if (existing.get("fingerprint") != fingerprint and existing.get("request_id") == req.request_id
+                        and existing.get("request") == json.loads(json.dumps(req.to_dict(), default=str))
+                        and existing.get("purpose") == stage3_purpose
+                        and _unchanged_since(req.source_checkpoint_path, record_path)):
+                    # Record from the former scout-summary-bound fingerprint (no checkpoint
+                    # hash stored): identical request and purpose, source checkpoint not
+                    # modified after the point was computed -> same calculation, migrate.
+                    existing = {**existing, "fingerprint": fingerprint,
+                                "fingerprint_migrated_from": existing.get("fingerprint")}
+                    _save(record_path, existing)
                 if existing.get("fingerprint") != fingerprint or existing.get("request_id") != req.request_id:
-                    raise ValueError(f"Stale/conflicting point artifact: {record_path}")
+                    stored, now = existing.get("request") or {}, json.loads(json.dumps(req.to_dict(), default=str))
+                    changed = sorted(k for k in set(stored) | set(now) if stored.get(k) != now.get(k))
+                    if existing.get("purpose") != stage3_purpose:
+                        changed.append("purpose")
+                    raise ValueError(f"Stale/conflicting point artifact: {record_path} (changed: {changed})")
                 status = existing["result"]["status"]
                 point_result_records[req.request_id] = existing["result"]
                 (completed if status == "COMPLETED" else failures).append(req.request_id)
@@ -427,6 +456,7 @@ def run_benchmark_acquisition(
             point_records=point_result_records, pec_reviews=pec_reviews,
             stage3_settings=stage3_settings, output_dir=output_dir / "electronic_ea",
             point_backend=point_runner, loops_out=ea_loops,
+            open_scout_components={label: group["open_diagnostics"] for label, group in open_state.items()},
         )
         electronic_ea["stage3_purpose"] = stage3_purpose
 

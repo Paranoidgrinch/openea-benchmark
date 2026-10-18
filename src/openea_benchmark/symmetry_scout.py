@@ -28,7 +28,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from .point_pool import core_slot, run_parallel
 from .state_candidates import candidate_spin_sectors, enumerate_state_candidates
@@ -109,6 +109,33 @@ def plan_blocks(atom_a: str, atom_b: str, charge: int, r0: float, policy: Symmet
     }
 
 
+def _bracket_label_consistent(ok: Sequence[Mapping[str, Any]], i: int, target: str) -> bool:
+    """The minimum carries the block label and neither neighbour carries another one.
+
+    A label of None means the determinant is not an Lz^2 eigenfunction at that
+    geometry (e.g. sigma/delta mixing inside one abelian irrep): no evidence of
+    another state.  Label changes outside the bracket (far edges of the scan)
+    do not touch the minimum the high-level grid is placed around.
+    """
+    return ok[i]["label"] == target and all(ok[j]["label"] in (None, target) for j in (i - 1, i + 1))
+
+
+def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: str | None, target: str) -> str:
+    """Scan status from the stored points (also re-applied to cached scout records)."""
+    ok = [p for p in sorted(points, key=lambda p: p["r_angstrom"]) if p["converged"]]
+    if not ok:
+        return "SCF_FAILED_AT_START"
+    energies = [p["energy_hartree"] for p in ok]
+    i_min = min(range(len(ok)), key=lambda i: energies[i])
+    if 0 < i_min < len(ok) - 1 and energies[i_min - 1] > energies[i_min] < energies[i_min + 1]:
+        return "BRACKETED_SINGLE_MINIMUM" if _bracket_label_consistent(ok, i_min, target) else "LABEL_CHANGED"
+    if any(p["label"] != target for p in ok):
+        return "LABEL_CHANGED"
+    if higher_r_status == "PLATEAU" and i_min == len(ok) - 1:
+        return "DISSOCIATIVE_PLATEAU"
+    return "UNRESOLVED"
+
+
 def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: SymmetryScoutPolicy,
                checkpoint_dir: Path, scf_runner: Callable[..., Any] | None = None) -> dict:
     """Seeded R scan inside one symmetry block until a bracketed minimum or a large-R plateau."""
@@ -170,7 +197,7 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
     for _ in range(policy.max_bracket_refinements):
         ok = [p for p in sorted(points.values(), key=lambda p: p["r_angstrom"]) if p["converged"]]
         i = min(range(len(ok)), key=lambda j: ok[j]["energy_hartree"])
-        if not 0 < i < len(ok) - 1 or any(p["label"] != occ.symmetry.label for p in ok):
+        if not 0 < i < len(ok) - 1 or not _bracket_label_consistent(ok, i, occ.symmetry.label):
             break
         left, right = ok[i]["r_angstrom"] - ok[i - 1]["r_angstrom"], ok[i + 1]["r_angstrom"] - ok[i]["r_angstrom"]
         if max(left, right) <= policy.step_angstrom + 1e-9:
@@ -182,15 +209,7 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
     ok = [p for p in ordered if p["converged"]]
     energies = [p["energy_hartree"] for p in ok]
     i_min = min(range(len(ok)), key=lambda i: energies[i])
-    label_ok = all(p["label"] == occ.symmetry.label for p in ok)
-    if not label_ok:
-        result_status = "LABEL_CHANGED"
-    elif 0 < i_min < len(ok) - 1 and energies[i_min - 1] > energies[i_min] < energies[i_min + 1]:
-        result_status = "BRACKETED_SINGLE_MINIMUM"
-    elif status.get(+1) == "PLATEAU" and i_min == len(ok) - 1:
-        result_status = "DISSOCIATIVE_PLATEAU"
-    else:
-        result_status = "UNRESOLVED"
+    result_status = classify_block_scan(ordered, status.get(+1), occ.symmetry.label)
     return {"status": result_status, "side_status": {"lower_r": status.get(-1), "higher_r": status.get(+1)},
             "minimum": {"r_angstrom": ok[i_min]["r_angstrom"], "energy_hartree": energies[i_min],
                         "checkpoint": ok[i_min]["checkpoint"]},
@@ -339,6 +358,9 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                     "energy_hartree": p["energy_hartree"], "s2": None,
                     "internal_stable": p["stable_within_symmetry"], "origin_guess": "SYMMETRY_BLOCK",
                     "status": "CANONICALIZED", "charge": charge, "spin_2s": two_s})
+            if block["status"] != "SCF_FAILED_AT_START":  # cached records: current classification rule
+                block = {**block, "status": classify_block_scan(
+                    block["points"], block.get("side_status", {}).get("higher_r"), block["label"])}
             status = _STATUS_MAP.get(block["status"], block["status"].lower())
             minimum_scout: dict[str, Any] = {"status": status, "component_id": bid, "candidates": []}
             lowest = min((p["energy_center_hartree"] for p in pts), default=None)
@@ -372,6 +394,8 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                 "component_id": bid, "pec": {"component_id": bid, "points": pts}, "minimum_scout": minimum_scout,
                 "symmetry_block": {"label": block["label"], "point_group": pg, "two_s": two_s,
                                    "irrep_nelec": block["irrep_nelec"]}})
+    for sector in sectors.values():
+        _merge_coincident_label_changed(sector)
     spins = {q: sorted({s for (c, s) in sectors if c == q}) for q in (0, -1)}
     return {
         "system": record["system"], "atoms": [atom_a, atom_b],
@@ -382,6 +406,45 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
         "mr_only_candidates": mr_only,
         "validation_metadata_used_in_computation": False,
     }
+
+
+# Same block-SCF state reached from two different irrep blocks: DFT grid and
+# convergence noise of ~1e-6 Eh (verify_v1 FeO 5Sigma- vs 5Delta: 1.1e-6 Eh);
+# distinct states at one geometry differ by orders of magnitude more.
+SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE = 1.0e-5
+
+
+def _merge_coincident_label_changed(sector: dict) -> None:
+    """A label-changed block whose minimum and both neighbours coincide (same R, same
+    energy) with points of a bracketed component of the same sector converged onto
+    that state (verify_v1 FeO 5Sigma- -> 5Delta, VO 4Delta -> 4Sigma-): it is
+    covered by that component, not an open competitor."""
+    from .open_pec_extension import MERGED_STATUS
+    scouts = sector["manifold_pec_scouts"]
+    bracketed = [s for s in scouts if s["minimum_scout"]["status"] == "bracketed_single_minimum"]
+    for scout in scouts:
+        pts = sorted(scout["pec"]["points"], key=lambda p: p["r_angstrom"])
+        if scout["minimum_scout"]["status"] != "label_changed" or len(pts) < 3:
+            continue
+        i = min(range(len(pts)), key=lambda k: pts[k]["energy_center_hartree"])
+        probe = pts[max(0, i - 1):i + 2]
+        for other in bracketed:
+            hits = []
+            for p in probe:
+                ref = next((q for q in other["pec"]["points"]
+                            if abs(q["r_angstrom"] - p["r_angstrom"]) < 1.0e-6
+                            and abs(q["energy_center_hartree"] - p["energy_center_hartree"])
+                            < SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE), None)
+                if ref is None:
+                    break
+                hits.append({"r_angstrom": p["r_angstrom"],
+                             "delta_hartree": p["energy_center_hartree"] - ref["energy_center_hartree"]})
+            if len(hits) == len(probe) >= 2:
+                scout["minimum_scout"] = {**scout["minimum_scout"], "status": MERGED_STATUS,
+                                          "scout_status": "label_changed",
+                                          "merged_into_component_id": other["component_id"],
+                                          "coincident_points": hits}
+                break
 
 
 def manifest_for_two_atoms(summary: Mapping[str, Any], *, basis: str = "def2-TZVPPD") -> dict:

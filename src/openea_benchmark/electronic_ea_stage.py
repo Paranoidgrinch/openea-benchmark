@@ -359,6 +359,28 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}
 
 
+def _block_on_open_scout_components(comp: dict, open_components: Sequence[Mapping[str, Any]],
+                                    margin_ev: float) -> None:
+    """Stage-2 components without a bracketed minimum never reach Stage 3, so the
+    high-level competition cannot see them.  One whose lowest sampled DFT energy
+    lies below (or within ``margin_ev`` above) the lowest bracketed seed may be the
+    true ground state (verify_v1 IO: X2Pi dropped, 4Sigma- selected, EA 1.8 eV too
+    large): the competition is not cleared.  Components without any sampled energy
+    are listed, not blocking."""
+    near, unsampled = [], []
+    for item in open_components:
+        gap = item.get("observed_gap_to_bracketed_seed_ev_not_lower_bound")
+        if gap is None:
+            unsampled.append(dict(item))
+        elif gap < margin_ev:
+            near.append(dict(item))
+    comp["open_scout_components_without_energy"] = unsampled
+    comp["blocking_open_scout_components"] = near
+    if near:
+        comp.update(status="UNRESOLVED", selected_job_id=None,
+                    open_scout_rule=f"STAGE2_OPEN_COMPONENT_WITHIN_{margin_ev}_EV_OF_OR_BELOW_SEED")
+
+
 def single_basis_ea_interval(neutral: Mapping[str, Any], anion: Mapping[str, Any]) -> tuple[float, float, float, str]:
     """[L_N - U_A, U_N - L_A] in eV plus the sign *at this level only* (never a verdict)."""
     lower = (neutral["energy_lower_hartree"] - anion["energy_upper_hartree"]) * HARTREE_TO_EV
@@ -375,7 +397,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                             point_backend: Callable[..., Stage3PointResult] | None = None,
                             fragment_runner: Callable[..., Any] | None = None,
                             identity_thresholds: Any = None, branch_thresholds: Any = None,
-                            loops_out: dict | None = None) -> dict:
+                            loops_out: dict | None = None,
+                            open_scout_components: Mapping[str, Sequence[Mapping[str, Any]]] | None = None) -> dict:
     """``loops_out`` (optional) receives the refinement loop result per job id, for
     downstream layers that need the identity-cleared curves (nuclear motion)."""
     output_dir = Path(output_dir)
@@ -485,6 +508,9 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
     competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev,
                                       policy.collapsed_reference_scf_margin_ev)
                    for label, items in entries.items()}
+    for label, comp in competition.items():
+        _block_on_open_scout_components(comp, (open_scout_components or {}).get(label, ()),
+                                        policy.competitor_exclusion_margin_ev)
     basis = requests[0].basis if requests else None
     fragments = scan_atomic_fragments(atoms=atoms, basis=basis, settings=stage3_settings, policy=policy,
                                       cache_dir=output_dir / "fragments", runner=fragment_runner) if requests else {}
