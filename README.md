@@ -164,4 +164,16 @@ Calculation output and caches are never committed. The repository state before t
 October 2026 cleanup (old DFT-scout pipeline, evidence-planning layers, FeH pilots) is
 kept in the tag `archive/pre-cleanup-2026-10-16`. See `CONTRIBUTING.md` for development rules.
 
-License: GPL-3.0-only.
+## Background
+
+OpenEA grew out of the need for electron affinities in laser photodetachment for accelerator mass
+spectrometry, where most diatomic anions have never been measured. Its predecessors:
+
+- [DiatomicEA](https://github.com/Paranoidgrinch/diatomic-ea) — a released desktop app that estimates EAs
+  from a fixed DFT ensemble with calibrated prediction intervals. Fast, but limited by DFT.
+- [diatomic-ea-workflow](https://github.com/Paranoidgrinch/diatomic-ea-workflow) (v0.9) — explicit discovery
+  and following of electronic states along the potential curve; its ideas became OpenEA's state layers.
+
+## License
+
+GPL-3.0-only — see [LICENSE](LICENSE).
