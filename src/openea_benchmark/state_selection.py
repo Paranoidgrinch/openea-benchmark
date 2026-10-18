@@ -240,6 +240,7 @@ def build_state_selection_report(
                     "dissociative_to_asymptote",
                     "merged_into_bracketed_component",
                     "above_lowest_dissociation_limit",
+                    "lambda_mixed_mr_route",  # MR competitor layer decides (symmetry_scout)
                 )
                 and graph_resolved
                 and sector_status == "dft_scout_complete"

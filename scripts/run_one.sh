@@ -3,6 +3,7 @@
 # Usage: scripts/run_one.sh RUN_NAME A B        (from the repository root)
 # Log: runs/RUN_NAME/AB.log; results: $OPENEA_OUTPUT/RUN_NAME/AB/ (default ../openea_results).
 # All runs on the machine share one core-slot budget and one memory gate (runs/core_slots).
+# OPENEA_EXTRA_ARGS: extra workflow flags, e.g. "--auto-dry-run --no-electronic-ea" (scout only).
 set -u
 RUN="$1"; A="$2"; B="$3"
 THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-8}"
@@ -16,5 +17,5 @@ export OMP_NUM_THREADS="$THREADS" OPENBLAS_NUM_THREADS="$THREADS" MKL_NUM_THREAD
 nice -n 19 .venv/bin/python -m openea_benchmark.workflow --atoms "$A" "$B" \
   --output "$OUTPUT" --threads "$THREADS" --cbs-memory-mb "${CBS_MEMORY_MB:-48000}" \
   --point-workers "$CORE_SLOTS" --core-slots "$CORE_SLOTS" --core-slots-dir runs/core_slots \
-  --mem-limit-frac "${MEM_LIMIT_FRAC:-0.70}" >> "$LOG" 2>&1
+  --mem-limit-frac "${MEM_LIMIT_FRAC:-0.70}" ${OPENEA_EXTRA_ARGS:-} >> "$LOG" 2>&1
 echo "EXIT $?" >> "$LOG"

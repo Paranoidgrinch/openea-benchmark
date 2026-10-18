@@ -48,10 +48,12 @@ class SymmetryScoutPolicy:
     fine_steps: int = 4             # constant steps near the start geometry
     step_growth: float = 1.5        # then geometric growth ...
     max_step_angstrom: float = 0.5  # ... up to this step
-    max_points_per_side: int = 16
+    max_points_per_side: int = 24
     max_bracket_refinements: int = 8
     min_r_angstrom: float = 0.5
-    max_r_angstrom: float = 4.0
+    # 4.0 A cut off weakly bound large-R states before their minimum (verify_v1: Li2/Na2
+    # a3Sigmau+, Na2- 2Sigmag+ stopped at R_LIMIT and blocked the EA as open components).
+    max_r_angstrom: float = 8.0
     plateau_energy_tolerance_ev: float = 0.01
     occupation_window_below: int = 3
     occupation_window_above: int = 5
@@ -109,6 +111,37 @@ def plan_blocks(atom_a: str, atom_b: str, charge: int, r0: float, policy: Symmet
     }
 
 
+# Point labels from the determinant <Lz^2> (symmetry_states.label_of_determinant).
+# Blocks scanned under the former per-orbital |m| rule are relabelled from their
+# stored checkpoints on load (no new SCF).
+LABEL_RULE = "DETERMINANT_LZ2_V1"
+# Scan extent is not part of the scout signature: cached blocks stopped by a smaller
+# extent are continued from their stored points (no rescan of existing geometries).
+SCAN_EXTENT_FIELDS = ("max_r_angstrom", "max_points_per_side", "max_bracket_refinements")
+
+
+def _relabel_block_from_checkpoints(block: dict) -> bool:
+    """Relabel the stored points of a block with the current rule; False if a checkpoint is missing."""
+    from pyscf.lib import chkfile
+    from .symmetry_states import label_of_determinant
+    points = []
+    for p in block["points"]:
+        p = dict(p)
+        if p.get("converged"):
+            path = p.get("checkpoint")
+            if not path or not Path(path).is_file():
+                return False
+            mol = chkfile.load_mol(path)
+            scf = chkfile.load(path, "scf")
+            sym = label_of_determinant(mol, scf["mo_coeff"], scf["mo_occ"], like_nuclei=mol.groupname == "D2h")
+            p["label"] = None if sym is None else sym.label
+        points.append(p)
+    block["points"] = points
+    block["status"] = classify_block_scan(points, block.get("side_status", {}).get("higher_r"), block["label"])
+    block["label_rule"] = LABEL_RULE
+    return True
+
+
 def _bracket_label_consistent(ok: Sequence[Mapping[str, Any]], i: int, target: str) -> bool:
     """The minimum carries the block label and neither neighbour carries another one.
 
@@ -120,6 +153,31 @@ def _bracket_label_consistent(ok: Sequence[Mapping[str, Any]], i: int, target: s
     return ok[i]["label"] == target and all(ok[j]["label"] in (None, target) for j in (i - 1, i + 1))
 
 
+def bracket_label(points: Sequence[Mapping[str, Any]]) -> str | None:
+    """The one Lambda-S label shared by the minimum and both neighbours, else None.
+
+    With determinant labels (an exact Lz^2 eigenvalue plus the imposed irreps) a block
+    that converged onto another state along its whole bracket is a curve of that
+    state with the same irrep occupation (verify_v1 LaO: X2Sigma+ found only inside the
+    2Delta block; FeO-: 4Delta inside the 4Sigma- block)."""
+    ok = [p for p in sorted(points, key=lambda p: p["r_angstrom"]) if p["converged"]]
+    if len(ok) < 3:
+        return None
+    i = min(range(len(ok)), key=lambda k: ok[k]["energy_hartree"])
+    if not 0 < i < len(ok) - 1:
+        return None
+    labels = {ok[j]["label"] for j in (i - 1, i, i + 1)}
+    return labels.pop() if len(labels) == 1 else None
+
+
+LAMBDA_MIXED_STATUS = "lambda_mixed_mr_route"
+
+
+def _minimum_lambda_mixed(points: Sequence[Mapping[str, Any]]) -> bool:
+    ok = [p for p in points if p["converged"]]
+    return bool(ok) and min(ok, key=lambda p: p["energy_hartree"])["label"] is None
+
+
 def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: str | None, target: str) -> str:
     """Scan status from the stored points (also re-applied to cached scout records)."""
     ok = [p for p in sorted(points, key=lambda p: p["r_angstrom"]) if p["converged"]]
@@ -128,7 +186,9 @@ def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: st
     energies = [p["energy_hartree"] for p in ok]
     i_min = min(range(len(ok)), key=lambda i: energies[i])
     if 0 < i_min < len(ok) - 1 and energies[i_min - 1] > energies[i_min] < energies[i_min + 1]:
-        return "BRACKETED_SINGLE_MINIMUM" if _bracket_label_consistent(ok, i_min, target) else "LABEL_CHANGED"
+        if _bracket_label_consistent(ok, i_min, target):
+            return "BRACKETED_SINGLE_MINIMUM"
+        return "BRACKETED_RELABELLED" if bracket_label(points) not in (None, target) else "LABEL_CHANGED"
     if any(p["label"] != target for p in ok):
         return "LABEL_CHANGED"
     if higher_r_status == "PLATEAU" and i_min == len(ok) - 1:
@@ -137,8 +197,13 @@ def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: st
 
 
 def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: SymmetryScoutPolicy,
-               checkpoint_dir: Path, scf_runner: Callable[..., Any] | None = None) -> dict:
-    """Seeded R scan inside one symmetry block until a bracketed minimum or a large-R plateau."""
+               checkpoint_dir: Path, scf_runner: Callable[..., Any] | None = None,
+               existing: Mapping[str, Any] | None = None) -> dict:
+    """Seeded R scan inside one symmetry block until a bracketed minimum or a large-R plateau.
+
+    ``existing`` (a stored block scan) is continued: its points are kept, sides that
+    stopped at R_LIMIT/BUDGET are extended under the current policy, and the bracket
+    refinement is applied again."""
     def default_runner(r, seed):
         from pyscf import lib
         mol = build_symmetric_molecule(atoms, r, basis=policy.basis, charge=charge, two_s=occ.symmetry.two_s)
@@ -164,14 +229,50 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
             "checkpoint": res.checkpoint, "warnings": list(res.warnings)}
         return points[round(r, 4)]
 
-    center = compute(r0, None)
-    if not center["converged"]:
-        return {"status": "SCF_FAILED_AT_START", "points": sorted(points.values(), key=lambda p: p["r_angstrom"])}
     status = {}
-    for direction in (-1, +1):
-        prev, step, r = center, policy.step_angstrom, r0
-        for k in range(1, policy.max_points_per_side + 1):
-            if k > policy.fine_steps:
+    starts = {}
+    if existing is not None:
+        for p in existing["points"]:
+            points[round(p["r_angstrom"], 4)] = dict(p)
+        center = points.get(round(r0, 4)) or min((p for p in points.values() if p["converged"]),
+                                                 key=lambda p: abs(p["r_angstrom"] - r0))
+        side = existing.get("side_status") or {}
+        for direction, key in ((-1, "lower_r"), (+1, "higher_r")):
+            if side.get(key) not in ("R_LIMIT", "BUDGET", "SCF_FAILED"):
+                status[direction] = side.get(key)
+                continue
+            own = sorted((p for p in points.values() if p["converged"]
+                          and direction * (p["r_angstrom"] - center["r_angstrom"]) > 0),
+                         key=lambda p: direction * p["r_angstrom"])
+            if side.get(key) == "SCF_FAILED":
+                # continue from the last converged point, retrying the failed step halved
+                failed = [p for p in points.values() if not p["converged"]
+                          and direction * (p["r_angstrom"] - (own[-1] if own else center)["r_angstrom"]) > 0]
+                if failed:
+                    last = own[-1] if own else center
+                    gap = min(abs(f["r_angstrom"] - last["r_angstrom"]) for f in failed)
+                    starts[direction] = (last, gap, len(own) + 1, "RETRY_HALF")
+                    continue
+            if not own:
+                starts[direction] = (center, policy.step_angstrom, 1)
+                continue
+            last = own[-1]
+            step = abs(last["r_angstrom"] - (own[-2] if len(own) > 1 else center)["r_angstrom"])
+            starts[direction] = (last, step, len(own) + 1)
+    else:
+        center = compute(r0, None)
+        if not center["converged"]:
+            return {"status": "SCF_FAILED_AT_START",
+                    "points": sorted(points.values(), key=lambda p: p["r_angstrom"])}
+        starts = {-1: (center, policy.step_angstrom, 1), +1: (center, policy.step_angstrom, 1)}
+    for direction, start in starts.items():
+        prev, step, k0 = start[:3]
+        retry_half = len(start) > 3
+        r = prev["r_angstrom"]
+        for k in range(k0, policy.max_points_per_side + 1):
+            if retry_half:
+                step, retry_half = step / 2.0, False
+            elif k > policy.fine_steps:
                 step = min(step * policy.step_growth, policy.max_step_angstrom)
             r = round(r + direction * step, 4)
             if r < policy.min_r_angstrom or r > policy.max_r_angstrom:
@@ -179,8 +280,15 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
                 break
             p = compute(r, prev["checkpoint"])
             if not p["converged"]:
-                status[direction] = "SCF_FAILED"
-                break
+                # One retry at half the step from the last converged geometry: a closer
+                # seed often converges (verify_v1 NiO- 2Delta failed at 1.80 A and the
+                # minimum stayed unbracketed at 1.85 A).
+                step = step / 2.0
+                r = round(prev["r_angstrom"] + direction * step, 4)
+                p = points.get(r) or compute(r, prev["checkpoint"])
+                if not p["converged"] or r < policy.min_r_angstrom:
+                    status[direction] = "SCF_FAILED"
+                    break
             if p["energy_hartree"] > prev["energy_hartree"]:
                 status[direction] = "RISES"
                 break
@@ -197,8 +305,8 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
     for _ in range(policy.max_bracket_refinements):
         ok = [p for p in sorted(points.values(), key=lambda p: p["r_angstrom"]) if p["converged"]]
         i = min(range(len(ok)), key=lambda j: ok[j]["energy_hartree"])
-        if not 0 < i < len(ok) - 1 or not _bracket_label_consistent(ok, i, occ.symmetry.label):
-            break
+        if not 0 < i < len(ok) - 1 or ok[i]["label"] is None:
+            break  # refine any bracket whose minimum is an exact-Lambda determinant
         left, right = ok[i]["r_angstrom"] - ok[i - 1]["r_angstrom"], ok[i + 1]["r_angstrom"] - ok[i]["r_angstrom"]
         if max(left, right) <= policy.step_angstrom + 1e-9:
             break
@@ -210,7 +318,8 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
     energies = [p["energy_hartree"] for p in ok]
     i_min = min(range(len(ok)), key=lambda i: energies[i])
     result_status = classify_block_scan(ordered, status.get(+1), occ.symmetry.label)
-    return {"status": result_status, "side_status": {"lower_r": status.get(-1), "higher_r": status.get(+1)},
+    return {"status": result_status, "label_rule": LABEL_RULE,
+            "side_status": {"lower_r": status.get(-1), "higher_r": status.get(+1)},
             "minimum": {"r_angstrom": ok[i_min]["r_angstrom"], "energy_hartree": energies[i_min],
                         "checkpoint": ok[i_min]["checkpoint"]},
             "symmetry_breaking_instability_points": sum(1 for p in ok if p["symmetry_breaking_instability"]),
@@ -232,13 +341,53 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
     output_dir = Path(output_dir)
     r0 = r0 if r0 is not None else covalent_start_r(atom_a, atom_b)
     path = output_dir / "symmetry_scout.json"
-    signature = sha256(json.dumps({"policy": asdict(policy), "atoms": [atom_a, atom_b], "r0": r0},
+    level = {k: v for k, v in asdict(policy).items() if k not in SCAN_EXTENT_FIELDS}
+    signature = sha256(json.dumps({"policy": level, "atoms": [atom_a, atom_b], "r0": r0},
                                   sort_keys=True).encode()).hexdigest()
     record = json.loads(path.read_text()) if path.exists() else {}
     if record.get("signature") != signature:
-        record = {"signature": signature, "charges": {}}
+        old_level = {k: v for k, v in (record.get("policy") or {}).items() if k not in SCAN_EXTENT_FIELDS}
+        # Records from before the extent split: same level of theory -> keep, extend below.
+        if not (old_level == level and record.get("atoms") == [atom_a, atom_b] and record.get("r0_angstrom") == r0):
+            record = {"charges": {}}
+        record["signature"] = signature
     record.update(system=f"{atom_a}{atom_b}", atoms=[atom_a, atom_b], r0_angstrom=r0, policy=asdict(policy),
                   validation_metadata_used_in_computation=False)
+    relabelled = False
+    for entry in record["charges"].values():
+        for bid, block in list(entry.get("blocks", {}).items()):
+            if block.get("label_rule") != LABEL_RULE and block.get("status") != "SCF_FAILED_AT_START":
+                if _relabel_block_from_checkpoints(block):
+                    relabelled = True
+                else:
+                    del entry["blocks"][bid]  # checkpoint gone: rescan this block
+    if relabelled:
+        _save(path, record)
+    extent = {k: getattr(policy, k) for k in SCAN_EXTENT_FIELDS}
+    for q_str, entry in record["charges"].items():
+        cont = []
+        for b in entry.get("plan", {}).get("blocks", ()):
+            occ = BlockOccupation(_symmetry_from_label(b["label"]),
+                                  tuple((k, tuple(v)) for k, v in b["irrep_nelec"]), b["orbital_energy_sum"])
+            bid = _block_id(int(q_str), occ)
+            block = entry["blocks"].get(bid)
+            if block and block.get("extent") != extent and block.get("status") != "SCF_FAILED_AT_START":
+                cont.append((b, bid, occ, block))
+
+        def store_cont(index: int, scan: dict, entry=entry, cont=cont) -> None:
+            b, bid, _, _ = cont[index]
+            entry["blocks"][bid] = {"label": b["label"], "two_s": b["two_s"], "irrep_nelec": b["irrep_nelec"],
+                                    **scan, "extent": extent}
+            _save(path, record)
+
+        args = [((atom_a, atom_b), int(q_str), occ, r0, policy, output_dir / "symmetry_checkpoints",
+                 scf_runner_factory(int(q_str), occ) if scf_runner_factory else None, block)
+                for _, _, occ, block in cont]
+        if scf_runner_factory:
+            for index, item in enumerate(args):
+                store_cont(index, scan_block(*item))
+        elif args:
+            run_parallel(scan_block, args, on_result=store_cont)
     for charge in charges:
         entry = record["charges"].setdefault(str(charge), {"blocks": {}})
         if "plan" not in entry:
@@ -263,7 +412,7 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
         def store(index: int, scan: dict, entry=entry, todo=todo) -> None:
             b, bid, _ = todo[index]
             entry["blocks"][bid] = {"label": b["label"], "two_s": b["two_s"], "irrep_nelec": b["irrep_nelec"],
-                                    **scan}
+                                    **scan, "extent": {k: getattr(policy, k) for k in SCAN_EXTENT_FIELDS}}
             _save(path, record)
 
         # Blocks are independent scans (own seeds, own checkpoint names): they run
@@ -289,7 +438,8 @@ def _symmetry_from_label(label: str):
 
 # ------------------------------------------------------------ legacy export
 
-_STATUS_MAP = {"BRACKETED_SINGLE_MINIMUM": "bracketed_single_minimum"}
+_STATUS_MAP = {"BRACKETED_SINGLE_MINIMUM": "bracketed_single_minimum",
+               "BRACKETED_RELABELLED": "bracketed_single_minimum"}
 
 
 def lowest_dissociation_limit(atomic: Mapping[str, Any], atom_a: str, atom_b: str, charge: int) -> dict | None:
@@ -363,6 +513,13 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                     block["points"], block.get("side_status", {}).get("higher_r"), block["label"])}
             status = _STATUS_MAP.get(block["status"], block["status"].lower())
             minimum_scout: dict[str, Any] = {"status": status, "component_id": bid, "candidates": []}
+            if block["status"] == "LABEL_CHANGED" and _minimum_lambda_mixed(block["points"]):
+                # The block determinant at its lowest point is not an Lz^2 eigenfunction
+                # (e.g. pi^1 delta^1 mixes Pi and Phi): no single-reference state of any
+                # Lambda.  Route the target term to the MR competitor layer, which bounds
+                # every state of this (charge, spin, irrep) block; the final verdict stays
+                # blocked until that layer clears it.
+                minimum_scout = {**minimum_scout, "status": LAMBDA_MIXED_STATUS}
             lowest = min((p["energy_center_hartree"] for p in pts), default=None)
             reaches_large_r = block.get("side_status", {}).get("higher_r") in ("R_LIMIT", "PLATEAU", "RISES")
             if (limit is not None and lowest is not None and reaches_large_r
@@ -390,10 +547,19 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                                              (last["energy_center_hartree"] - asym["energy_hartree"]) * HARTREE_TO_EV}}
                 else:
                     minimum_scout["status"] = "plateau_not_on_computed_asymptote"
+            if minimum_scout["status"] == LAMBDA_MIXED_STATUS and not any(
+                    m["charge"] == charge and m["label"] == block["label"] for m in mr_only):
+                mr_only.append({"charge": charge, "label": block["label"], "count": 1, "channels": [],
+                                "reason": "LAMBDA_MIXED_SINGLE_DETERMINANT", "component_id": bid})
+            symmetry_block = {"label": block["label"], "point_group": pg, "two_s": two_s,
+                              "irrep_nelec": block["irrep_nelec"]}
+            if block["status"] == "BRACKETED_RELABELLED":
+                # Same irrep occupation, converged state carries another exact label.
+                symmetry_block = {**symmetry_block, "label": bracket_label(block["points"]),
+                                  "block_target_label": block["label"]}
             sector["manifold_pec_scouts"].append({
                 "component_id": bid, "pec": {"component_id": bid, "points": pts}, "minimum_scout": minimum_scout,
-                "symmetry_block": {"label": block["label"], "point_group": pg, "two_s": two_s,
-                                   "irrep_nelec": block["irrep_nelec"]}})
+                "symmetry_block": symmetry_block})
     for sector in sectors.values():
         _merge_coincident_label_changed(sector)
     spins = {q: sorted({s for (c, s) in sectors if c == q}) for q in (0, -1)}
@@ -421,14 +587,22 @@ def _merge_coincident_label_changed(sector: dict) -> None:
     covered by that component, not an open competitor."""
     from .open_pec_extension import MERGED_STATUS
     scouts = sector["manifold_pec_scouts"]
-    bracketed = [s for s in scouts if s["minimum_scout"]["status"] == "bracketed_single_minimum"]
+    # Blocks that kept their own label come first, so a relabelled duplicate merges into them.
+    bracketed = sorted((s for s in scouts if s["minimum_scout"]["status"] == "bracketed_single_minimum"),
+                       key=lambda s: "block_target_label" in s["symmetry_block"])
     for scout in scouts:
         pts = sorted(scout["pec"]["points"], key=lambda p: p["r_angstrom"])
-        if scout["minimum_scout"]["status"] != "label_changed" or len(pts) < 3:
+        relabelled = "block_target_label" in scout["symmetry_block"] \
+            and scout["minimum_scout"]["status"] == "bracketed_single_minimum"
+        if not (scout["minimum_scout"]["status"] == "label_changed" or relabelled) or len(pts) < 3:
             continue
         i = min(range(len(pts)), key=lambda k: pts[k]["energy_center_hartree"])
         probe = pts[max(0, i - 1):i + 2]
         for other in bracketed:
+            if other is scout or other["minimum_scout"]["status"] != "bracketed_single_minimum":
+                continue
+            if relabelled and other["symmetry_block"]["label"] != scout["symmetry_block"]["label"]:
+                continue
             hits = []
             for p in probe:
                 ref = next((q for q in other["pec"]["points"]
@@ -441,7 +615,7 @@ def _merge_coincident_label_changed(sector: dict) -> None:
                              "delta_hartree": p["energy_center_hartree"] - ref["energy_center_hartree"]})
             if len(hits) == len(probe) >= 2:
                 scout["minimum_scout"] = {**scout["minimum_scout"], "status": MERGED_STATUS,
-                                          "scout_status": "label_changed",
+                                          "scout_status": "bracketed_relabelled" if relabelled else "label_changed",
                                           "merged_into_component_id": other["component_id"],
                                           "coincident_points": hits}
                 break

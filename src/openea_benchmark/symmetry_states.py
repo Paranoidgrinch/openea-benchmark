@@ -196,8 +196,89 @@ def _occupied_tables(mf) -> tuple[list[OrbitalInfo], list[OrbitalInfo]]:
 
 
 def label_of_mean_field(mf, *, like_nuclei: bool) -> MolecularSymmetry | None:
-    alpha, beta = _occupied_tables(mf)
-    return label_from_orbitals(alpha, beta, like_nuclei=like_nuclei)
+    return label_of_determinant(mf.mol, mf.mo_coeff, mf.mo_occ, like_nuclei=like_nuclei)
+
+
+# Largest admixture of the Lambda+-2 partner (same abelian irrep: Sigma+/Delta,
+# Pi/Phi, Delta/Gamma) for which a determinant still carries the label of its dominant
+# Lambda: w = |<Lz^2> - L^2| / |(L+-2)^2 - L^2|.  An absolute window does not work:
+# verify_v1 Cu2- 4Piu drifts 1.05-1.12 (w <= 1.5 %), VO near 4Delta 3.85-4.48 (w <= 4 %),
+# genuine mixtures such as VO 4.90 or PO 5Sigma- 0.31 have w > 7 %.
+DETERMINANT_LAMBDA_ADMIXTURE_MAX = 0.05
+
+
+def dominant_lambda(lz2: float) -> int | None:
+    """Dominant Lambda of a determinant from <Lz^2>, None above the admixture limit."""
+    best = None
+    for lam in range(0, 9):
+        sq = lam * lam
+        partner = (lam + 2) ** 2 if lz2 >= sq else (lam - 2) ** 2
+        if lz2 < sq and lam < 2:
+            partner = None  # nothing below Sigma; below Pi only basis noise
+        weight = abs(lz2 - sq) / abs(partner - sq) if partner is not None else abs(lz2 - sq) / 3.0
+        if best is None or weight < best[1]:
+            best = (lam, weight)
+    return best[0] if best[1] <= DETERMINANT_LAMBDA_ADMIXTURE_MAX else None
+
+
+def determinant_lz2(mol, occupied: Sequence[np.ndarray]) -> float:
+    """<Phi|Lz^2|Phi> of a determinant from its occupied orbitals per spin.
+
+    With real orbitals <i|lz|i> = 0, so <Lz^2> = sum_i <i|lz^2|i> - sum_ij(same spin) |<i|lz|j>|^2.
+    Invariant under rotations inside the occupied space, unlike per-orbital |m|
+    (verify_v1: Cu2/Ag2/IO points with sigma/delta-mixed occupied orbitals but an
+    exact Lambda determinant had no orbital-based label).
+    """
+    s = mol.intor("int1e_ovlp")
+    with mol.with_common_origin((0.0, 0.0, 0.0)):
+        a = mol.intor("int1e_cg_irxp", comp=3)[2]
+    lz2 = -a @ np.linalg.solve(s, a)
+    total = 0.0
+    for c in occupied:
+        if c.shape[1]:
+            total += float(np.trace(c.T @ lz2 @ c) - np.sum((c.T @ a @ c) ** 2))
+    return total
+
+
+def label_of_determinant(mol, mo_coeff, mo_occ, *, like_nuclei: bool) -> MolecularSymmetry | None:
+    """Lambda-S label of a symmetry-block determinant, None if it mixes Lambda values.
+
+    Lambda from the determinant <Lz^2>; 2S from the electron counts; g/u and Sigma+/-
+    from the abelian irreps of the occupied orbitals (characters of inversion and of
+    the xz mirror plane), which are exact for the imposed irrep occupation.
+    """
+    from pyscf.scf import hf_symm
+    from pyscf.symm import param
+
+    mo_occ = np.asarray(mo_occ)
+    if mo_occ.ndim == 2:
+        occupied = [np.asarray(mo_coeff[k])[:, mo_occ[k] > 0.5] for k in (0, 1)]
+        coeffs = [np.asarray(mo_coeff[k]) for k in (0, 1)]
+        masks = [mo_occ[k] > 0.5 for k in (0, 1)]
+    else:
+        c = np.asarray(mo_coeff)
+        occupied = [c[:, mo_occ > 0.5], c[:, mo_occ > 1.5]]
+        coeffs, masks = [c, c], [mo_occ > 0.5, mo_occ > 1.5]
+    two_s = occupied[0].shape[1] - occupied[1].shape[1]
+    if two_s < 0:
+        return None
+    lam = dominant_lambda(determinant_lz2(mol, occupied))
+    if lam is None:
+        return None
+    names = dict(zip(mol.irrep_id, mol.irrep_name))
+    ops = param.OPERATOR_TABLE[mol.groupname]
+    chars = {row[0]: dict(zip(ops, row[1:])) for row in param.CHARACTER_TABLE[mol.groupname]}
+    inversion, mirror = 1, 1
+    for c, mask in zip(coeffs, masks):
+        for irrep_id in np.asarray(hf_symm.get_orbsym(mol, c))[mask]:
+            ch = chars[names[irrep_id]]
+            mirror *= ch["sy"]          # sigma_v(xz)
+            inversion *= ch.get("i", 1)
+    return MolecularSymmetry(
+        two_s=two_s, lam=lam,
+        gu=("g" if inversion > 0 else "u") if like_nuclei else None,
+        reflection=("+" if mirror > 0 else "-") if lam == 0 else None,
+    )
 
 
 def run_block_scf(mol, occupation: BlockOccupation, *, method: str = "HF", xc: str | None = None,

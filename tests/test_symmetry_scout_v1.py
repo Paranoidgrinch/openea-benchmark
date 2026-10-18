@@ -69,10 +69,11 @@ def test_scan_detects_dissociative_plateau(tmp_path):
     assert res["status"] == "DISSOCIATIVE_PLATEAU"
 
 
-def test_label_change_is_never_accepted(tmp_path):
+def test_other_state_is_never_accepted_under_the_block_label(tmp_path):
+    # The block converged onto 2Sigma+ everywhere: a curve of 2Sigma+, not of 2Pi.
     res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path,
                      _runner(lambda r: (r - 0.97) ** 2, label="2Sigma+"))
-    assert res["status"] == "LABEL_CHANGED"
+    assert res["status"] == "BRACKETED_RELABELLED"
 
 
 def _labelled_runner(shape, label_at):
@@ -154,3 +155,45 @@ def test_legacy_summary_independent_of_record_key_order():
     record = json.loads(candidates[0].read_text())
     reversed_order = json.loads(json.dumps(record), object_pairs_hook=lambda kv: dict(reversed(kv)))
     assert json.dumps(to_legacy_summary(record), sort_keys=True) == json.dumps(to_legacy_summary(reversed_order), sort_keys=True)
+
+
+def test_cached_scan_stopped_at_r_limit_is_continued(tmp_path):
+    # verify_v1 Li2 a3Sigmau+: still decreasing at the former 4.0 A limit.  A wider
+    # extent continues the stored scan instead of rescanning it.
+    from dataclasses import replace
+    calls = []
+    def shape(r):
+        calls.append(r)
+        return (r - 4.6) ** 2
+    small = replace(POLICY, max_r_angstrom=4.0)
+    first = scan_block(("Li", "Li"), 0, _occ(), 2.6, small, tmp_path, _runner(shape))
+    assert first["side_status"]["higher_r"] == "R_LIMIT" and first["status"] == "UNRESOLVED"
+    n_first = len(calls)
+    wide = replace(POLICY, max_r_angstrom=8.0)
+    second = scan_block(("Li", "Li"), 0, _occ(), 2.6, wide, tmp_path, _runner(shape), existing=first)
+    assert second["status"] == "BRACKETED_SINGLE_MINIMUM"
+    assert abs(second["minimum"]["r_angstrom"] - 4.6) <= POLICY.step_angstrom
+    assert all(round(r, 4) not in {p["r_angstrom"] for p in first["points"]} for r in calls[n_first:])
+
+
+def test_consistently_relabelled_bracket_becomes_candidate_of_that_state():
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    block = _block("2Delta", 1, [(1.8, -0.95), (1.9, -1.0), (2.0, -0.97)], "LABEL_CHANGED")
+    for p in block["points"]:
+        p["label"] = "2Sigma+"
+    sc = to_legacy_summary(_record({"d": block}))["sectors"][0]["manifold_pec_scouts"][0]
+    assert sc["minimum_scout"]["status"] == "bracketed_single_minimum"
+    assert sc["symmetry_block"]["label"] == "2Sigma+" and sc["symmetry_block"]["block_target_label"] == "2Delta"
+
+
+def test_scf_failure_is_retried_at_half_step(tmp_path):
+    # verify_v1 NiO- 2Delta: SCF failed one step inside the minimum -> unbracketed.
+    def run(r, seed):
+        ok = abs(r - 0.95) > 1e-6
+        return BlockSCFResult(symmetry=_symmetry_from_label("2Pi"), target=_occ().symmetry, irrep_nelec={},
+                              converged=ok, energy_hartree=(r - 0.985) ** 2 if ok else None,
+                              stable_within_symmetry=True, symmetry_breaking_instability=False,
+                              checkpoint=f"{r}.chk")
+    res = scan_block(("O", "H"), 0, _occ(), 1.0, POLICY, tmp_path, run)
+    assert res["status"] == "BRACKETED_SINGLE_MINIMUM"
+    assert any(abs(p["r_angstrom"] - 0.975) < 1e-9 for p in res["points"])
