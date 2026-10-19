@@ -265,7 +265,7 @@ def run_mr_term_gap_stage(*, mr_competitors: Mapping[str, Any] | None, output_di
         jobs.append((tuple(sel["atoms"]), charge, ref, spec, r0, policy, str(output_dir / "blocks"), hint, reuse))
         meta.append({"charge": charge, "label": label, "role": sel["role"]})
         print(f"[MR-GAP] q={charge} {label} vs {ref['label']}", flush=True)
-    results = run_parallel(task_fn or _gap_task, jobs)
+    results = run_parallel(task_fn or _gap_task, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))
     gaps = [{**m, **res} for m, res in zip(meta, results)]
     failed = [g for g in gaps if g.get("status") != "COMPLETED"]
     return done(status="CLEARED" if not failed else "UNRESOLVED_GAP_NOT_COMPUTED", gaps=gaps)

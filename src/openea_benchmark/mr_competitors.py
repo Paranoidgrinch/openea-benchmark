@@ -396,7 +396,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
             index.append((q, mult, irrep))
     for job in jobs:
         print(f"[MR] {electronic_ea.get('system')} q={job[1]} 2S+1={job[2]} {job[3]} R={job[4]:.3f}", flush=True)
-    results = run_parallel(fn, jobs)
+    results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
     per_block: dict[tuple, list] = {}
     for key, res in zip(index, results):
         per_block.setdefault(key, []).append(res)

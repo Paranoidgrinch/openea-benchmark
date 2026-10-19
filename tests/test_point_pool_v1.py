@@ -83,3 +83,34 @@ def test_memory_gate_waits_counts_reservations_and_clears(tmp_path, monkeypatch)
     assert record == [point_pool._machine_id(), str(os.getpid()), "100"]
     assert (slots / "slot002.lock").read_text() == ""  # stale record dropped
     assert (slots / "slot000.lock").read_text() == ""  # reservation cleared on release
+
+
+def test_nested_slot_reserves_the_task_estimate_and_restores(tmp_path, monkeypatch):
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=1,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 0.0)
+    state = {"mem": (1000.0, 500.0)}  # 500 used
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        state["mem"] = (1000.0, 900.0)  # 100 used: the larger reservation fits
+
+    monkeypatch.setattr(point_pool, "meminfo_mb", lambda: state["mem"])
+    monkeypatch.setattr(point_pool.time, "sleep", fake_sleep)
+    path = slots / "slot000.lock"
+    try:
+        with point_pool.core_slot():
+            outer = path.read_text().split()[2]
+            with point_pool.core_slot(reserve_mb=30):  # smaller estimate: no wait, frees the rest
+                small = path.read_text().split()[2]
+            assert not sleeps
+            with point_pool.core_slot(reserve_mb=400):  # 500 + 400 > 800: waits once
+                large = path.read_text().split()[2]
+            restored = path.read_text().split()[2]
+    finally:
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert (outer, small, large, restored) == ("100", "30", "400", "100")
+    assert len(sleeps) == 1

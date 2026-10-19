@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from ..heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from math import isfinite
 from pathlib import Path
@@ -546,6 +546,18 @@ def _run_stage3_point_pyscf(
     request: Stage3ExecutionRequest,
     settings: Stage3ExecutionSettings,
 ) -> Stage3PointResult:
+    """Execute one authorized request with PySCF under its own memory budget
+    (``point_memory_budget_mb``), reserved at the memory gate while it runs."""
+    from ..point_pool import core_slot
+    budget = point_memory_budget_mb(request, settings)
+    with core_slot(reserve_mb=budget * GATE_OVERSHOOT):
+        return _run_stage3_point_pyscf_body(request, replace(settings, max_memory_mb=budget))
+
+
+def _run_stage3_point_pyscf_body(
+    request: Stage3ExecutionRequest,
+    settings: Stage3ExecutionSettings,
+) -> Stage3PointResult:
     """Execute one authorized request with PySCF; imported lazily for testability."""
     import pyscf
     from pyscf import cc, gto, scf
@@ -839,6 +851,50 @@ def uccsd_incore_memory_mb(nmo: int, nao: int) -> float:
     nmo^4 arrays plus their sliced copies (~1 more), plus the AO integrals of the SCF."""
     nao_pair = nao * (nao + 1) // 2
     return (4 * nmo**4 + nao_pair**2) * 8 / 1e6
+
+
+# PySCF memory of one CC point (user decision 2026-10-20): a point gets what its basis
+# needs, at most the cap; integrals beyond it go out of core / AO-direct to scratch, so
+# a large point runs (somewhat slower) instead of waiting for free RAM.  The memory gate
+# reserves the same budget plus PySCF's overshoot instead of a run-wide 48 GB.
+POINT_MEMORY_CAP_ENV = "OPENEA_POINT_MEMORY_CAP_MB"
+DEFAULT_POINT_MEMORY_CAP_MB = 16000
+POINT_MEMORY_FLOOR_MB = 2000
+GATE_OVERSHOOT = 1.25
+
+
+def point_memory_cap_mb() -> int:
+    import os
+    return int(os.environ.get(POINT_MEMORY_CAP_ENV, DEFAULT_POINT_MEMORY_CAP_MB))
+
+
+def cc_point_memory_need_mb(nao: int, ncorr_occ: int, open_shell: bool) -> float:
+    """In-core peak of a PySCF SCF + CCSD(T) point (nmo = nao): the larger of the SCF's
+    8-fold AO integrals and the CC integrals, plus amplitude copies (t2, residual,
+    intermediates) and the interpreter baseline."""
+    nao_pair = nao * (nao + 1) // 2
+    scf_mb = nao_pair * (nao_pair + 1) / 2 * 8 / 1e6
+    cc_mb = uccsd_incore_memory_mb(nao, nao) if open_shell else (nao ** 4 / 4 + nao_pair ** 2) * 8 / 1e6
+    nvir = max(0, nao - ncorr_occ)
+    amp_mb = 8 * (3 if open_shell else 1) * (ncorr_occ * nvir) ** 2 * 8 / 1e6
+    return max(scf_mb, cc_mb) + amp_mb + POINT_MEMORY_FLOOR_MB
+
+
+def point_memory_budget_mb(request: "Stage3ExecutionRequest", settings: "Stage3ExecutionSettings") -> int:
+    """PySCF ``max_memory`` of this point: its estimated need, at most the stage's
+    ``max_memory_mb`` and the cap.  Unknown size (molecule cannot be built): the limit."""
+    from pyscf import gto
+    limit = min(int(settings.max_memory_mb), point_memory_cap_mb())
+    try:
+        mol = gto.M(atom=[(request.atoms[0], (0.0, 0.0, 0.0)), (request.atoms[1], (0.0, 0.0, 1.0))],
+                    **mole_basis_kwargs(request.atoms, dict(request.basis_by_element)
+                                        if request.basis_by_element is not None else request.basis),
+                    charge=request.charge, spin=request.spin_2s, verbose=0, dump_input=False)
+    except Exception:  # noqa: BLE001 - the point itself reports the problem
+        return limit
+    ncorr = max(mol.nelec) - (valence_frozen_core_orbitals(mol) if settings.frozen_core else 0)
+    need = cc_point_memory_need_mb(mol.nao_nr(), ncorr, request.spin_2s > 0 or request.scf_reference != "RHF")
+    return int(min(limit, max(POINT_MEMORY_FLOOR_MB, need)))
 
 
 def _ccsd_eris_within_memory(mycc: Any) -> Any:

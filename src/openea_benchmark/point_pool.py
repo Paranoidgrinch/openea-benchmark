@@ -13,7 +13,10 @@ the not yet allocated part of every running task's reservation plus its own
 reservation stays below ``mem_limit_frac * MemTotal``; otherwise it waits.  The
 holder writes ``host/pid-namespace pid reserve_mb`` into its slot file, so concurrent runs see
 each other's reservations.  ``scripts/openea_mem_watchdog.py`` guards against
-tasks that outgrow their reservation.
+tasks that outgrow their reservation.  A task that knows its own need (a CC point
+from its basis size, see ``stage3_execution.point_memory_budget_mb``) re-enters
+``core_slot(reserve_mb)`` while it holds the slot: its record then carries that
+reservation instead of the run-wide default, smaller or larger, until it leaves.
 
 Without a configured pool everything runs serially in the calling process (the
 behaviour of all tests and of ``--point-workers 1``); slots still apply when set.
@@ -167,14 +170,28 @@ def _pending_big_reservation_mb() -> float:
     return float(fields[2])
 
 
-def _wait_for_memory(handle, reserve_mb: float | None = None, big=None) -> None:
+def _record(handle, reserve_mb: float) -> None:
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{_machine_id()} {os.getpid()} {reserve_mb:.0f}\n")
+    handle.flush()
+
+
+def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact: bool = False) -> None:
     """Block until this task's reservation fits under the memory limit, then record it.
 
     ``reserve_mb`` (per task, e.g. a CCSDTQ storage estimate) replaces the run-wide
-    default when it is larger."""
+    default when it is larger; with ``exact`` (a running task re-reserving its own
+    estimate) it replaces the default in either direction.  The task's resident
+    memory is already part of the machine's memory in use, so only the rest of its
+    reservation is added."""
     if _MEM_LIMIT_FRAC <= 0.0:
         return
-    reserve = max(float(_MEM_RESERVE_MB), float(reserve_mb or 0.0))
+    reserve = float(reserve_mb) if exact else max(float(_MEM_RESERVE_MB), float(reserve_mb or 0.0))
+    if exact:
+        if reserve <= _held_reserve_mb(handle):  # shrinking: already covered, no wait
+            _record(handle, reserve)
+            return
     if big is not None:  # announce the pending large reservation to everyone else
         big.seek(0)
         big.truncate()
@@ -185,7 +202,8 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None) -> None:
         with open(os.path.join(_SLOT_DIR, "memgate.lock"), "a+") as gate:
             fcntl.flock(gate, fcntl.LOCK_EX)  # serialise admissions: no two tasks pass on the same free memory
             total, available = meminfo_mb()
-            projected = (total - available) + _outstanding_reservations_mb(handle.name) + reserve
+            projected = (total - available) + _outstanding_reservations_mb(handle.name) + (
+                max(0.0, reserve - (_rss_mb(os.getpid()) or 0.0)) if exact else reserve)
             if big is None:
                 projected += _pending_big_reservation_mb()
             if projected <= _MEM_LIMIT_FRAC * total:
@@ -194,10 +212,7 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None) -> None:
                     big.truncate()
                     big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} ADMITTED\n")
                     big.flush()
-                handle.seek(0)
-                handle.truncate()
-                handle.write(f"{_machine_id()} {os.getpid()} {reserve:.0f}\n")
-                handle.flush()
+                _record(handle, reserve)
                 return
         if not announced:
             print(f"[MEMORY GATE] pid {os.getpid()} waiting: projected {projected / 1024:.0f} GB > "
@@ -206,15 +221,40 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None) -> None:
         time.sleep(15.0)
 
 
+def _held_reserve_mb(handle) -> float:
+    """Reservation currently recorded in this task's own slot file (0 if none)."""
+    try:
+        handle.seek(0)
+        fields = handle.read().split()
+        return float(fields[2]) if len(fields) == 3 else 0.0
+    except (OSError, ValueError):
+        return 0.0
+
+
 def pool_workers() -> int:
     return _WORKERS if _POOL is not None else 1
 
 
 @contextmanager
 def core_slot(reserve_mb: float | None = None):
-    """Hold one machine-wide core slot (no-op without a slot budget; re-entrant per thread)."""
-    if not _SLOT_DIR or getattr(_LOCAL, "held", False):
+    """Hold one machine-wide core slot (no-op without a slot budget; re-entrant per thread).
+
+    Re-entered with ``reserve_mb`` while the slot is held, the slot's reservation becomes
+    ``reserve_mb`` (waiting at the memory gate if it grows) and is restored on exit."""
+    if not _SLOT_DIR:
         yield
+        return
+    if getattr(_LOCAL, "held", False):
+        handle = getattr(_LOCAL, "handle", None)
+        if reserve_mb is None or handle is None or _MEM_LIMIT_FRAC <= 0.0:
+            yield
+            return
+        previous = _held_reserve_mb(handle)
+        _wait_for_memory(handle, reserve_mb, exact=True)
+        try:
+            yield
+        finally:
+            _record(handle, previous)
         return
     big = None
     if reserve_mb is not None and float(reserve_mb) > BIG_TASK_MB:
@@ -235,12 +275,12 @@ def core_slot(reserve_mb: float | None = None):
             break
         if handle is None:
             time.sleep(2.0)
-    _LOCAL.held = True
+    _LOCAL.held, _LOCAL.handle = True, handle
     try:
         _wait_for_memory(handle, reserve_mb, big)
         yield
     finally:
-        _LOCAL.held = False
+        _LOCAL.held, _LOCAL.handle = False, None
         handle.seek(0)
         handle.truncate()
         fcntl.flock(handle, fcntl.LOCK_UN)

@@ -18,8 +18,12 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from .adaptive.stage3_execution import DEFAULT_POINT_MEMORY_CAP_MB, POINT_MEMORY_CAP_ENV
 from .branch_continuity import BranchThresholds
 from .state_identity import IdentityThresholds
+
+# Gate reservation of a task without its own estimate (scout DFT, fragments, MR, SOC).
+DEFAULT_TASK_RESERVE_MB = 8000
 
 
 # State-identity and branch-continuity thresholds of the Stage-3 / ZPE curve checks.
@@ -338,7 +342,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mem-reserve-mb", type=int, default=None,
-        help="memory reserved per calculation by the memory gate (default: --cbs-memory-mb)",
+        help="memory reserved by the memory gate per calculation without its own estimate "
+             "(CC points reserve their estimated budget instead)",
+    )
+    parser.add_argument(
+        "--point-memory-cap-mb", type=int, default=None,
+        help="upper limit of PySCF memory per CC point; larger integrals go out of core to scratch "
+             f"(default {DEFAULT_POINT_MEMORY_CAP_MB})",
     )
     parser.add_argument(
         "--no-open-pec-extension", action="store_true",
@@ -375,10 +385,13 @@ def _run_symmetry_auto(args) -> int:
     from .compute_threads import set_compute_threads
     from .point_pool import configure_point_pool
     set_compute_threads(args.threads)
+    if args.point_memory_cap_mb is not None:  # read by every point, also in spawned pool workers
+        import os
+        os.environ[POINT_MEMORY_CAP_ENV] = str(args.point_memory_cap_mb)
     configure_point_pool(workers=args.point_workers, threads=args.threads,
                          slot_dir=args.core_slots_dir, n_slots=args.core_slots,
                          mem_limit_frac=args.mem_limit_frac,
-                         mem_reserve_mb=(args.cbs_memory_mb if args.mem_reserve_mb is None
+                         mem_reserve_mb=(DEFAULT_TASK_RESERVE_MB if args.mem_reserve_mb is None
                                          else args.mem_reserve_mb))
     system_dir = args.output / f"{atom_a}{atom_b}"
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
