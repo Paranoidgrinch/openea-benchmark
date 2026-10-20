@@ -70,6 +70,17 @@ def test_atomic_scan_picks_lowest_spin_and_builds_channels(tmp_path):
     assert again["O+0"]["lowest"] == table["O+0"]["lowest"]
 
 
+def test_atomic_scan_drops_non_finite_energies(tmp_path):
+    # a diverged high-spin anion CCSD returned NaN: must not crash the JSON writer or win the scan
+    energies = {("H", 0, 1): -0.5, ("H", -1, 0): -0.52, ("H", -1, 2): float("nan")}
+    table = scan_atomic_fragments(atoms=("H", "H"), basis="sto-3g", settings=Stage3ExecutionSettings(),
+                                  policy=ElectronicEAStagePolicy(), cache_dir=tmp_path,
+                                  runner=_fake_fragment(energies))
+    assert table["H-1"]["lowest"]["spin_2s"] == 0
+    bad = [r for r in table["H-1"]["scanned"] if r["spin_2s"] == 2][0] if "scanned" in table["H-1"] else None
+    assert bad is None or (bad["status"] == "ERROR" and bad["ccsd_t_total_hartree"] is None)
+
+
 def test_cli_runs_electronic_ea_by_default():
     args = build_parser().parse_args(["--atoms", "H", "F"])
     assert args.no_electronic_ea is False

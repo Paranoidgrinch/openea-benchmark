@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from functools import partial
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -106,6 +107,19 @@ class ElectronicEAStagePolicy:
             max_model_energy_spread_hartree=self.equilibrium_max_energy_spread_hartree,
             point_energy_tolerance_hartree=self.equilibrium_point_tolerance_hartree,
         )
+
+
+def _finite_fragment_record(rec: dict) -> dict:
+    """NaN/inf energies (e.g. a diverged CCSD of an absurd high-spin ion) -> None; such a record is
+    not COMPLETED, so it can neither be selected nor break the strict JSON writer."""
+    bad = [k for k, v in rec.items() if isinstance(v, float) and not math.isfinite(v)]
+    if not bad:
+        return rec
+    rec = {k: (None if k in bad else v) for k, v in rec.items()}
+    if rec.get("status") == FragmentExecutionStatus.COMPLETED.value:
+        rec["status"] = FragmentExecutionStatus.ERROR.value
+    rec["non_finite_fields"] = sorted(bad)
+    return rec
 
 
 def _save_json(path: Path, data: Mapping[str, Any]) -> None:
@@ -226,7 +240,8 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
                         result = run_atomic_fragment(
                             AtomicFragmentRequest(fid, element, charge, spin_2s, basis, state_label=None),
                             settings=settings, runner=runner)
-                    rec = {k: (v.value if hasattr(v, "value") else v) for k, v in asdict(result).items()}
+                    rec = _finite_fragment_record(
+                        {k: (v.value if hasattr(v, "value") else v) for k, v in asdict(result).items()})
                     _save_json(path, rec)
                 scanned.append(rec)
             completed = [r for r in scanned if r["status"] == FragmentExecutionStatus.COMPLETED.value
