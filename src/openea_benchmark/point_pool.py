@@ -18,6 +18,12 @@ from its basis size, see ``stage3_execution.point_memory_budget_mb``) re-enters
 ``core_slot(reserve_mb)`` while it holds the slot: its record then carries that
 reservation instead of the run-wide default, smaller or larger, until it leaves.
 
+CPU gate (``OPENEA_CPU_LIMIT_FRAC``, default 1.0; 0 disables): a task that got its slot
+starts only when the other users' load (1-min load average minus ``threads`` per held
+slot) plus ``threads`` per held slot including its own stays within that fraction of
+the cores.  One task always runs, so the workflow never stalls completely.  Running
+tasks are never stopped; under nice 19 they only yield to the other users.
+
 Without a configured pool everything runs serially in the calling process (the
 behaviour of all tests and of ``--point-workers 1``); slots still apply when set.
 """
@@ -221,6 +227,54 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact
         time.sleep(15.0)
 
 
+CPU_LIMIT_ENV = "OPENEA_CPU_LIMIT_FRAC"
+
+
+def _held_slots(own_path: str) -> int:
+    """Number of other core slots currently held (by any run sharing the slot directory)."""
+    held = 0
+    for name in os.listdir(_SLOT_DIR):
+        path = os.path.join(_SLOT_DIR, name)
+        if not name.startswith("slot") or not name.endswith(".lock") or path == own_path:
+            continue
+        try:
+            with open(path, "a+") as fh:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    held += 1
+        except OSError:
+            continue
+    return held
+
+
+def cpu_gate_admits(load1: float, ncpu: int, held: int, threads: int, frac: float) -> bool:
+    """Admission rule of the CPU gate (pure, for tests)."""
+    if frac <= 0.0 or held == 0:
+        return True
+    others = max(0.0, load1 - held * threads)
+    return others + (held + 1) * threads <= frac * ncpu
+
+
+def _wait_for_cpu(handle) -> None:
+    try:
+        frac = float(os.environ.get(CPU_LIMIT_ENV, "1.0"))
+    except ValueError:
+        frac = 1.0
+    ncpu = os.cpu_count() or 1
+    announced = False
+    while True:
+        held = _held_slots(handle.name)
+        load1 = os.getloadavg()[0]
+        if cpu_gate_admits(load1, ncpu, held, _THREADS, frac):
+            return
+        if not announced:
+            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load1:.0f}, {held} slots x {_THREADS} threads "
+                  f"held, {ncpu} cores x {frac:g}", flush=True)
+            announced = True
+        time.sleep(15.0)
+
+
 def _held_reserve_mb(handle) -> float:
     """Reservation currently recorded in this task's own slot file (0 if none)."""
     try:
@@ -277,6 +331,7 @@ def core_slot(reserve_mb: float | None = None):
             time.sleep(2.0)
     _LOCAL.held, _LOCAL.handle = True, handle
     try:
+        _wait_for_cpu(handle)
         _wait_for_memory(handle, reserve_mb, big)
         yield
     finally:
