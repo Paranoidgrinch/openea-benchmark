@@ -19,10 +19,13 @@ from its basis size, see ``stage3_execution.point_memory_budget_mb``) re-enters
 reservation instead of the run-wide default, smaller or larger, until it leaves.
 
 CPU gate (``OPENEA_CPU_LIMIT_FRAC``, default 1.0; 0 disables): a task that got its slot
-starts only when the other users' load (1-min load average minus ``threads`` per held
-slot) plus ``threads`` per held slot including its own stays within that fraction of
-the cores.  One task always runs, so the workflow never stalls completely.  Running
-tasks are never stopped; under nice 19 they only yield to the other users.
+starts only when the measured machine load (all users, ours included: the larger of the
+1-min load average and the current number of running threads) plus its own ``threads``
+stays within that fraction of the cores, and at most one task per ``CPU_GATE_SPACING_S``
+is admitted machine-wide, so the load can register before the next one starts.  Slots
+then only cap memory/parallelism; tasks with mostly serial phases leave cores to further
+slots.  One task always runs, so the workflow never stalls completely.  Running tasks are
+never stopped; under nice 19 they only yield to the other users.
 
 Without a configured pool everything runs serially in the calling process (the
 behaviour of all tests and of ``--point-workers 1``); slots still apply when set.
@@ -248,12 +251,28 @@ def _held_slots(own_path: str) -> int:
     return held
 
 
-def cpu_gate_admits(load1: float, ncpu: int, held: int, threads: int, frac: float) -> bool:
-    """Admission rule of the CPU gate (pure, for tests)."""
+CPU_GATE_SPACING_S = 30.0
+
+
+def cpu_gate_admits(load: float, ncpu: int, held: int, threads: int, frac: float) -> bool:
+    """Admission rule of the CPU gate (pure, for tests); ``load`` is the measured machine load."""
     if frac <= 0.0 or held == 0:
         return True
-    others = max(0.0, load1 - held * threads)
-    return others + (held + 1) * threads <= frac * ncpu
+    return load + threads <= frac * ncpu
+
+
+def _machine_load() -> float:
+    """max(1-min load average, running threads now) - the latter reacts at once to new tasks."""
+    running = 0.0
+    try:
+        with open("/proc/stat") as fh:
+            for line in fh:
+                if line.startswith("procs_running"):
+                    running = float(line.split()[1]) - 1.0   # minus this reader
+                    break
+    except OSError:
+        pass
+    return max(os.getloadavg()[0], running)
 
 
 def _wait_for_cpu(handle) -> None:
@@ -261,18 +280,32 @@ def _wait_for_cpu(handle) -> None:
         frac = float(os.environ.get(CPU_LIMIT_ENV, "1.0"))
     except ValueError:
         frac = 1.0
+    if frac <= 0.0:
+        return
     ncpu = os.cpu_count() or 1
     announced = False
     while True:
-        held = _held_slots(handle.name)
-        load1 = os.getloadavg()[0]
-        if cpu_gate_admits(load1, ncpu, held, _THREADS, frac):
-            return
+        with open(os.path.join(_SLOT_DIR, "cpugate.lock"), "a+") as gate:
+            fcntl.flock(gate, fcntl.LOCK_EX)
+            gate.seek(0)
+            try:
+                last = float(gate.read().strip() or 0.0)
+            except ValueError:
+                last = 0.0
+            held = _held_slots(handle.name)
+            load = _machine_load()
+            spaced = held == 0 or time.time() - last >= CPU_GATE_SPACING_S
+            if spaced and cpu_gate_admits(load, ncpu, held, _THREADS, frac):
+                gate.seek(0)
+                gate.truncate()
+                gate.write(f"{time.time():.1f}\n")
+                gate.flush()
+                return
         if not announced:
-            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load1:.0f}, {held} slots x {_THREADS} threads "
-                  f"held, {ncpu} cores x {frac:g}", flush=True)
+            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {_THREADS} threads > "
+                  f"{frac:g} x {ncpu} cores ({held} slots held)", flush=True)
             announced = True
-        time.sleep(15.0)
+        time.sleep(10.0)
 
 
 def _held_reserve_mb(handle) -> float:

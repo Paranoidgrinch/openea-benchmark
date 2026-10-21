@@ -118,12 +118,11 @@ def test_nested_slot_reserves_the_task_estimate_and_restores(tmp_path, monkeypat
 
 def test_cpu_gate_leaves_room_for_other_users():
     from openea_benchmark.point_pool import cpu_gate_admits
-    # idle machine: 8 x 10 threads fit on 80 cores, the 9th does not
-    assert cpu_gate_admits(load1=70.0, ncpu=80, held=7, threads=10, frac=1.0)
-    assert not cpu_gate_admits(load1=80.0, ncpu=80, held=8, threads=10, frac=1.0)
-    # another user runs 40 threads: only 4 of our slots
-    assert cpu_gate_admits(load1=70.0, ncpu=80, held=3, threads=10, frac=1.0)
-    assert not cpu_gate_admits(load1=80.0, ncpu=80, held=4, threads=10, frac=1.0)
+    # measured load counts everybody: 70 busy threads leave room for one more 10-thread task
+    assert cpu_gate_admits(load=70.0, ncpu=80, held=7, threads=10, frac=1.0)
+    assert not cpu_gate_admits(load=75.0, ncpu=80, held=7, threads=10, frac=1.0)
+    # slots whose tasks are mostly serial leave cores free: a 12th slot may start
+    assert cpu_gate_admits(load=45.0, ncpu=80, held=11, threads=10, frac=1.0)
     # one task always runs; frac 0 disables the gate
-    assert cpu_gate_admits(load1=500.0, ncpu=80, held=0, threads=10, frac=1.0)
-    assert cpu_gate_admits(load1=500.0, ncpu=80, held=8, threads=10, frac=0.0)
+    assert cpu_gate_admits(load=500.0, ncpu=80, held=0, threads=10, frac=1.0)
+    assert cpu_gate_admits(load=500.0, ncpu=80, held=8, threads=10, frac=0.0)

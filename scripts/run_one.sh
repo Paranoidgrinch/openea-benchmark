@@ -6,7 +6,10 @@
 # OPENEA_EXTRA_ARGS: extra workflow flags, e.g. "--auto-dry-run --no-electronic-ea" (scout only).
 set -u
 RUN="$1"; A="$2"; B="$3"
-THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-8}"
+# CORE_SLOTS caps concurrent tasks machine-wide; the CPU gate (point_pool) admits a slot only
+# while the measured load leaves room for its THREADS, so 16 slots fill the cores when tasks are
+# partly serial and back off when other users compute.  POINT_WORKERS = parallel points per molecule.
+THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-16}"; POINT_WORKERS="${POINT_WORKERS:-8}"
 OUTPUT="${OPENEA_OUTPUT:-../openea_results}/$RUN"
 LOG="runs/$RUN/$A$B.log"
 mkdir -p "runs/$RUN" "$OUTPUT"
@@ -16,6 +19,6 @@ export PYTHONUNBUFFERED=1  # logs show progress immediately
 export OMP_NUM_THREADS="$THREADS" OPENBLAS_NUM_THREADS="$THREADS" MKL_NUM_THREADS="$THREADS"
 nice -n 19 .venv/bin/python -m openea_benchmark.workflow --atoms "$A" "$B" \
   --output "$OUTPUT" --threads "$THREADS" --cbs-memory-mb "${CBS_MEMORY_MB:-48000}" \
-  --point-workers "$CORE_SLOTS" --core-slots "$CORE_SLOTS" --core-slots-dir runs/core_slots \
+  --point-workers "$POINT_WORKERS" --core-slots "$CORE_SLOTS" --core-slots-dir runs/core_slots \
   --mem-limit-frac "${MEM_LIMIT_FRAC:-0.70}" ${OPENEA_EXTRA_ARGS:-} >> "$LOG" 2>&1
 echo "EXIT $?" >> "$LOG"
