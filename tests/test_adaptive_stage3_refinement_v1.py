@@ -159,7 +159,16 @@ def test_lower_boundary_minimum_extends_lower_r():
     pec, _, _ = pec_from((0.9, 1.0, 1.1), (-75.2, -75.1, -75.0))
     plan = plan_stage3_pec_refinement(pec, settings=SETTINGS)
     assert plan.action is RefinementAction.EXTEND_LOWER_R
-    assert round(plan.proposed_geometries[0].r_angstrom, 6) == 0.85
+    # geometric line search: twice the outermost spacing (0.1 A), not one fixed 0.05 A step
+    assert round(plan.proposed_geometries[0].r_angstrom, 6) == 0.7
+
+
+def test_boundary_extension_growth_is_capped():
+    # Li2 a3Sigma_u+ in verify_v1 crept outward by 0.025 A for 12 rounds and never bracketed
+    pec, _, _ = pec_from((3.0, 3.4, 4.2), (-14.90, -14.92, -14.93))
+    plan = plan_stage3_pec_refinement(pec, settings=SETTINGS)
+    assert plan.action is RefinementAction.EXTEND_UPPER_R
+    assert round(plan.proposed_geometries[0].r_angstrom, 6) == round(4.2 + 16 * 0.05, 6)
 
 
 def test_upper_boundary_minimum_extends_upper_r_like_oh_smoke():
@@ -173,7 +182,7 @@ def test_equal_lowest_boundaries_expand_both_directions():
     pec, _, _ = pec_from((0.9, 1.0, 1.1), (-75.2, -75.0, -75.2))
     plan = plan_stage3_pec_refinement(pec, settings=SETTINGS)
     assert plan.action is RefinementAction.EXTEND_BOTH_SIDES
-    assert [round(x.r_angstrom, 6) for x in plan.proposed_geometries] == [0.85, 1.15]
+    assert [round(x.r_angstrom, 6) for x in plan.proposed_geometries] == [0.7, 1.3]
 
 
 def test_nonstrict_interior_minimum_is_locally_resolved():

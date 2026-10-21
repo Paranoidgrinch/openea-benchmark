@@ -136,6 +136,23 @@ def _filter_new_r(
     return tuple(kept)
 
 
+MAX_EXTENSION_GROWTH = 16.0   # boundary steps grow up to 16 x extension_step (0.4 A for 0.025 A)
+
+
+def _boundary_step(points: Sequence[HighLevelPECPoint], settings: Stage3RefinementSettings, *, upper: bool) -> float:
+    """Step beyond a boundary whose energy still decreases outward.
+
+    Doubles the outermost spacing on that side (geometric line search), from
+    ``extension_step_angstrom`` up to ``MAX_EXTENSION_GROWTH`` times it, so a flat or
+    far-away minimum (weakly bound triplet, diffuse anion) is reached within the round limit
+    instead of creeping outward by one fixed small step per round."""
+    base = settings.extension_step_angstrom
+    if len(points) < 2:
+        return base
+    spacing = (points[-1].r_angstrom - points[-2].r_angstrom) if upper else (points[1].r_angstrom - points[0].r_angstrom)
+    return min(MAX_EXTENSION_GROWTH * base, max(base, 2.0 * spacing))
+
+
 def _midpoint(a: float, b: float, reason: str) -> ProposedGeometry:
     return ProposedGeometry(
         r_angstrom=0.5 * (float(a) + float(b)),
@@ -323,7 +340,9 @@ def plan_stage3_pec_refinement(
 
         raw: list[ProposedGeometry] = []
         if at_lower:
-            target = points[0].r_angstrom - settings.extension_step_angstrom
+            target = points[0].r_angstrom - _boundary_step(points, settings, upper=False)
+            if target <= 0.0:
+                target = points[0].r_angstrom - settings.extension_step_angstrom
             if target > 0.0:
                 raw.append(ProposedGeometry(
                     target,
@@ -331,7 +350,7 @@ def plan_stage3_pec_refinement(
                 ))
         if at_upper:
             raw.append(ProposedGeometry(
-                points[-1].r_angstrom + settings.extension_step_angstrom,
+                points[-1].r_angstrom + _boundary_step(points, settings, upper=True),
                 "Lowest sampled high-level energy reaches the upper-R boundary",
             ))
 
