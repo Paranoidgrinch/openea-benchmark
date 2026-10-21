@@ -21,8 +21,9 @@ reservation instead of the run-wide default, smaller or larger, until it leaves.
 CPU gate (``OPENEA_CPU_LIMIT_FRAC``, default 1.0; 0 disables): a task that got its slot
 starts only when the measured machine load (all users, ours included: the larger of the
 1-min load average and the current number of running threads) plus its own ``threads``
-stays within that fraction of the cores, and at most one task per ``CPU_GATE_SPACING_S``
-is admitted machine-wide, so the load can register before the next one starts.  Slots
+plus ``threads`` for each of our tasks admitted within the last minute that still runs
+(the load average lags behind them) stays within that fraction of the cores.  Short tasks
+release their slot quickly and stop counting at once.  Slots
 then only cap memory/parallelism; tasks with mostly serial phases leave cores to further
 slots.  One task always runs, so the workflow never stalls completely.  Running tasks are
 never stopped; under nice 19 they only yield to the other users.
@@ -251,18 +252,22 @@ def _held_slots(own_path: str) -> int:
     return held
 
 
-CPU_GATE_SPACING_S = 30.0
+CPU_GATE_RAMP_S = 60.0   # a task admitted this recently may not show in the load average yet
 
 
-def cpu_gate_admits(load: float, ncpu: int, held: int, threads: int, frac: float) -> bool:
-    """Admission rule of the CPU gate (pure, for tests); ``load`` is the measured machine load."""
+def cpu_gate_admits(load: float, ncpu: int, held: int, threads: int, frac: float, ramping: int = 0) -> bool:
+    """Admission rule of the CPU gate (pure, for tests).
+
+    ``load`` is the measured machine load, ``ramping`` the number of our tasks admitted within
+    the last ``CPU_GATE_RAMP_S`` that still run (counted with their full threads, since the
+    1-min load average lags behind them)."""
     if frac <= 0.0 or held == 0:
         return True
-    return load + threads <= frac * ncpu
+    return load + (ramping + 1) * threads <= frac * ncpu
 
 
 def _machine_load() -> float:
-    """max(1-min load average, running threads now) - the latter reacts at once to new tasks."""
+    """max(1-min load average, running threads now)."""
     running = 0.0
     try:
         with open("/proc/stat") as fh:
@@ -273,6 +278,18 @@ def _machine_load() -> float:
     except OSError:
         pass
     return max(os.getloadavg()[0], running)
+
+
+def _still_held(path: str) -> bool:
+    try:
+        with open(path, "a+") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return False
+            except BlockingIOError:
+                return True
+    except OSError:
+        return False
 
 
 def _wait_for_cpu(handle) -> None:
@@ -288,22 +305,27 @@ def _wait_for_cpu(handle) -> None:
         with open(os.path.join(_SLOT_DIR, "cpugate.lock"), "a+") as gate:
             fcntl.flock(gate, fcntl.LOCK_EX)
             gate.seek(0)
-            try:
-                last = float(gate.read().strip() or 0.0)
-            except ValueError:
-                last = 0.0
+            now, recent = time.time(), []
+            for line in gate.read().splitlines():   # "<slot path> <admission time>"
+                try:
+                    path, stamp = line.rsplit(" ", 1)
+                    stamp = float(stamp)
+                except ValueError:
+                    continue
+                if now - stamp < CPU_GATE_RAMP_S and path != handle.name and _still_held(path):
+                    recent.append((path, stamp))
             held = _held_slots(handle.name)
             load = _machine_load()
-            spaced = held == 0 or time.time() - last >= CPU_GATE_SPACING_S
-            if spaced and cpu_gate_admits(load, ncpu, held, _THREADS, frac):
+            if cpu_gate_admits(load, ncpu, held, _THREADS, frac, ramping=len(recent)):
+                recent.append((handle.name, now))
                 gate.seek(0)
                 gate.truncate()
-                gate.write(f"{time.time():.1f}\n")
+                gate.write("".join(f"{p} {t:.1f}\n" for p, t in recent))
                 gate.flush()
                 return
         if not announced:
-            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {_THREADS} threads > "
-                  f"{frac:g} x {ncpu} cores ({held} slots held)", flush=True)
+            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {len(recent) + 1} x {_THREADS} "
+                  f"threads > {frac:g} x {ncpu} cores ({held} slots held)", flush=True)
             announced = True
         time.sleep(10.0)
 

@@ -123,6 +123,9 @@ def test_cpu_gate_leaves_room_for_other_users():
     assert not cpu_gate_admits(load=75.0, ncpu=80, held=7, threads=10, frac=1.0)
     # slots whose tasks are mostly serial leave cores free: a 12th slot may start
     assert cpu_gate_admits(load=45.0, ncpu=80, held=11, threads=10, frac=1.0)
+    # freshly admitted tasks count with full threads until the load average shows them
+    assert not cpu_gate_admits(load=45.0, ncpu=80, held=11, threads=10, frac=1.0, ramping=3)
+    assert cpu_gate_admits(load=45.0, ncpu=80, held=11, threads=10, frac=1.0, ramping=2)
     # one task always runs; frac 0 disables the gate
     assert cpu_gate_admits(load=500.0, ncpu=80, held=0, threads=10, frac=1.0)
     assert cpu_gate_admits(load=500.0, ncpu=80, held=8, threads=10, frac=0.0)
