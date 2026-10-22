@@ -292,7 +292,45 @@ def _still_held(path: str) -> bool:
         return False
 
 
+def _read_entries(fh) -> list[tuple[str, float]]:
+    """``"<slot path> <time>"`` lines of a gate file (malformed lines are skipped)."""
+    fh.seek(0)
+    entries = []
+    for line in fh.read().splitlines():
+        try:
+            path, stamp = line.rsplit(" ", 1)
+            entries.append((path, float(stamp)))
+        except ValueError:
+            continue
+    return entries
+
+
+def _write_entries(fh, entries: list[tuple[str, float]]) -> None:
+    fh.seek(0)
+    fh.truncate()
+    fh.write("".join(f"{p} {t:.1f}\n" for p, t in entries))
+    fh.flush()
+
+
+def cpu_queue_update(queue: list[tuple[str, float]], own: str, now: float, *, registered: bool,
+                     alive: Callable[[str], bool]) -> tuple[list[tuple[str, float]], bool]:
+    """FIFO bookkeeping of the CPU gate (pure, for tests).
+
+    Drops entries of slots no longer held (dead waiters), (re-)registers ``own`` on its first
+    call (a stale entry left on the same slot file by an earlier holder is replaced) and returns
+    the queue ordered by waiting time plus whether ``own`` is at its head."""
+    kept = [(p, t) for p, t in queue if p != own and alive(p)]
+    mine = [(p, t) for p, t in queue if p == own]
+    kept.append(mine[0] if registered and mine else (own, now))
+    kept.sort(key=lambda e: e[1])
+    return kept, kept[0][0] == own
+
+
 def _wait_for_cpu(handle) -> None:
+    """Wait until the measured machine load leaves room for one more task.
+
+    Waiters are served first come, first served (queue in ``cpuqueue.lock``): without the queue
+    whichever waiter polled first after the load dropped won, and single tasks starved for hours."""
     try:
         frac = float(os.environ.get(CPU_LIMIT_ENV, "1.0"))
     except ValueError:
@@ -300,32 +338,27 @@ def _wait_for_cpu(handle) -> None:
     if frac <= 0.0:
         return
     ncpu = os.cpu_count() or 1
-    announced = False
+    announced = registered = False
     while True:
-        with open(os.path.join(_SLOT_DIR, "cpugate.lock"), "a+") as gate:
+        with open(os.path.join(_SLOT_DIR, "cpugate.lock"), "a+") as gate, \
+                open(os.path.join(_SLOT_DIR, "cpuqueue.lock"), "a+") as queue_fh:
             fcntl.flock(gate, fcntl.LOCK_EX)
-            gate.seek(0)
-            now, recent = time.time(), []
-            for line in gate.read().splitlines():   # "<slot path> <admission time>"
-                try:
-                    path, stamp = line.rsplit(" ", 1)
-                    stamp = float(stamp)
-                except ValueError:
-                    continue
-                if now - stamp < CPU_GATE_RAMP_S and path != handle.name and _still_held(path):
-                    recent.append((path, stamp))
+            now = time.time()
+            recent = [(p, t) for p, t in _read_entries(gate)   # "<slot path> <admission time>"
+                      if now - t < CPU_GATE_RAMP_S and p != handle.name and _still_held(p)]
+            queue, first = cpu_queue_update(_read_entries(queue_fh), handle.name, now,
+                                            registered=registered, alive=_still_held)
+            registered = True
             held = _held_slots(handle.name)
             load = _machine_load()
-            if cpu_gate_admits(load, ncpu, held, _THREADS, frac, ramping=len(recent)):
-                recent.append((handle.name, now))
-                gate.seek(0)
-                gate.truncate()
-                gate.write("".join(f"{p} {t:.1f}\n" for p, t in recent))
-                gate.flush()
+            if first and cpu_gate_admits(load, ncpu, held, _THREADS, frac, ramping=len(recent)):
+                _write_entries(gate, recent + [(handle.name, now)])
+                _write_entries(queue_fh, queue[1:])
                 return
+            _write_entries(queue_fh, queue)
         if not announced:
             print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {len(recent) + 1} x {_THREADS} "
-                  f"threads > {frac:g} x {ncpu} cores ({held} slots held)", flush=True)
+                  f"threads > {frac:g} x {ncpu} cores ({held} slots held, {len(queue)} in queue)", flush=True)
             announced = True
         time.sleep(10.0)
 

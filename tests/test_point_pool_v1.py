@@ -129,3 +129,28 @@ def test_cpu_gate_leaves_room_for_other_users():
     # one task always runs; frac 0 disables the gate
     assert cpu_gate_admits(load=500.0, ncpu=80, held=0, threads=10, frac=1.0)
     assert cpu_gate_admits(load=500.0, ncpu=80, held=8, threads=10, frac=0.0)
+
+
+def test_cpu_gate_queue_is_first_come_first_served():
+    from openea_benchmark.point_pool import cpu_queue_update
+
+    alive = {"a", "b", "c"}.__contains__
+    queue, first = cpu_queue_update([], "a", 10.0, registered=False, alive=alive)
+    assert first and queue == [("a", 10.0)]
+    queue, first = cpu_queue_update(queue, "b", 20.0, registered=False, alive=alive)
+    assert not first
+    # a later poll of b keeps its original place; a stays ahead
+    queue, first = cpu_queue_update(queue, "b", 30.0, registered=True, alive=alive)
+    assert not first and queue == [("a", 10.0), ("b", 20.0)]
+    # a dead waiter is dropped, so b moves to the head
+    queue, first = cpu_queue_update(queue, "b", 40.0, registered=True, alive={"b", "c"}.__contains__)
+    assert first and queue == [("b", 20.0)]
+
+
+def test_cpu_gate_queue_replaces_stale_entry_of_reused_slot():
+    from openea_benchmark.point_pool import cpu_queue_update
+
+    # slot "a" was left in the queue by an earlier holder; the new holder queues behind "b"
+    queue, first = cpu_queue_update([("a", 1.0), ("b", 5.0)], "a", 50.0, registered=False,
+                                    alive=lambda p: True)
+    assert not first and queue == [("b", 5.0), ("a", 50.0)]
