@@ -11,6 +11,11 @@ Usage: .venv/bin/python scripts/preflight.py RUN_NAME [--fix]
   recomputes them instead of crashing on them.  Files already checked unchanged are
   remembered in RUN/.preflight_ok.json.
 
+Only this user's own OpenEA files are touched: batch scratch directories that have a
+pid file runs/*/batch_<stamp>.pid whose batch no longer runs (no pid file -> kept), and
+result files of RUN only while no batch of RUN runs.  Liveness is checked with kill -0,
+so run it from a normal login shell (a sandboxed shell sees no host processes).
+
 Exit status 0: ready to start; 1: problems left (rerun with --fix or look at them).
 """
 from __future__ import annotations
@@ -41,19 +46,29 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def _batch_alive(scratch_dir: Path) -> bool:
-    """batch_<YYYYmmdd_HHMMSS>_XXXX belongs to runs/*/batch_<stamp>.pid; alive if that pid runs."""
+def _pids_alive(pid_files) -> list[bool]:
+    states = []
+    for pid_file in pid_files:
+        try:
+            states.append(_alive(int(pid_file.read_text().strip())))
+        except (OSError, ValueError):
+            states.append(True)  # unreadable: assume running, never delete on doubt
+    return states
+
+
+def _batch_state(scratch_dir: Path) -> str:
+    """batch_<YYYYmmdd_HHMMSS>_XXXX -> runs/*/batch_<stamp>.pid: 'dead', 'alive' or 'unknown' (no pid file)."""
     parts = scratch_dir.name.split("_")
     if len(parts) < 3:
-        return False
-    stamp = f"{parts[1]}_{parts[2]}"
-    for pid_file in (ROOT / "runs").glob(f"*/batch_{stamp}.pid"):
-        try:
-            if _alive(int(pid_file.read_text().strip())):
-                return True
-        except ValueError:
-            pass
-    return False
+        return "unknown"
+    states = _pids_alive((ROOT / "runs").glob(f"*/batch_{parts[1]}_{parts[2]}.pid"))
+    if not states:
+        return "unknown"
+    return "alive" if any(states) else "dead"
+
+
+def run_batch_alive(run: str) -> bool:
+    return any(_pids_alive((ROOT / "runs" / run).glob("batch_*.pid")))
 
 
 def _size_gb(path: Path) -> float:
@@ -82,7 +97,11 @@ def check_scratch(fix: bool) -> list[str]:
         if not base.is_dir():
             continue
         for d in sorted(base.glob("batch_*")):
-            if not d.is_dir() or _batch_alive(d):
+            if not d.is_dir():
+                continue
+            state = _batch_state(d)
+            if state != "dead":
+                print(f"kept {d} (batch {'running' if state == 'alive' else 'without pid file'})")
                 continue
             size = _size_gb(d)
             if fix:
@@ -155,7 +174,11 @@ def main() -> int:
     parser.add_argument("run")
     parser.add_argument("--fix", action="store_true")
     args = parser.parse_args()
-    problems = check_scratch(args.fix) + check_results(args.run, args.fix)
+    problems = check_scratch(args.fix)
+    if run_batch_alive(args.run):
+        problems.append(f"a batch of {args.run} is still running: results not checked, nothing moved")
+    else:
+        problems += check_results(args.run, args.fix)
     for problem in problems:
         print(f"PROBLEM {problem}")
     print("preflight OK" if not problems else f"preflight: {len(problems)} problem(s); rerun with --fix")
