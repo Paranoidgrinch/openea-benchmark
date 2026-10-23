@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .stage3_naming import checkpoint_artifact_basename
+from ..scratch import discard_broken_checkpoint
 
 
 class PointExecutionStatus(str, Enum):
@@ -626,6 +627,7 @@ def _run_stage3_point_pyscf_body(
         high_level_checkpoint = artifact_dir / checkpoint_artifact_basename(
             request.request_id
         )
+        discard_broken_checkpoint(high_level_checkpoint)
         mf.chkfile = str(high_level_checkpoint)
 
     mf.conv_tol = settings.scf_conv_tol

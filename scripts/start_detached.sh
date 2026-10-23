@@ -5,6 +5,8 @@
 cd "$(dirname "$0")/.."
 RUN="$1"
 mkdir -p "runs/$RUN"
+# Free scratch space, no leftovers, no broken result files (scripts/preflight.py --fix repairs).
+.venv/bin/python scripts/preflight.py "$RUN" || { echo "not started: preflight failed"; exit 1; }
 STAMP="$(date +%Y%m%d_%H%M%S)"
 LOG="runs/$RUN/batch_$STAMP.console.log"
 setsid nohup scripts/run_batch.sh "$@" > "$LOG" 2>&1 < /dev/null &

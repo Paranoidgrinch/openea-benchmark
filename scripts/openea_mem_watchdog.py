@@ -23,6 +23,10 @@ used = 1 - MemAvailable / MemTotal.  The memory gate in point_pool.py keeps new
 calculations from starting above the limit; this watchdog handles calculations
 that outgrow their reservation and memory taken by other users.
 
+The status line (every --status-every seconds) also reports the size of the batch
+scratch ($PYSCF_TMPDIR) and the free space of its file system, with a LOW DISK warning
+below --min-free-gb (a full home quota crashed the run on 2026-10-22/23).
+
 The watchdog must run in the same process namespace as the runs it guards
 (start it from the same launcher, e.g. runs/<run>/run_batch.sh).
 """
@@ -30,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import signal
 import sys
 import time
@@ -76,6 +81,22 @@ def openea_processes() -> list[dict]:
     return found
 
 
+def scratch_status(min_free_gb: float) -> str:
+    root = os.environ.get("PYSCF_TMPDIR")
+    if not root or not os.path.isdir(root):
+        return ""
+    size = 0
+    for base, _, files in os.walk(root):
+        for name in files:
+            try:
+                size += os.lstat(os.path.join(base, name)).st_size
+            except OSError:
+                pass
+    free = shutil.disk_usage(root).free / 1024 ** 3
+    warn = f" LOW DISK (< {min_free_gb:.0f} GB free)" if free < min_free_gb else ""
+    return f", scratch {size / 1024 ** 3:.0f} GB, {free:.0f} GB free{warn}"
+
+
 def log(fh, message: str) -> None:
     fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
     fh.flush()
@@ -92,6 +113,7 @@ def main() -> int:
     parser.add_argument("--resume-every", type=float, default=30.0)
     parser.add_argument("--kill-every", type=float, default=30.0)
     parser.add_argument("--status-every", type=float, default=600.0)
+    parser.add_argument("--min-free-gb", type=float, default=500.0)
     parser.add_argument("--log", type=Path, default=ROOT / "runs" / "mem_watchdog.log")
     args = parser.parse_args()
     if not args.resume_frac < args.pause_frac < args.kill_frac:
@@ -132,7 +154,7 @@ def main() -> int:
             if now - last["status"] >= args.status_every:
                 ours = sum(p["rss_mb"] for p in procs) / 1024
                 log(fh, f"status used {used:.1%} of {total / 1024:.0f} GB, openea {len(procs)} procs "
-                        f"{ours:.0f} GB, paused {len(paused)}")
+                        f"{ours:.0f} GB, paused {len(paused)}{scratch_status(args.min_free_gb)}")
                 last["status"] = now
 
             high_since = (high_since or now) if used >= args.pause_frac else None

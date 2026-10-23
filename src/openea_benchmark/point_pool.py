@@ -30,6 +30,10 @@ never stopped; under nice 19 they only yield to the other users.
 
 Without a configured pool everything runs serially in the calling process (the
 behaviour of all tests and of ``--point-workers 1``); slots still apply when set.
+
+Scratch: every process writes PySCF scratch into its own ``$PYSCF_TMPDIR/<host>_<pid>``
+(``scratch.py``); directories of dead processes are swept, and a pool worker deletes its
+no longer open scratch files after each task.
 """
 from __future__ import annotations
 
@@ -44,6 +48,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from .scratch import prune_process_scratch, use_process_scratch
+
 _POOL: ProcessPoolExecutor | None = None
 _WORKERS = 1
 _SLOT_DIR: str | None = None
@@ -56,12 +62,13 @@ _MEM_RESERVE_MB = 0
 # side, which leaves the shared server no headroom.
 BIG_TASK_MB = 100000
 _LOCAL = threading.local()
+_IN_WORKER = False
 
 
 def _init_worker(threads: int, slot_dir: str | None, n_slots: int,
                  mem_limit_frac: float = 0.0, mem_reserve_mb: int = 0) -> None:
-    global _SLOT_DIR, _N_SLOTS, _THREADS, _MEM_LIMIT_FRAC, _MEM_RESERVE_MB
-    _SLOT_DIR, _N_SLOTS, _THREADS = slot_dir, n_slots, threads
+    global _SLOT_DIR, _N_SLOTS, _THREADS, _MEM_LIMIT_FRAC, _MEM_RESERVE_MB, _IN_WORKER
+    _SLOT_DIR, _N_SLOTS, _THREADS, _IN_WORKER = slot_dir, n_slots, threads, True
     _MEM_LIMIT_FRAC, _MEM_RESERVE_MB = mem_limit_frac, mem_reserve_mb
     try:
         os.nice(19 - os.nice(0))  # inherited anyway; enforce the project's nice 19 rule
@@ -69,6 +76,7 @@ def _init_worker(threads: int, slot_dir: str | None, n_slots: int,
         pass
     from .compute_threads import set_compute_threads
     set_compute_threads(threads)
+    use_process_scratch()
 
 
 def configure_point_pool(*, workers: int, threads: int, slot_dir: str | Path | None = None,
@@ -83,6 +91,7 @@ def configure_point_pool(*, workers: int, threads: int, slot_dir: str | Path | N
     _MEM_RESERVE_MB = max(0, int(mem_reserve_mb))
     if _SLOT_DIR:
         Path(_SLOT_DIR).mkdir(parents=True, exist_ok=True)
+    use_process_scratch()
     if _WORKERS > 1:
         # spawn, not fork: forking a process whose OpenMP runtime is initialised can deadlock.
         _POOL = ProcessPoolExecutor(max_workers=_WORKERS, mp_context=multiprocessing.get_context("spawn"),
@@ -433,6 +442,8 @@ def core_slot(reserve_mb: float | None = None):
             big.truncate()
             fcntl.flock(big, fcntl.LOCK_UN)
             big.close()
+        if _IN_WORKER:
+            prune_process_scratch()  # the task is over: its scratch files are garbage
 
 
 def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:

@@ -38,6 +38,7 @@ from typing import Any, Callable, Mapping
 
 from .local_pec import LocalPEC, LocalPECPoint
 from .minimum_scout import MinimumScoutThresholds, scout_local_pec_minimum
+from .scratch import discard_broken_checkpoint
 
 HARTREE_TO_EV = 27.211386245988
 OPEN_STATUSES = ("decreases_toward_higher_r", "decreases_toward_lower_r")
@@ -126,6 +127,7 @@ def pyscf_continuation_point(*, atoms: tuple[str, str], charge: int, spin_2s: in
                 **mole_basis_kwargs(atoms, basis), charge=charge, spin=spin_2s, unit="Angstrom", verbose=0)
     mf = _dft_mean_field(mol, functional, grid_level, 1.0e-9, 200)
     dm0 = mf.from_chk(seed_checkpoint)
+    discard_broken_checkpoint(checkpoint)
     mf.chkfile = checkpoint
     mf = _converge(mf, dm0, policy.stability_following_steps)
     mo, _, stable, _ = mf.stability(internal=True, external=False, return_status=True)

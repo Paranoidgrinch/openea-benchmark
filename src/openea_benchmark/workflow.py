@@ -13,6 +13,7 @@ import argparse
 from dataclasses import fields, is_dataclass
 from enum import Enum
 import json
+import os
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -217,16 +218,13 @@ def _write_json(
         exist_ok=True,
     )
 
-    path.write_text(
-        json.dumps(
-            _jsonable(
-                value
-            ),
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    # Atomic (temp file + rename): a full disk left truncated summary.json files (2026-10-23).
+    temp = path.with_name(path.name + ".tmp")
+    with temp.open("w", encoding="utf-8") as out:
+        out.write(json.dumps(_jsonable(value), indent=2, sort_keys=True) + "\n")
+        out.flush()
+        os.fsync(out.fileno())
+    temp.replace(path)
 
 
 def build_parser() -> argparse.ArgumentParser:

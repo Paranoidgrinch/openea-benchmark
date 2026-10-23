@@ -5,10 +5,12 @@
 # Memory: gate in every calculation (--mem-limit-frac 0.70) and the watchdog
 # scripts/openea_mem_watchdog.py (pause >= 70 %, resume < 65 %, kill >= 80 %).
 # A molecule whose run fails (e.g. a worker killed by the watchdog) is resumed from its
-# point cache, at most MAX_ATTEMPTS times.
+# point cache, at most MAX_ATTEMPTS times, RETRY_WAIT seconds after the failure (a full
+# disk on 2026-10-23 used up all three attempts of several molecules within minutes).
 cd "$(dirname "$0")/.."
 RUN="$1"; shift
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
+RETRY_WAIT="${RETRY_WAIT:-900}"
 SCRATCH_ROOT="${OPENEA_PYSCF_SCRATCH:-/scratch/$USER/openea_pyscf}"
 mkdir -p "runs/$RUN" "$SCRATCH_ROOT"
 # Own PySCF scratch per batch, removed at the end: killed calculations leave their
@@ -25,6 +27,7 @@ for pair in "$@"; do
       echo "[BATCH] $a$b attempt $attempt $(date '+%F %T')" >> "runs/$RUN/$a$b.log"
       scripts/run_one.sh "$RUN" "$a" "$b"
       tail -1 "runs/$RUN/$a$b.log" | grep -qx "EXIT 0" && break
+      [ "$attempt" -lt "$MAX_ATTEMPTS" ] && sleep "$RETRY_WAIT"
     done
   ) &
 done

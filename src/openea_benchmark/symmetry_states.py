@@ -31,6 +31,7 @@ from typing import Sequence
 import numpy as np
 
 from .state_candidates import MolecularSymmetry
+from .scratch import discard_broken_checkpoint
 
 
 @dataclass(frozen=True)
@@ -301,6 +302,7 @@ def run_block_scf(mol, occupation: BlockOccupation, *, method: str = "HF", xc: s
     mf.irrep_nelec = {k: (v if target.two_s else v[0] + v[1]) for k, v in occ.items()}
     mf.max_cycle, mf.conv_tol = max_cycle, conv_tol
     if checkpoint:
+        discard_broken_checkpoint(checkpoint)
         mf.chkfile = checkpoint
     mf.kernel(dm0=dm0)
     if not mf.converged:  # same problem, second-order solver from the DIIS end point

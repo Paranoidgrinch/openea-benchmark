@@ -42,6 +42,7 @@ import numpy as np
 from .core_valence_stage import selected_state_specs
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 from .point_pool import run_parallel
+from .scratch import sweep_dead
 
 METHODS = ("CCSD(T)", "CCSDT", "CCSDTQ")
 # File tokens; "CCSD(T)" without parentheses would collide with "CCSDT".
@@ -188,18 +189,6 @@ def cached_diis_class():
     return CachedDIIS
 
 
-def _sweep_dead_scratch(root: Path) -> None:
-    """Remove scratch directories of killed points (finally never ran) on this host."""
-    host = socket.gethostname()
-    for d in root.glob(f"{host}_*_*"):
-        try:
-            os.kill(int(d.name.split("_")[1]), 0)
-        except ProcessLookupError:
-            shutil.rmtree(d, ignore_errors=True)
-        except (ValueError, PermissionError):
-            pass
-
-
 @contextmanager
 def cc_scratch_dir():
     """Per-point directory for CCpy's DIIS file (tempfile-based), always removed afterwards.
@@ -207,7 +196,7 @@ def cc_scratch_dir():
     Points run one per pool worker process, so redirecting ``tempfile.tempdir`` is safe.
     """
     CC_SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
-    _sweep_dead_scratch(CC_SCRATCH_ROOT)
+    sweep_dead(CC_SCRATCH_ROOT)
     path = CC_SCRATCH_ROOT / f"{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     path.mkdir()
     previous, tempfile.tempdir = tempfile.tempdir, str(path)
