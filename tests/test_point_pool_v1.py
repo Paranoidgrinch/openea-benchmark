@@ -147,6 +147,17 @@ def test_cpu_gate_queue_is_first_come_first_served():
     assert first and queue == [("b", 20.0)]
 
 
+def test_cpu_gate_queue_equal_times_have_exactly_one_head():
+    from openea_benchmark.point_pool import cpu_queue_update
+
+    # waiters registered within the same instant (restart burst): all must agree on one head
+    file_queue = [("s5", 5.0), ("s2", 5.0), ("s3", 5.0), ("s9", 4.0)]
+    alive = lambda p: p != "s9"
+    heads = [own for own in ("s2", "s3", "s5")
+             if cpu_queue_update(file_queue, own, 9.0, registered=True, alive=alive)[1]]
+    assert heads == ["s2"]
+
+
 def test_cpu_gate_queue_replaces_stale_entry_of_reused_slot():
     from openea_benchmark.point_pool import cpu_queue_update
 

@@ -317,7 +317,7 @@ def _read_entries(fh) -> list[tuple[str, float]]:
 def _write_entries(fh, entries: list[tuple[str, float]]) -> None:
     fh.seek(0)
     fh.truncate()
-    fh.write("".join(f"{p} {t:.1f}\n" for p, t in entries))
+    fh.write("".join(f"{p} {t:.6f}\n" for p, t in entries))
     fh.flush()
 
 
@@ -327,11 +327,13 @@ def cpu_queue_update(queue: list[tuple[str, float]], own: str, now: float, *, re
 
     Drops entries of slots no longer held (dead waiters), (re-)registers ``own`` on its first
     call (a stale entry left on the same slot file by an earlier holder is replaced) and returns
-    the queue ordered by waiting time plus whether ``own`` is at its head."""
+    the queue ordered by waiting time plus whether ``own`` is at its head.  Equal times are
+    ordered by slot path, so every waiter sees the same head (2026-10-23: 16 waiters registered
+    within 0.1 s at a restart, each sorted itself behind the others and none was ever admitted)."""
     kept = [(p, t) for p, t in queue if p != own and alive(p)]
     mine = [(p, t) for p, t in queue if p == own]
     kept.append(mine[0] if registered and mine else (own, now))
-    kept.sort(key=lambda e: e[1])
+    kept.sort(key=lambda e: (e[1], e[0]))
     return kept, kept[0][0] == own
 
 
