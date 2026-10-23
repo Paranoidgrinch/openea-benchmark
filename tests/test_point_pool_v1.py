@@ -165,3 +165,14 @@ def test_cpu_gate_queue_replaces_stale_entry_of_reused_slot():
     queue, first = cpu_queue_update([("a", 1.0), ("b", 5.0)], "a", 50.0, registered=False,
                                     alive=lambda p: True)
     assert not first and queue == [("b", 5.0), ("a", 50.0)]
+
+
+def test_finished_task_leaves_the_cpu_gate_ramp(tmp_path, monkeypatch):
+    import types
+    from openea_benchmark import point_pool as pp
+
+    monkeypatch.setattr(pp, "_SLOT_DIR", str(tmp_path))
+    gate = tmp_path / "cpugate.lock"
+    gate.write_text(f"{tmp_path}/slot000.lock 1.0\n{tmp_path}/slot001.lock 2.0\n")
+    pp._leave_cpu_gate(types.SimpleNamespace(name=f"{tmp_path}/slot000.lock"))
+    assert gate.read_text() == f"{tmp_path}/slot001.lock 2.000000\n"

@@ -262,6 +262,7 @@ def _held_slots(own_path: str) -> int:
 
 
 CPU_GATE_RAMP_S = 60.0   # a task admitted this recently may not show in the load average yet
+CPU_GATE_HEAD_POLL_S = 0.25
 
 
 def cpu_gate_admits(load: float, ncpu: int, held: int, threads: int, frac: float, ramping: int = 0) -> bool:
@@ -371,7 +372,23 @@ def _wait_for_cpu(handle) -> None:
             print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {len(recent) + 1} x {_THREADS} "
                   f"threads > {frac:g} x {ncpu} cores ({held} slots held, {len(queue)} in queue)", flush=True)
             announced = True
-        time.sleep(10.0)
+        # The front of the queue polls often: short tasks (cache replay at a restart) pass one
+        # per poll, and the next waiter must notice at once that it moved to the head.
+        position = next((i for i, (p, _) in enumerate(queue) if p == handle.name), 0)
+        time.sleep(CPU_GATE_HEAD_POLL_S if position < 3 else 5.0)
+
+
+def _leave_cpu_gate(handle) -> None:
+    """Drop the own ramp entry when the task ends: the next holder of this slot file must not
+    count as a ramping task (2026-10-23: finished short tasks blocked the gate for 60 s each)."""
+    if not _SLOT_DIR or not os.path.exists(os.path.join(_SLOT_DIR, "cpugate.lock")):
+        return
+    with open(os.path.join(_SLOT_DIR, "cpugate.lock"), "a+") as gate:
+        fcntl.flock(gate, fcntl.LOCK_EX)
+        entries = _read_entries(gate)
+        kept = [(p, t) for p, t in entries if p != handle.name]
+        if len(kept) != len(entries):
+            _write_entries(gate, kept)
 
 
 def _held_reserve_mb(handle) -> float:
@@ -435,6 +452,7 @@ def core_slot(reserve_mb: float | None = None):
         yield
     finally:
         _LOCAL.held, _LOCAL.handle = False, None
+        _leave_cpu_gate(handle)
         handle.seek(0)
         handle.truncate()
         fcntl.flock(handle, fcntl.LOCK_UN)
