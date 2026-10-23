@@ -9,10 +9,12 @@
 cd "$(dirname "$0")/.."
 RUN="$1"; shift
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
-mkdir -p "runs/$RUN" runs/scratch
+SCRATCH_ROOT="${OPENEA_PYSCF_SCRATCH:-/scratch/$USER/openea_pyscf}"
+mkdir -p "runs/$RUN" "$SCRATCH_ROOT"
 # Own PySCF scratch per batch, removed at the end: killed calculations leave their
-# integral files behind (123 GB on 2026-10-12).
-export PYSCF_TMPDIR="$(mktemp -d "$PWD/runs/scratch/batch_$(date +%Y%m%d_%H%M%S)_XXXX")"
+# integral files behind (123 GB on 2026-10-12). On /scratch, not in the home quota
+# (111 GB of batch scratch filled the home quota on 2026-10-22/23 -> crashes).
+export PYSCF_TMPDIR="$(mktemp -d "$SCRATCH_ROOT/batch_$(date +%Y%m%d_%H%M%S)_XXXX")"
 nohup nice -n 19 .venv/bin/python scripts/openea_mem_watchdog.py --log runs/mem_watchdog.log &
 WATCHDOG=$!
 trap 'kill -TERM $WATCHDOG 2>/dev/null; rm -rf "$PYSCF_TMPDIR"' EXIT

@@ -13,8 +13,8 @@ THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-16}"; POINT_WORKERS="${POINT
 OUTPUT="${OPENEA_OUTPUT:-../openea_results}/$RUN"
 LOG="runs/$RUN/$A$B.log"
 mkdir -p "runs/$RUN" "$OUTPUT"
-# PySCF integral scratch on the project file system (5Z points write >15 GB each).
-export PYSCF_TMPDIR="${PYSCF_TMPDIR:-$PWD/runs/scratch}" && mkdir -p "$PYSCF_TMPDIR"
+# PySCF integral scratch on /scratch, not in the home quota (5Z points write >15 GB each).
+export PYSCF_TMPDIR="${PYSCF_TMPDIR:-/scratch/$USER/openea_pyscf}" && mkdir -p "$PYSCF_TMPDIR"
 export PYTHONUNBUFFERED=1  # logs show progress immediately
 export OMP_NUM_THREADS="$THREADS" OPENBLAS_NUM_THREADS="$THREADS" MKL_NUM_THREADS="$THREADS"
 nice -n 19 .venv/bin/python -m openea_benchmark.workflow --atoms "$A" "$B" \
