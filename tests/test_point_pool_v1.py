@@ -116,6 +116,62 @@ def test_nested_slot_reserves_the_task_estimate_and_restores(tmp_path, monkeypat
     assert len(sleeps) == 1
 
 
+def test_settled_reservations_count_only_a_tail(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=3,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 0.0)
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_MB", 10.0)
+    held = []
+    try:
+        for name, reserve, age in (("slot001.lock", 300, 0.0), ("slot002.lock", 300, 2 * point_pool.MEM_GATE_RAMP_S)):
+            fh = open(slots / name, "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{point_pool._machine_id()} {os.getpid()} {reserve}\n")
+            fh.flush()
+            stamp = time.time() - age
+            os.utime(slots / name, (stamp, stamp))
+            held.append(fh)
+        own = str(slots / "slot000.lock")
+        fresh_plus_tail = point_pool._outstanding_reservations_mb(own)
+        fresh_only = point_pool._outstanding_reservations_mb(own, tail_mb=0.0)
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert fresh_plus_tail == 310.0  # the fresh reservation in full, the settled one only up to the tail
+    assert fresh_only == 300.0
+
+
+def test_growing_task_ignores_settled_reservations_of_others(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=2,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 0.0)
+    monkeypatch.setattr(point_pool, "meminfo_mb", lambda: (1000.0, 600.0))  # 400 used
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_MB", 250.0)
+    other = open(slots / "slot001.lock", "a+")
+    fcntl.flock(other, fcntl.LOCK_EX)
+    other.write(f"{point_pool._machine_id()} {os.getpid()} 300\n")  # settled, unused
+    other.flush()
+    stamp = time.time() - 2 * point_pool.MEM_GATE_RAMP_S
+    os.utime(slots / "slot001.lock", (stamp, stamp))
+    sleeps = []
+    monkeypatch.setattr(point_pool.time, "sleep", lambda s: sleeps.append(s) or (_ for _ in ()).throw(TimeoutError))
+    try:
+        with point_pool.core_slot():           # new task: 400 + 250 tail + 100 <= 800
+            with point_pool.core_slot(reserve_mb=350):  # growth: 400 + 350 <= 800 without the tail
+                grown = (slots / "slot000.lock").read_text().split()[2]
+    finally:
+        other.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert grown == "350" and not sleeps
+
+
 def test_cpu_gate_leaves_room_for_other_users():
     from openea_benchmark.point_pool import cpu_gate_admits
     # measured load counts everybody: 70 busy threads leave room for one more 10-thread task

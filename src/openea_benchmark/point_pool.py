@@ -137,9 +137,19 @@ def _machine_id() -> str:
     return f"{socket.gethostname()}/{namespace}"
 
 
-def _outstanding_reservations_mb(own_path: str) -> float:
-    """Reserved but not yet resident memory of the tasks running on this host."""
-    machine, total = _machine_id(), 0.0
+MEM_GATE_RAMP_S = 900.0     # a reservation counts in full this long after it was recorded
+MEM_GATE_TAIL_MB = 4096.0   # afterwards at most this much of it above the task's resident memory
+
+
+def _outstanding_reservations_mb(own_path: str, tail_mb: float | None = None) -> float:
+    """Reserved but not yet resident memory of the tasks running on this host.
+
+    A reservation is a guess made at the start; a task that has not grown into it after
+    ``MEM_GATE_RAMP_S`` counts with at most ``tail_mb`` beyond its resident memory (the memory
+    watchdog catches the rest).  Counted in full, unused reservations of out-of-core CC tasks
+    added up to ~225 GB while 390 GB were free, and every task waited (2026-10-25)."""
+    machine, total, now = _machine_id(), 0.0, time.time()
+    tail_mb = MEM_GATE_TAIL_MB if tail_mb is None else tail_mb
     for name in os.listdir(_SLOT_DIR):
         path = os.path.join(_SLOT_DIR, name)
         if not name.startswith("slot") or not name.endswith(".lock") or path == own_path:
@@ -154,13 +164,15 @@ def _outstanding_reservations_mb(own_path: str) -> float:
                     pass
                 fh.seek(0)
                 fields = fh.read().split()
+                age = now - os.fstat(fh.fileno()).st_mtime
         except OSError:
             continue
         if len(fields) != 3 or fields[0] != machine:
             continue
         rss = _rss_mb(int(fields[1]))
         if rss is not None:
-            total += max(0.0, float(fields[2]) - rss)
+            rest = max(0.0, float(fields[2]) - rss)
+            total += rest if age < MEM_GATE_RAMP_S else min(rest, tail_mb)
     return total
 
 
@@ -221,7 +233,10 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact
         with open(os.path.join(_SLOT_DIR, "memgate.lock"), "a+") as gate:
             fcntl.flock(gate, fcntl.LOCK_EX)  # serialise admissions: no two tasks pass on the same free memory
             total, available = meminfo_mb()
-            projected = (total - available) + _outstanding_reservations_mb(handle.name) + (
+            # A running task that grows (``exact``) holds its slot while it waits: it ignores the
+            # settled reservations of the others, or tasks that all grow wait for each other.
+            others = _outstanding_reservations_mb(handle.name, tail_mb=0.0 if exact else None)
+            projected = (total - available) + others + (
                 max(0.0, reserve - (_rss_mb(os.getpid()) or 0.0)) if exact else reserve)
             if big is None:
                 projected += _pending_big_reservation_mb()
