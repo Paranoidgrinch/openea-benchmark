@@ -635,6 +635,31 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
 SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE = 1.0e-5
 
 
+# Bracket refinements of two blocks can round the same midpoint differently (verify_v1
+# FeO- 6Sigma- block on 6Delta: 1.6503 vs 1.6504 A, so the duplicate was not merged).
+SCOUT_MERGE_R_TOLERANCE_ANGSTROM = 1.0e-3
+
+
+def _energy_on_curve(points: Sequence[Mapping[str, Any]], r: float) -> float | None:
+    """Energy of a scout curve at ``r``: its point there, or linear between the two points
+    around ``r`` when its nearest point is within SCOUT_MERGE_R_TOLERANCE_ANGSTROM."""
+    pts = sorted((q for q in points if q.get("energy_center_hartree") is not None), key=lambda q: q["r_angstrom"])
+    if not pts:
+        return None
+    near = min(pts, key=lambda q: abs(q["r_angstrom"] - r))
+    if abs(near["r_angstrom"] - r) < 1.0e-6:
+        return near["energy_center_hartree"]
+    if abs(near["r_angstrom"] - r) > SCOUT_MERGE_R_TOLERANCE_ANGSTROM:
+        return None
+    lo = [q for q in pts if q["r_angstrom"] < r]
+    hi = [q for q in pts if q["r_angstrom"] > r]
+    if not lo or not hi:
+        return None
+    a, b = lo[-1], hi[0]
+    t = (r - a["r_angstrom"]) / (b["r_angstrom"] - a["r_angstrom"])
+    return a["energy_center_hartree"] + t * (b["energy_center_hartree"] - a["energy_center_hartree"])
+
+
 def _merge_coincident_label_changed(sector: dict, mr_only: list | None = None, charge: int | None = None) -> None:
     """A label-changed block whose minimum and both neighbours coincide (same R, same
     energy) with points of a bracketed component of the same sector converged onto
@@ -665,14 +690,10 @@ def _merge_coincident_label_changed(sector: dict, mr_only: list | None = None, c
                 continue
             hits = []
             for p in probe:
-                ref = next((q for q in other["pec"]["points"]
-                            if abs(q["r_angstrom"] - p["r_angstrom"]) < 1.0e-6
-                            and abs(q["energy_center_hartree"] - p["energy_center_hartree"])
-                            < SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE), None)
-                if ref is None:
+                ref = _energy_on_curve(other["pec"]["points"], p["r_angstrom"])
+                if ref is None or abs(p["energy_center_hartree"] - ref) >= SCOUT_MERGE_ENERGY_TOLERANCE_HARTREE:
                     break
-                hits.append({"r_angstrom": p["r_angstrom"],
-                             "delta_hartree": p["energy_center_hartree"] - ref["energy_center_hartree"]})
+                hits.append({"r_angstrom": p["r_angstrom"], "delta_hartree": p["energy_center_hartree"] - ref})
             if len(hits) == len(probe) >= 2 and other["minimum_scout"]["status"] != "bracketed_single_minimum":
                 # Same SCF solution as a state routed to the MR layer: same route.
                 scout["minimum_scout"] = {**scout["minimum_scout"], "status": other["minimum_scout"]["status"],

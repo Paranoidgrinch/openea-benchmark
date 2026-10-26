@@ -221,3 +221,31 @@ def test_descending_into_scf_failure_routes_to_mr_layer():
     summary = to_legacy_summary(_record({"d": block}))
     assert summary["sectors"][0]["manifold_pec_scouts"][0]["minimum_scout"]["status"] == "scf_failed_edge_mr_route"
     assert any(m["label"] == "2Delta" and m["charge"] == 0 for m in summary["mr_only_candidates"])
+
+
+def test_relabelled_duplicate_merges_despite_rounded_grid():
+    # verify_v1 FeO-: the 6Sigma- block converged onto 6Delta along its whole curve, but its
+    # refinement points sat at 1.6503 instead of 1.6504 A -> not merged, the same state twice
+    # (gap 0.015 meV) blocked the electronic EA.
+    from openea_benchmark.open_pec_extension import MERGED_STATUS
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    delta = _block("6Delta", 5, [(1.6082, -1338.65486917), (1.6504, -1338.65812130), (1.6925, -1338.65893372),
+                                 (1.7206, -1338.65835983), (1.7487, -1338.65703489)], "BRACKETED_SINGLE_MINIMUM")
+    sigma = _block("6Sigma-", 5, [(1.6081, -1338.65485729), (1.6503, -1338.65811593), (1.6925, -1338.65893305),
+                                  (1.7206, -1338.65835922), (1.7487, -1338.65703434)], "LABEL_CHANGED")
+    for p in sigma["points"]:
+        p["label"] = "6Delta"
+    scouts = to_legacy_summary(_record({"a": delta, "b": sigma}))["sectors"][0]["manifold_pec_scouts"]
+    status = {s["symmetry_block"].get("block_target_label", s["symmetry_block"]["label"]): s["minimum_scout"]["status"]
+              for s in scouts}
+    assert status["6Delta"] == "bracketed_single_minimum"
+    assert status["6Sigma-"] == MERGED_STATUS
+
+
+def test_curve_energy_is_interpolated_only_next_to_a_point():
+    from openea_benchmark.symmetry_scout import _energy_on_curve
+    pts = [{"r_angstrom": 1.60, "energy_center_hartree": -1.0}, {"r_angstrom": 1.70, "energy_center_hartree": -2.0}]
+    assert _energy_on_curve(pts, 1.70) == -2.0
+    assert abs(_energy_on_curve(pts, 1.6005) - (-1.005)) < 1e-12
+    assert _energy_on_curve(pts, 1.65) is None          # far from every point: no comparison
+    assert _energy_on_curve(pts, 1.7005) is None        # outside the curve
