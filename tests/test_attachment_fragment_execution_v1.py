@@ -125,3 +125,24 @@ def test_two_electron_waiver_can_be_recorded_without_promoting_threshold():
     assert result.external_instability_waived is True
     assert result.two_electron_ccsd_exact_space is True
     assert result.is_production_threshold is False
+
+
+def test_closed_shell_ns2_atom_keeps_its_rhf_ccsd_t_energy():
+    # verify_v1 Li-/Na-: RHF 1S is externally (RHF -> UHF) unstable; dropping it made 3P
+    # the anion ground state, 0.88 eV too high for Li-.
+    req = AtomicFragmentRequest("Li_minus_1S", "Li", -1, 0, "def2-svpd", state_label="1S")
+    result = run_atomic_fragment(req)
+    assert result.status is FragmentExecutionStatus.COMPLETED
+    assert result.external_stable is False and result.external_instability_waived is True
+    assert result.external_instability_waiver_reason == "ATOMIC_CLOSED_SHELL_1S_RHF_REFERENCE"
+    neutral = run_atomic_fragment(AtomicFragmentRequest("Li_2S", "Li", 0, 1, "def2-svpd", state_label="2S"))
+    assert 0.2 < (neutral.ccsd_t_total_hartree - result.ccsd_t_total_hartree) * 27.211386 < 0.8   # EA(Li) 0.62 eV
+
+
+def test_closed_shell_waiver_only_for_complete_subshells():
+    from openea_benchmark.attachment.fragment_execution import closed_subshell_electron_count
+    assert all(closed_subshell_electron_count(el, q) for el, q in
+               (("Li", -1), ("Na", -1), ("Cu", -1), ("Ag", -1), ("Au", -1), ("Be", 0), ("Mg", 0), ("Zn", 0)))
+    # closed-shell determinant of an open p/d atom is a 1D component, not a 1S state
+    assert not any(closed_subshell_electron_count(el, q) for el, q in
+                   (("O", 0), ("C", 0), ("S", 0), ("Si", 0), ("N", -1), ("P", -1), ("B", -1), ("Pb", 0), ("Ni", 0)))

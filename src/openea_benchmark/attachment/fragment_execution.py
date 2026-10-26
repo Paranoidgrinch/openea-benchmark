@@ -356,30 +356,37 @@ def _run_atomic_fragment_pyscf(
             **common,
         )
 
-    # Narrow atomic two-electron exception:
+    # Atomic closed-shell exception (two-electron atoms and ns^2 atoms, see below):
     # For a closed-shell *atomic* two-electron fragment (e.g. H-), RHF may be
     # externally unstable to an unrestricted determinant.  CCSD nevertheless
     # spans the complete excitation space for two electrons in the chosen
     # one-particle basis.  We therefore retain external_stable=False as
-    # diagnostic evidence but do not block the correlated energy.  This waiver
-    # is not applied to molecules, open shells, or systems with != 2 electrons.
+    # diagnostic evidence but do not block the correlated energy.  The waiver
+    # is not applied to molecules or open shells.
     two_electron_closed_shell_atom = (
         request.spin_2s == 0
         and int(mol.nelectron) == 2
         and int(mol.natm) == 1
     )
+    # Closed-shell ns^2 atoms (Li-, Na-, Cu-, Ag-, Be, Mg, Zn, ...): the RHF -> UHF instability comes from
+    # the ns/np near-degeneracy, the UHF determinant is spin-contaminated, and CCSD(T) on the
+    # internally stable RHF reference is the standard description of the 1S state.  Dropping
+    # it took the 3P state as the atomic ground state (verify_v1: Li- 0.88 eV, Na- 0.79 eV too
+    # high, so the Li + Li- and Na + Na- asymptotes were wrong).
+    closed_shell_atom = (request.spin_2s == 0 and int(mol.natm) == 1 and internal_stable
+                         and closed_subshell_electron_count(request.element, request.charge))
     waive_external_instability = (
         settings.require_rhf_external_stability
         and external_stable is False
-        and two_electron_closed_shell_atom
+        and (two_electron_closed_shell_atom or closed_shell_atom)
     )
 
     common.update(
         external_instability_waived=waive_external_instability,
         external_instability_waiver_reason=(
-            "ATOMIC_CLOSED_SHELL_TWO_ELECTRON_CCSD_COMPLETE_EXCITATION_SPACE"
-            if waive_external_instability
-            else None
+            None if not waive_external_instability
+            else "ATOMIC_CLOSED_SHELL_TWO_ELECTRON_CCSD_COMPLETE_EXCITATION_SPACE" if two_electron_closed_shell_atom
+            else "ATOMIC_CLOSED_SHELL_1S_RHF_REFERENCE"
         ),
         two_electron_ccsd_exact_space=two_electron_closed_shell_atom,
     )
@@ -667,6 +674,18 @@ def _run_atomic_fragment_configurations(request: AtomicFragmentRequest, settings
     gap = None if not other else (min(other) - best.ccsd_t_total_hartree) * hartree_ev
     return replace(best, configuration_label=best_sol["label"], configuration_candidates=candidates,
                    configuration_gap_ev=gap)
+
+
+# Electron counts whose aufbau configuration fills complete subshells (1s2, 2s2, 2p6, 3s2,
+# 3p6, 4s2, 3d10, 4p6, 5s2, 4d10, 5p6, 6s2, 4f14, 5d10, 6p6): only there is the closed-shell
+# determinant a 1S state.  For open p/d atoms (C, O, Si, S, N-, P-, ...) it is one component
+# of an excited 1D state and stays excluded when RHF is unstable.
+CLOSED_SUBSHELL_ELECTRONS = frozenset((2, 4, 10, 12, 18, 20, 30, 36, 38, 48, 54, 56, 70, 80, 86))
+
+
+def closed_subshell_electron_count(element: str, charge: int) -> bool:
+    from pyscf.data.elements import charge as nuclear_charge
+    return int(nuclear_charge(element)) - int(charge) in CLOSED_SUBSHELL_ELECTRONS
 
 
 def run_atomic_fragment(

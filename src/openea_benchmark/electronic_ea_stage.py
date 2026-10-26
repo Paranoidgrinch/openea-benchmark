@@ -45,7 +45,8 @@ from .adaptive.stage3_loop import Stage3LoopRetrySettings, run_stage3_refinement
 from .adaptive.stage3_refinement import Stage3RefinementSettings
 from .attachment.asymptote import DissociationChannel
 from .attachment.equilibrium import EquilibriumResolverSettings, EquilibriumStatus, resolve_stage3_equilibrium
-from .attachment.fragment_execution import AtomicFragmentRequest, FragmentExecutionStatus, run_atomic_fragment
+from .attachment.fragment_execution import (AtomicFragmentRequest, FragmentExecutionStatus, closed_subshell_electron_count,
+                                          run_atomic_fragment)
 from .attachment.stage3_bridge import Stage3AttachmentBridgeStatus, bridge_stage3_loop_to_attachment
 from .attachment.workflow import evaluate_stage3_electronic_ea
 from .reference_branches import branch_parent
@@ -233,6 +234,11 @@ def scan_atomic_fragments(*, atoms: Sequence[str], basis: str, settings: Stage3E
                         and needs_atomic_multistate(element)):
                     # single-guess record from before configuration control (Patch 60): only d/f
                     # atoms have competing configurations a single guess can miss
+                    rec = None
+                if (rec is not None and spin_2s == 0 and rec.get("status") == FragmentExecutionStatus.SCF_UNSTABLE.value
+                        and rec.get("internal_stable") and closed_subshell_electron_count(element, charge)):
+                    # 1S of a complete-subshell atom dropped before the closed-shell waiver
+                    # (verify_v1 Li-, Na-, Cu-, Ag-): recomputed once, now kept
                     rec = None
                 if rec is None:
                     from .point_pool import core_slot

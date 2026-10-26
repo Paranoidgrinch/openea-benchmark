@@ -1,3 +1,4 @@
+import json
 """Automated electronic-EA stage: competition, fragments, channels, wiring."""
 import pytest
 
@@ -197,3 +198,22 @@ def test_open_scout_components_far_above_seed_do_not_block():
     _block_on_open_scout_components(comp, [
         {"component_id": "a", "observed_gap_to_bracketed_seed_ev_not_lower_bound": 1.5}], 1.0)
     assert comp["status"] == "CLEARED" and comp["selected_job_id"] == "j"
+
+
+def test_dropped_1s_of_complete_subshell_atom_is_recomputed_once(tmp_path):
+    # verify_v1 Li-: 1S cached as SCF_UNSTABLE (RHF -> UHF) made 3P the anion ground state
+    energies = {("Li", 0, 1): -7.468, ("Li", -1, 2): -7.4526, ("Li", -1, 4): -5.36, ("Li", 0, 3): -5.34}
+    scan_atomic_fragments(atoms=("Li", "Li"), basis="b", settings=Stage3ExecutionSettings(),
+                          policy=ElectronicEAStagePolicy(), cache_dir=tmp_path, runner=_fake_fragment(energies))
+    path = tmp_path / "Li_q-1_2S0__b.json"
+    old = json.loads(path.read_text())
+    assert old["status"] == "SCF_UNSTABLE"
+    path.write_text(json.dumps({**old, "internal_stable": True, "external_stable": False}))  # as in verify_v1
+    energies[("Li", -1, 0)] = -7.4851
+    table = scan_atomic_fragments(atoms=("Li", "Li"), basis="b", settings=Stage3ExecutionSettings(),
+                                  policy=ElectronicEAStagePolicy(), cache_dir=tmp_path, runner=_fake_fragment(energies))
+    assert table["Li-1"]["lowest"]["spin_2s"] == 0
+    again = scan_atomic_fragments(atoms=("Li", "Li"), basis="b", settings=Stage3ExecutionSettings(),
+                                  policy=ElectronicEAStagePolicy(), cache_dir=tmp_path,
+                                  runner=lambda *a, **k: pytest.fail("recomputed"))
+    assert again["Li-1"]["lowest"]["spin_2s"] == 0
