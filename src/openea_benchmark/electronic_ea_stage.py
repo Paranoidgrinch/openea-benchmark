@@ -411,6 +411,15 @@ def single_basis_ea_interval(neutral: Mapping[str, Any], anion: Mapping[str, Any
     return lower, upper, central, sign
 
 
+def lowest_sampled(initial: float | None, results: Sequence[Stage3PointResult]) -> float | None:
+    """Lowest CCSD(T) energy of a candidate over its initial grid and its refinement points."""
+    energies = [r.ccsd_t_total_hartree for r in results
+                if r.status is PointExecutionStatus.COMPLETED and r.ccsd_t_total_hartree is not None]
+    if initial is not None:
+        energies.append(initial)
+    return min(energies, default=None)
+
+
 def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequence[Stage3ExecutionRequest],
                             point_records: Mapping[str, Mapping[str, Any]], pec_reviews: Mapping[str, Mapping[str, Any]],
                             stage3_settings: Stage3ExecutionSettings, output_dir: Path,
@@ -461,6 +470,10 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
             retry_settings=Stage3LoopRetrySettings(max_retries_per_request=1, cycle_multiplier=2.0),
             runner=runner, resolver=resolver)
         loops[job_id] = loop
+        # Refinement points count for the margin test of an unresolved candidate: a curve
+        # still falling at its boundary lies lower than its initial grid (verify_v1 Li2-
+        # 2Sigmag+: initial lowest -14.9581, extended -14.9674 Eh, 0.25 eV lower).
+        entry["lowest_sampled_hartree"] = lowest_sampled(entry["lowest_sampled_hartree"], loop.results)
         entry["loop_rationale"] = loop.rationale
         entry["loop_status"] = loop.status.value
         record = bridge_stage3_loop_to_attachment(loop)

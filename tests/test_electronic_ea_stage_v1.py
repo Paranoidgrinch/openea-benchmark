@@ -217,3 +217,18 @@ def test_dropped_1s_of_complete_subshell_atom_is_recomputed_once(tmp_path):
                                   policy=ElectronicEAStagePolicy(), cache_dir=tmp_path,
                                   runner=lambda *a, **k: pytest.fail("recomputed"))
     assert again["Li-1"]["lowest"]["spin_2s"] == 0
+
+
+def test_lowest_sampled_includes_refinement_points():
+    # verify_v1 Li2- 2Sigmag+: the margin test used the initial grid (-14.9581) although the
+    # extended curve reached -14.9674 Eh
+    from types import SimpleNamespace
+    from openea_benchmark.adaptive.stage3_execution import PointExecutionStatus
+    from openea_benchmark.electronic_ea_stage import lowest_sampled
+    ok = PointExecutionStatus.COMPLETED
+    results = [SimpleNamespace(status=ok, ccsd_t_total_hartree=-14.9674),
+               SimpleNamespace(status=PointExecutionStatus.ERROR, ccsd_t_total_hartree=None),
+               SimpleNamespace(status=ok, ccsd_t_total_hartree=-14.9600)]
+    assert lowest_sampled(-14.9581, results) == -14.9674
+    assert lowest_sampled(None, []) is None
+    assert lowest_sampled(-14.9581, []) == -14.9581
