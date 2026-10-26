@@ -367,6 +367,13 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             continue
         if e["equilibrium_status"] == "RESOLVED" and gap_ev > 0.0:
             continue  # cleanly separated interval
+        if e["equilibrium_status"] != "RESOLVED" and e.get("bracket_floor_hartree") is not None:
+            # Strictly bracketed minimum without an admissible quadratic model: the convex
+            # bracket floor is a lower bound like a resolved interval, no margin needed.
+            floor_gap_ev = (e["bracket_floor_hartree"] - upper) * HARTREE_TO_EV
+            if floor_gap_ev > 0.0:
+                excluded.append({"job_id": e["job_id"], "gap_ev": floor_gap_ev, "basis": "CONVEX_BRACKET_FLOOR"})
+                continue
         if e["equilibrium_status"] != "RESOLVED" and gap_ev > margin_ev:
             excluded.append({"job_id": e["job_id"], "gap_ev": gap_ev, "basis": "LOWEST_SAMPLED_CCSD(T)_POINT"})
             continue
@@ -418,6 +425,44 @@ def lowest_sampled(initial: float | None, results: Sequence[Stage3PointResult]) 
     if initial is not None:
         energies.append(initial)
     return min(energies, default=None)
+
+
+def mark_refinement_collapse(entry: dict, results: Sequence[Stage3PointResult],
+                             policy: "ElectronicEAStagePolicy") -> None:
+    """An unresolved candidate whose refinement reached collapsed CCSD(T) points is
+    SINGLE_REFERENCE_COLLAPSED, as when the initial grid collapses: its CCSD(T) energies
+    are no floor.  verify_v1 Li2- 2Sigmag+ (delocalized ROHF of Li + Li-): extended to 7 A,
+    (T) grew to 35 % of the correlation energy and CCSD(T) fell 1.2 eV below Li + Li-."""
+    collapsed = [c for c in (reference_collapse_evidence(r.to_dict(), policy) for r in results
+                             if r.status is PointExecutionStatus.COMPLETED) if c]
+    if collapsed:
+        entry.update(equilibrium_status="SINGLE_REFERENCE_COLLAPSED", lowest_sampled_hartree=None,
+                     reference_collapse={"n_points": len(collapsed), "n_sampled": len(results),
+                                         "points": collapsed, "source": "REFINEMENT"})
+
+
+# Convergence noise of CCSD(T) point energies, subtracted from a bracket floor.
+BRACKET_FLOOR_TOLERANCE_HARTREE = 1.0e-6
+
+
+def bracket_floor(pec: Any, tolerance_hartree: float = BRACKET_FLOOR_TOLERANCE_HARTREE) -> float | None:
+    """Lower bound of the minimum of a strictly bracketed curve whose quadratic models were
+    rejected (e.g. curvature below the threshold in a shallow well, verify_v1 Li2 a3Sigma_u+).
+
+    Points a < b < c with E_b lowest; for a curve convex on [a, c] the secant lines through b
+    and its neighbours extended beyond b lie below it, so
+    min >= E_b - max((E_c - E_b)(b - a)/(c - b), (E_a - E_b)(c - b)/(b - a))."""
+    scout = getattr(pec, "minimum_scout", None)
+    if scout is None or scout.status.value != "BRACKETED_SINGLE_MINIMUM" or len(scout.candidates) != 1:
+        return None
+    cand = scout.candidates[0]
+    energy = {round(p.r_angstrom, 9): p.energy_hartree for p in pec.points if p.energy_hartree is not None}
+    ea, ec = energy.get(round(cand.left_r_angstrom, 9)), energy.get(round(cand.right_r_angstrom, 9))
+    a, b, c, eb = cand.left_r_angstrom, cand.r_angstrom, cand.right_r_angstrom, cand.energy_hartree
+    if ea is None or ec is None or not (a < b < c) or not (eb < ea and eb < ec):
+        return None
+    drop = max((ec - eb) * (b - a) / (c - b), (ea - eb) * (c - b) / (b - a))
+    return eb - drop - tolerance_hartree
 
 
 def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequence[Stage3ExecutionRequest],
@@ -481,6 +526,8 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
         if record.status is Stage3AttachmentBridgeStatus.READY:
             eq = resolve_stage3_equilibrium(record, settings=policy.equilibrium())
             entry["equilibrium_status"] = eq.status.value
+            if eq.status is not EquilibriumStatus.RESOLVED:
+                entry["equilibrium_reason"] = eq.rationale
             if eq.status is EquilibriumStatus.RESOLVED:
                 entry.update(energy_central_hartree=eq.energy_central_hartree,
                              energy_lower_hartree=eq.energy_interval_hartree.lower_hartree,
@@ -488,6 +535,9 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                              r_central_angstrom=eq.geometry_central_angstrom)
         else:
             entry["equilibrium_status"] = "BRIDGE_NOT_READY"
+        if entry["equilibrium_status"] != EquilibriumStatus.RESOLVED.value:
+            entry["bracket_floor_hartree"] = bracket_floor(loop.final_pec) if loop.final_pec is not None else None
+            mark_refinement_collapse(entry, loop.results, policy)
 
     for job_id, job_reqs in sorted(by_job.items()):
         review = pec_reviews.get(job_id, {})

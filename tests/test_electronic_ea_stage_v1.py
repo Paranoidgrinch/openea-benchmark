@@ -232,3 +232,55 @@ def test_lowest_sampled_includes_refinement_points():
     assert lowest_sampled(-14.9581, results) == -14.9674
     assert lowest_sampled(None, []) is None
     assert lowest_sampled(-14.9581, []) == -14.9581
+
+
+def test_collapse_in_refinement_points_marks_unresolved_candidate():
+    from types import SimpleNamespace
+    from openea_benchmark.adaptive.stage3_execution import PointExecutionStatus
+    from openea_benchmark.electronic_ea_stage import mark_refinement_collapse
+
+    def point(r, corr, triples):
+        rec = {"request_id": f"p{r}", "r_angstrom": r, "ccsd_correlation_hartree": corr,
+               "triples_correction_hartree": triples, "max_abs_t2_amplitude": 0.2}
+        return SimpleNamespace(status=PointExecutionStatus.COMPLETED, to_dict=lambda rec=rec: rec)
+
+    entry = {"equilibrium_status": "BRIDGE_NOT_READY", "lowest_sampled_hartree": -14.998}
+    mark_refinement_collapse(entry, [point(3.0, -0.118, -0.007), point(7.0, -0.160, -0.056)],
+                             ElectronicEAStagePolicy())
+    assert entry["equilibrium_status"] == "SINGLE_REFERENCE_COLLAPSED"
+    assert entry["lowest_sampled_hartree"] is None and entry["reference_collapse"]["n_points"] == 1
+    healthy = {"equilibrium_status": "BRIDGE_NOT_READY", "lowest_sampled_hartree": -14.96}
+    mark_refinement_collapse(healthy, [point(3.0, -0.118, -0.007)], ElectronicEAStagePolicy())
+    assert healthy["equilibrium_status"] == "BRIDGE_NOT_READY"
+
+
+def _bracketed_pec(points, center):
+    from types import SimpleNamespace
+    rs = [r for r, _ in points]
+    i = rs.index(center)
+    cand = SimpleNamespace(r_angstrom=center, energy_hartree=points[i][1], left_r_angstrom=rs[i - 1],
+                           right_r_angstrom=rs[i + 1])
+    return SimpleNamespace(minimum_scout=SimpleNamespace(status=SimpleNamespace(value="BRACKETED_SINGLE_MINIMUM"),
+                                                         candidates=(cand,)),
+                           points=[SimpleNamespace(r_angstrom=r, energy_hartree=e) for r, e in points])
+
+
+def test_convex_bracket_floor_of_a_shallow_well():
+    # verify_v1 Li2 a3Sigma_u+: strict bracket, curvature below the model threshold
+    from openea_benchmark.electronic_ea_stage import bracket_floor
+    pec = _bracketed_pec([(4.3428, -14.937229543), (4.3628, -14.937229793), (4.3728, -14.937229685)], 4.3628)
+    floor = bracket_floor(pec, tolerance_hartree=0.0)
+    assert -14.937229793 - 6e-7 < floor < -14.937229793
+    flat = _bracketed_pec([(1.0, -1.0), (1.1, -1.0), (1.2, -0.9)], 1.1)    # not strict: no floor
+    assert bracket_floor(flat) is None
+
+
+def test_bracket_floor_clears_candidate_below_margin():
+    low = entry("x", center=-14.972, lo=-14.97201, hi=-14.97199)
+    shallow = {**entry("t", status="UNRESOLVED", sampled=-14.93723),
+               "bracket_floor_hartree": -14.93723}
+    comp = _competition("neutral", [low, shallow], 1.0)
+    assert comp["status"] == "CLEARED"
+    assert comp["excluded_by_margin"][0]["basis"] == "CONVEX_BRACKET_FLOOR"
+    deep = {**shallow, "bracket_floor_hartree": -14.98}
+    assert _competition("neutral", [low, deep], 1.0)["status"] == "UNRESOLVED"
