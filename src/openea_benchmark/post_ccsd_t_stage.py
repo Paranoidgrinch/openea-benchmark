@@ -99,7 +99,22 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     mf1.kernel(dm0=mf.make_rdm1())
     if not mf1.converged or abs(mf1.e_tot - mf.e_tot) > policy.c1_energy_tolerance_hartree:
         raise RuntimeError(f"C1 reference left the symmetry-block solution ({mf1.e_tot} vs {mf.e_tot})")
-    return mf1
+    return occupation_ordered(mf1)
+
+
+def occupation_ordered(mf):
+    """``mf`` with its orbitals in the order doubly, singly occupied, virtual (energy order within).
+
+    CCpy takes the first orbitals as occupied.  A ROHF orbital energy does not have to follow
+    the occupation: CH- 3Sigma- in aug-cc-pVTZ has a virtual between the doubly and the singly
+    occupied orbitals, and CCpy stopped with "Integrals don't match mean field energy"
+    (verify_v1, 2026-10-26).  Reordering leaves the determinant and its energy unchanged."""
+    import numpy as np
+    order = np.argsort(-np.asarray(mf.mo_occ), kind="stable")
+    if np.array_equal(order, np.arange(order.size)):
+        return mf
+    mf.mo_coeff, mf.mo_occ, mf.mo_energy = mf.mo_coeff[:, order], mf.mo_occ[order], mf.mo_energy[order]
+    return mf
 
 
 # CCpy keeps diis_size (6) amplitude and residual vectors, plus the amplitudes, the

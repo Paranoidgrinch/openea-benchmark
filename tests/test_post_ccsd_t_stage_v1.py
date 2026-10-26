@@ -1,3 +1,4 @@
+import pytest
 """Patch 49: post-CCSD(T) layer (fake CCpy points)."""
 from types import SimpleNamespace
 
@@ -139,3 +140,27 @@ def test_cached_points_reserve_no_memory(tmp_path, monkeypatch):
     assert max(seen[0]) == 50000.0
     run(tmp_path, monkeypatch, limit=60000)  # second pass: every point cached
     assert seen[1] and all(x == 0.0 for x in seen[1])
+
+
+def test_reference_orbitals_are_handed_to_ccpy_in_occupation_order():
+    # CH- 3Sigma- in aug-cc-pVTZ: a ROHF virtual lay between the doubly and the singly occupied
+    # orbitals and CCpy failed with "Integrals don't match mean field energy" (2026-10-26).
+    import numpy as np
+    from pyscf import gto, scf
+    from ccpy.drivers.driver import Driver
+    from openea_benchmark.post_ccsd_t_stage import occupation_ordered
+
+    mol = gto.M(atom="C 0 0 0; H 0 0 1.13", basis="cc-pvdz", charge=-1, spin=2, symmetry="C1", verbose=0)
+    mf = scf.ROHF(mol)
+    mf.kernel()
+    energy = mf.e_tot
+    swap = np.arange(mol.nao_nr())
+    swap[[3, 5]] = swap[[5, 3]]              # a virtual in front of the singly occupied orbitals
+    mf.mo_coeff, mf.mo_occ, mf.mo_energy = mf.mo_coeff[:, swap], mf.mo_occ[swap], mf.mo_energy[swap]
+    assert abs(mf.energy_tot() - energy) < 1e-8
+    with pytest.raises(RuntimeError, match="Integrals don't match"):
+        Driver.from_pyscf(mf, nfrozen=1)
+    ordered = occupation_ordered(mf)
+    assert list(ordered.mo_occ[:6]) == [2, 2, 2, 1, 1, 0]
+    driver = Driver.from_pyscf(ordered, nfrozen=1)
+    assert abs(driver.system.reference_energy - energy) < 1e-6
