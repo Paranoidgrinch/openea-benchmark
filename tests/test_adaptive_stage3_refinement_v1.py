@@ -304,3 +304,25 @@ def test_refinement_requests_preserve_basis_by_element_policy():
     assert new
     assert all(item.basis == 'MIXED_TEST' for item in new)
     assert all(item.basis_by_element == {'O': 'aug-cc-pVTZ', 'H': 'aug-cc-pVQZ'} for item in new)
+
+
+def test_boundary_extension_stays_below_the_continuity_step_limit():
+    # verify_v1 Li2- 2Sigmag+: spacing 0.05 A doubled to 3.0631 - 2.9631 = 0.1000000001 A,
+    # above the 0.10 A continuity limit -> AMBIGUOUS edge, refinement stopped on a falling curve.
+    pec, _, _ = pec_from((2.8631, 2.9131, 2.9631), (-14.9574, -14.9581, -14.9587))
+    capped = replace(SETTINGS, max_extension_step_angstrom=0.10)
+    plan = plan_stage3_pec_refinement(pec, settings=capped)
+    assert plan.action is RefinementAction.EXTEND_UPPER_R
+    new = [2.9631] + [g.r_angstrom for g in plan.proposed_geometries]
+    assert len(new) == 3 and all(0.0 < b - a < 0.10 for a, b in zip(new, new[1:]))
+    assert abs(new[-1] - (2.9631 + 0.1)) < 1e-9          # the reach of the uncapped step is kept
+    assert [round(g.r_angstrom, 6) for g in plan_stage3_pec_refinement(pec, settings=SETTINGS).proposed_geometries] == [3.0631]
+
+
+def test_boundary_extension_reach_doubles_with_a_densely_sampled_falling_tail():
+    # Sub-steps keep the outermost spacing small; the reach still grows with the falling tail.
+    rs = (2.8, 2.9, 3.0, 3.1, 3.2)
+    pec, _, _ = pec_from(rs, tuple(-14.95 - 0.001 * i for i in range(len(rs))))
+    plan = plan_stage3_pec_refinement(pec, settings=replace(SETTINGS, max_extension_step_angstrom=0.10))
+    assert abs(plan.proposed_geometries[-1].r_angstrom - (3.2 + 0.4)) < 1e-9
+    assert len(plan.proposed_geometries) == 5

@@ -367,6 +367,10 @@ def run_stage3_refinement_loop(
     completed_refinement_rounds = 0
     settings = execution_settings or Stage3ExecutionSettings()
     retries = retry_settings or Stage3LoopRetrySettings()
+    cap = getattr(branch_thresholds, "max_step_angstrom", None)
+    if refinement_settings.max_extension_step_angstrom is None and cap is not None:
+        # New boundary points must stay within the step the continuity review can prove.
+        refinement_settings = replace(refinement_settings, max_extension_step_angstrom=float(cap))
 
     while True:
         resolution = _resolve(

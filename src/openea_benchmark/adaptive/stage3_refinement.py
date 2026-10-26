@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from math import isfinite
+from math import ceil, isfinite
 from typing import Any, Sequence
 
 from .stage3_execution import Stage3ExecutionRequest, Stage3PointResult
@@ -55,6 +55,9 @@ class Stage3RefinementSettings:
     target_bracket_width_angstrom: float
     minimum_new_point_separation_angstrom: float
     energy_tie_tolerance_hartree: float
+    # Largest step the geometry-continuity review accepts between neighbours (BranchThresholds
+    # max_step_angstrom); boundary extensions stay below it.  None: no limit.
+    max_extension_step_angstrom: float | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -136,21 +139,42 @@ def _filter_new_r(
     return tuple(kept)
 
 
+CONTINUITY_STEP_MARGIN = 0.98    # extension steps stay this fraction below the continuity step limit
 MAX_EXTENSION_GROWTH = 16.0   # boundary steps grow up to 16 x extension_step (0.4 A for 0.025 A)
 
 
 def _boundary_step(points: Sequence[HighLevelPECPoint], settings: Stage3RefinementSettings, *, upper: bool) -> float:
     """Step beyond a boundary whose energy still decreases outward.
 
-    Doubles the outermost spacing on that side (geometric line search), from
-    ``extension_step_angstrom`` up to ``MAX_EXTENSION_GROWTH`` times it, so a flat or
-    far-away minimum (weakly bound triplet, diffuse anion) is reached within the round limit
-    instead of creeping outward by one fixed small step per round."""
+    Geometric line search: at least twice the outermost spacing and at least the length of
+    the falling tail already sampled on that side (so the reach doubles per round even when
+    the tail is sampled densely), from ``extension_step_angstrom`` up to
+    ``MAX_EXTENSION_GROWTH`` times it, so a flat or far-away minimum (weakly bound triplet,
+    diffuse anion) is reached within the round limit instead of creeping outward by one
+    fixed small step per round."""
     base = settings.extension_step_angstrom
     if len(points) < 2:
         return base
-    spacing = (points[-1].r_angstrom - points[-2].r_angstrom) if upper else (points[1].r_angstrom - points[0].r_angstrom)
-    return min(MAX_EXTENSION_GROWTH * base, max(base, 2.0 * spacing))
+    ordered = list(points) if upper else list(reversed(points))
+    spacing = abs(ordered[-1].r_angstrom - ordered[-2].r_angstrom)
+    k = len(ordered) - 1      # falling tail: energies decrease monotonically towards the boundary
+    while k > 0 and float(ordered[k - 1].energy_hartree) > float(ordered[k].energy_hartree):
+        k -= 1
+    tail = abs(ordered[-1].r_angstrom - ordered[k].r_angstrom)
+    return min(MAX_EXTENSION_GROWTH * base, max(base, 2.0 * spacing, tail))
+
+
+def _boundary_points(points: Sequence[HighLevelPECPoint], settings: Stage3RefinementSettings, *,
+                     upper: bool) -> list[float]:
+    """New R values beyond a boundary: one step, split into equal sub-steps when it exceeds the
+    largest step the geometry-continuity review accepts (verify_v1 Li2-/Na2- 2Sigmag+: a
+    0.1000000001 A step was AMBIGUOUS and refinement stopped on a falling curve)."""
+    step = _boundary_step(points, settings, upper=upper)
+    cap = settings.max_extension_step_angstrom
+    n = 1 if cap is None else max(1, ceil(step / (CONTINUITY_STEP_MARGIN * cap)))
+    edge = points[-1].r_angstrom if upper else points[0].r_angstrom
+    sign = 1.0 if upper else -1.0
+    return [edge + sign * step * i / n for i in range(1, n + 1)]
 
 
 def _midpoint(a: float, b: float, reason: str) -> ProposedGeometry:
@@ -340,19 +364,14 @@ def plan_stage3_pec_refinement(
 
         raw: list[ProposedGeometry] = []
         if at_lower:
-            target = points[0].r_angstrom - _boundary_step(points, settings, upper=False)
-            if target <= 0.0:
-                target = points[0].r_angstrom - settings.extension_step_angstrom
-            if target > 0.0:
-                raw.append(ProposedGeometry(
-                    target,
-                    "Lowest sampled high-level energy reaches the lower-R boundary",
-                ))
+            targets = [r for r in _boundary_points(points, settings, upper=False) if r > 0.0]
+            if not targets and points[0].r_angstrom - settings.extension_step_angstrom > 0.0:
+                targets = [points[0].r_angstrom - settings.extension_step_angstrom]
+            raw.extend(ProposedGeometry(target, "Lowest sampled high-level energy reaches the lower-R boundary")
+                       for target in targets)
         if at_upper:
-            raw.append(ProposedGeometry(
-                points[-1].r_angstrom + _boundary_step(points, settings, upper=True),
-                "Lowest sampled high-level energy reaches the upper-R boundary",
-            ))
+            raw.extend(ProposedGeometry(target, "Lowest sampled high-level energy reaches the upper-R boundary")
+                       for target in _boundary_points(points, settings, upper=True))
 
         if raw:
             action = (
