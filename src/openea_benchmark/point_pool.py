@@ -383,13 +383,17 @@ def _wait_for_cpu(handle) -> None:
                 _write_entries(queue_fh, queue[1:])
                 return
             _write_entries(queue_fh, queue)
-        if not announced:
-            print(f"[CPU GATE] pid {os.getpid()} waiting: load {load:.0f} + {len(recent) + 1} x {_THREADS} "
-                  f"threads > {frac:g} x {ncpu} cores ({held} slots held, {len(queue)} in queue)", flush=True)
-            announced = True
         # The front of the queue polls often: short tasks (cache replay at a restart) pass one
         # per poll, and the next waiter must notice at once that it moved to the head.
         position = next((i for i, (p, _) in enumerate(queue) if p == handle.name), 0)
+        if not announced:
+            # Behind others in the queue the load is not the reason to wait (2026-10-26: the
+            # "load 38 + 1 x 10 > 96" lines of a cache replay looked like a stuck gate).
+            reason = (f"load {load:.0f} + {len(recent) + 1} x {_THREADS} threads > {frac:g} x {ncpu} cores"
+                      if first else f"position {position + 1} in the queue")
+            print(f"[CPU GATE] pid {os.getpid()} waiting: {reason} ({held} slots held, {len(queue)} in queue)",
+                  flush=True)
+            announced = True
         time.sleep(CPU_GATE_HEAD_POLL_S if position < 3 else 5.0)
 
 
