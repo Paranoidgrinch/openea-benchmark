@@ -284,3 +284,18 @@ def test_bracket_floor_clears_candidate_below_margin():
     assert comp["excluded_by_margin"][0]["basis"] == "CONVEX_BRACKET_FLOOR"
     deep = {**shallow, "bracket_floor_hartree": -14.98}
     assert _competition("neutral", [low, deep], 1.0)["status"] == "UNRESOLVED"
+
+
+def test_same_state_from_two_blocks_does_not_block():
+    # verify_v1 LaO 2Sigma+ reached by the 2Sigma+ and the 2Delta block: 6e-11 Eh, same R
+    a = {**entry("sigma", center=-8565.94005163294, lo=-8565.9400517, hi=-8565.9400516), "spin_2s": 1,
+         "r_central_angstrom": 1.83245}
+    b = {**entry("delta", center=-8565.940051695577, lo=-8565.9400518, hi=-8565.9400516), "spin_2s": 1,
+         "r_central_angstrom": 1.83244}
+    comp = _competition("neutral", [a, b], 1.0)
+    assert comp["status"] == "CLEARED"
+    assert comp["reference_branch_siblings"][0]["basis"] == "SAME_STATE_TWO_BLOCKS"
+    other_r = {**b, "r_central_angstrom": 1.90}                 # same energy, other geometry: still blocks
+    assert _competition("neutral", [a, other_r], 1.0)["status"] == "UNRESOLVED"
+    other_spin = {**b, "spin_2s": 3}
+    assert _competition("neutral", [a, other_spin], 1.0)["status"] == "UNRESOLVED"

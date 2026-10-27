@@ -324,6 +324,20 @@ def reference_collapse_evidence(record: Mapping[str, Any], policy: "ElectronicEA
             "max_abs_t2_amplitude": t2, "triples_fraction": fraction, "reasons": reasons}
 
 
+DUPLICATE_STATE_ENERGY_HARTREE = 1.0e-6
+DUPLICATE_STATE_R_ANGSTROM = 0.01
+
+
+def same_resolved_state(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    """Two resolved candidates of one charge with the same 2S, equilibrium energy and R."""
+    if a.get("equilibrium_status") != "RESOLVED" or b.get("equilibrium_status") != "RESOLVED":
+        return False
+    if a.get("spin_2s") != b.get("spin_2s") or None in (a.get("r_central_angstrom"), b.get("r_central_angstrom")):
+        return False
+    return (abs(a["energy_central_hartree"] - b["energy_central_hartree"]) < DUPLICATE_STATE_ENERGY_HARTREE
+            and abs(a["r_central_angstrom"] - b["r_central_angstrom"]) < DUPLICATE_STATE_R_ANGSTROM)
+
+
 def _competition(label: str, entries: list[dict], margin_ev: float,
                  collapsed_scf_margin_ev: float = 3.0) -> dict:
     """Automated high-level D04 review for one charge group."""
@@ -367,6 +381,13 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             continue
         if e["equilibrium_status"] == "RESOLVED" and gap_ev > 0.0:
             continue  # cleanly separated interval
+        if same_resolved_state(e, lowest):
+            # The same state reached by two symmetry blocks (verify_v1 FeO- 6Delta/6Sigma-,
+            # LaO 2Sigma+/2Delta: 1e-7 Eh, same R): with the same energy it cannot change the EA.
+            siblings.append({"job_id": e["job_id"], "equilibrium_status": e["equilibrium_status"],
+                             "offset_ev": (e["energy_central_hartree"] - lowest["energy_central_hartree"]) * HARTREE_TO_EV,
+                             "basis": "SAME_STATE_TWO_BLOCKS"})
+            continue
         if e["equilibrium_status"] != "RESOLVED" and e.get("bracket_floor_hartree") is not None:
             # Strictly bracketed minimum without an admissible quadratic model: the convex
             # bracket floor is a lower bound like a resolved interval, no margin needed.
