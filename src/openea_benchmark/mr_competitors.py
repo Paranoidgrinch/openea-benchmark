@@ -50,6 +50,7 @@ from .mr_nuclear_curve import C2V_IRREPS
 # intruder replacement (wrong, NH 1Delta); 5: borrowed orbitals, deviation recorded only;
 # 6: g/u from the CI vector when active orbitals mix g and u
 ROOT_CLASSIFICATION = 6
+EDGE_TOLERANCE_HARTREE = 1.0e-6
 LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
 
@@ -68,6 +69,14 @@ class MRCompetitorPolicy:
     classify_roots: int = 6
     lambda_tolerance: float = 0.25
     max_memory_mb: int = 16000
+    # A candidate bound lowest at a window edge: the window is extended outward, each
+    # step doubling the distance from the window (first step below), until the bound
+    # rises again.  Still falling at R >= asymptotic_r_angstrom: the curve approaches
+    # its dissociation limit, the last value is the bound.  Otherwise unresolved.
+    edge_extension_step_angstrom: float = 0.25
+    max_edge_extensions: int = 8
+    min_r_fraction: float = 0.6
+    asymptotic_r_angstrom: float = 10.0
 
 
 def candidate_lambda(label: str) -> int | None:
@@ -391,59 +400,48 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
         blocks.setdefault(key, []).append(label)
     keys = set(blocks) | {(q, s["mult"], s["irrep"]) for q, s in selected.items()}
     fn = block_fn or _block_task
-    jobs, index = [], []
+    # points[key]: (R, outside_window, block record).  Outside the window around the
+    # selected state no root is skipped: there the lowest root may be any state.
+    points: dict[tuple, list] = {}
+
+    def compute(specs):
+        """specs: (key, R, outside_window); results appended to ``points``."""
+        jobs = []
+        for (q, mult, irrep), r, _ in specs:
+            jobs.append((selected[q]["atoms"], q, mult, irrep, r, policy,
+                         str(output_dir / "blocks" / f"q{q}_m{mult}_{irrep}_r{r:.4f}.json")))
+            print(f"[MR] {electronic_ea.get('system')} q={q} 2S+1={mult} {irrep} R={r:.3f}", flush=True)
+        results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
+        for (key, r, outside), res in zip(specs, results):
+            points.setdefault(key, []).append((r, outside, res))
+
+    specs = []
     for (q, mult, irrep) in sorted(keys):
         sel = selected[q]
         window = [round(sel["r"] + dr, 6) for dr in policy.r_offsets_angstrom]
         extra = sorted({round(float((candidate_r_angstrom or {})[label]), 6)
-                        for label in blocks.get((q, mult, irrep), ()) if label in (candidate_r_angstrom or {})}
-                       - {r for r in window})
+                        for label in blocks.get((q, mult, irrep), ()) if label in (candidate_r_angstrom or {})})
         extra = [r for r in extra if min(abs(r - w) for w in window) > 1.0e-4]
-        for r, is_extra in [(r, False) for r in window] + [(r, True) for r in extra]:
-            jobs.append((sel["atoms"], q, mult, irrep, r, policy,
-                         str(output_dir / "blocks" / f"q{q}_m{mult}_{irrep}_r{r:.4f}.json")))
-            index.append(((q, mult, irrep), is_extra))
-    for job in jobs:
-        print(f"[MR] {electronic_ea.get('system')} q={job[1]} 2S+1={job[2]} {job[3]} R={job[4]:.3f}", flush=True)
-    results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
-    per_block: dict[tuple, list] = {}
-    per_block_extra: dict[tuple, list] = {}
-    for (key, is_extra), res in zip(index, results):
-        (per_block_extra if is_extra else per_block).setdefault(key, []).append(res)
+        specs += [((q, mult, irrep), r, False) for r in window] + [((q, mult, irrep), r, True) for r in extra]
+    compute(specs)
 
-    def extra_lowered(key, value, extra_bound):
-        """A window bound lowered by the candidates' own R points.  There the lowest
-        root may be any state, the selected one included: no root is skipped."""
-        extra = per_block_extra.get(key)
-        if value is None or not extra:
-            return value
-        other = extra_bound(extra)
-        return None if other is None else min(value, other)
-
-    def lowest(key, root):
-        return extra_lowered(key, _lowest_of(per_block[key], root), lambda pts: _lowest_of(pts, 0))
-
-    def _lowest_of(points, root):
+    def _lowest_of(records, root):
         """Lowest energy of the given root over the R window; None if any point lacks it.
 
         A block holding only one state in the active space has no second root:
         then nothing else in that block can compete (``inf``)."""
         vals = []
-        for r in points:
+        for r in records:
             if r.get("status") != "COMPLETED":
                 return None
             energies = r["energies_hartree"]
             vals.append(energies[root] if root < len(energies) else float("inf"))
         return min(vals) if vals else None
 
-    def lambda_bound(key, lam, parity, skip_selected):
-        return extra_lowered(key, _lambda_bound_of(per_block[key], lam, parity, skip_selected),
-                             lambda pts: _lambda_bound_of(pts, lam, parity, False))
-
-    def _lambda_bound_of(points, lam, parity, skip_selected):
+    def _lambda_bound_of(records, lam, parity, skip_selected):
         """Lowest energy over the R window of a root that can be a Lambda=lam (g/u) state."""
         vals = []
-        for r in points:
+        for r in records:
             if r.get("status") != "COMPLETED" or "roots" not in r:
                 return None
             roots = list(r["roots"])
@@ -459,32 +457,99 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
                 vals.append(float("inf"))
         return min(vals) if vals else None
 
+    def bound(key, labels, same, pts):
+        """(lower bound of the candidates over ``pts``, Lambda resolved)."""
+        inside = [res for _, outside, res in pts if not outside]
+        beyond = [res for _, outside, res in pts if outside]
+
+        def combine(a, b):
+            if not beyond:
+                return a
+            if not inside:
+                return b
+            return None if a is None or b is None else min(a, b)
+        value = combine(_lowest_of(inside, 1 if same else 0), _lowest_of(beyond, 0))
+        kinds = {(candidate_lambda(label), candidate_parity(label)) for label in labels}
+        if policy.classify_roots and all(lam is not None for lam, _ in kinds):
+            bounds = [combine(_lambda_bound_of(inside, lam, par, same), _lambda_bound_of(beyond, lam, par, False))
+                      for lam, par in kinds]
+            if all(b is not None for b in bounds):
+                return min(bounds), True
+        return value, False
+
+    def edge_step(key, labels, same):
+        """+1 / -1 if the bound is lowest at the largest / smallest R (curve still falling
+        outward), else 0.  A window minimum at its edge is no lower bound of the state."""
+        pts = sorted(points[key], key=lambda p: p[0])
+        vals = [bound(key, labels, same, [p])[0] for p in pts]
+        if len(vals) < 2 or any(v is None for v in vals):
+            return 0
+        if vals[-1] < min(vals[:-1]) - EDGE_TOLERANCE_HARTREE:
+            return 1
+        if vals[0] < min(vals[1:]) - EDGE_TOLERANCE_HARTREE:
+            return -1
+        return 0
+
+    def is_selected_block(key):
+        return key == (key[0], selected[key[0]]["mult"], selected[key[0]]["irrep"])
+
+    candidate_keys = {key: labels for key, labels in blocks.items() if key[0] in selected}
+    at_edge: set = set()
+    asymptotic: set = set()
+    for _ in range(policy.max_edge_extensions):
+        specs, at_edge = [], set()
+        for key, labels in sorted(candidate_keys.items()):
+            q = key[0]
+            step = edge_step(key, labels, is_selected_block(key))
+            if not step:
+                continue
+            rs = [p[0] for p in points[key]]
+            window = [selected[q]["r"] + dr for dr in policy.r_offsets_angstrom]
+            edge, window_edge = (max(rs), max(window)) if step > 0 else (min(rs), min(window))
+            if step > 0 and edge >= policy.asymptotic_r_angstrom:
+                asymptotic.add(key)
+                continue
+            r = round(edge + step * max(policy.edge_extension_step_angstrom, abs(edge - window_edge)), 6)
+            if r < policy.min_r_fraction * selected[q]["r"]:
+                at_edge.add(key)
+                continue
+            specs.append((key, r, True))
+            at_edge.add(key)
+        if not specs:
+            break
+        compute(specs)
+    else:  # budget used up: classify once more with the last points
+        at_edge = set()
+        for key, labels in candidate_keys.items():
+            step = edge_step(key, labels, is_selected_block(key))
+            if step > 0 and max(p[0] for p in points[key]) >= policy.asymptotic_r_angstrom:
+                asymptotic.add(key)
+            elif step:
+                at_edge.add(key)
+
     verdicts, open_blocks = [], []
     for q, sel in selected.items():
-        e_sel = _lowest_of(per_block[(q, sel["mult"], sel["irrep"])], 0)  # window only
+        e_sel = _lowest_of([res for _, outside, res in points[(q, sel["mult"], sel["irrep"])] if not outside], 0)
         sel["mr_energy_hartree"] = e_sel
         for key, labels in sorted(blocks.items()):
             if key[0] != q:
                 continue
             same = key == (q, sel["mult"], sel["irrep"])
-            e_bound = lowest(key, 1 if same else 0)
-            kinds = {(candidate_lambda(label), candidate_parity(label)) for label in labels}
-            lambda_resolved = False
-            if policy.classify_roots and all(lam is not None for lam, _ in kinds):
-                bounds = [lambda_bound(key, lam, par, same) for lam, par in kinds]
-                if all(b is not None for b in bounds):
-                    e_bound, lambda_resolved = min(bounds), True
-            casci_only = any(r.get("casci_only") for r in per_block[key] + per_block_extra.get(key, []))
+            e_bound, lambda_resolved = bound(key, labels, same, points[key])
+            casci_only = any(res.get("casci_only") for _, _, res in points[key])
             threshold = policy.casci_only_exclusion_margin_ev if casci_only else policy.exclusion_margin_ev
             if e_sel is None or e_bound is None:
                 status, margin = "UNRESOLVED_NOT_COMPUTED", None
             else:
                 margin = (e_bound - e_sel) * HARTREE_TO_EV
                 status = "EXCLUDED" if margin > threshold else "UNRESOLVED_MR_COMPETITOR"
+            if key in at_edge and status == "EXCLUDED":
+                status = "UNRESOLVED_BOUND_AT_WINDOW_EDGE"
             verdicts.append({"charge": q, "mult": key[1], "irrep_c2v": key[2], "candidates": labels,
                              "lower_bound_margin_ev": margin, "status": status, "casci_only": casci_only,
                              "bound_root": "second" if same else "lowest", "lambda_resolved": lambda_resolved,
-                             "extra_r_angstrom": [r.get("r") for r in per_block_extra.get(key, [])]})
+                             "extra_r_angstrom": sorted(r for r, outside, _ in points[key] if outside),
+                             "falling_to_asymptote": key in asymptotic})
             if status != "EXCLUDED":
                 open_blocks.append(verdicts[-1])
     record.update(selected={str(q): s for q, s in selected.items()}, blocks=verdicts,

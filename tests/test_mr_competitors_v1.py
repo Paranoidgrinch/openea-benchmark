@@ -145,9 +145,44 @@ def test_collapsed_candidate_is_bounded_at_its_own_r_too(tmp_path):
     assert abs(blk["lower_bound_margin_ev"] - 1.5) < 1e-9 and window_only["status"] == "CLEARED"
     res = run_mr_competitor_stage(output_dir=tmp_path / "x", candidate_r_angstrom={"q=-1 2Sigmag+": 5.0}, **kw)
     blk = res["blocks"][0]
-    assert blk["extra_r_angstrom"] == [5.0]
+    # lowest at the outer edge: one step out (doubling the distance from the window), flat there
+    assert blk["extra_r_angstrom"] == [5.0, 6.67]
     assert abs(blk["lower_bound_margin_ev"] - 0.6) < 1e-9 and res["status"] == "CLEARED"
     # Selected energy stays the window minimum; a well within the margin keeps it open.
     res = run_mr_competitor_stage(output_dir=tmp_path / "y", policy=MRCompetitorPolicy(exclusion_margin_ev=0.7),
                                   candidate_r_angstrom={"q=-1 2Sigmag+": 5.0}, **kw)
     assert res["status"] == "UNRESOLVED_MR_COMPETITOR"
+
+
+def _falling_tail_run(tmp_path, turn_r, policy=None, asymptote=False):
+    """Anion competitor in its own block, falling with R until ``turn_r`` (or towards an
+    asymptote 1 eV above the selected state)."""
+    def block_fn(atoms, charge, mult, irrep, r, policy, cache):
+        if charge == 0 or mult == 2:
+            return {"status": "COMPLETED", "energies_hartree": [-10.0 - (0.02 if charge else 0.0)]}
+        if asymptote:
+            return {"status": "COMPLETED", "energies_hartree": [-10.02 + (1.0 + 0.5 * np.exp(-(r - 2.0))) * H]}
+        e = -10.02 + 1.0 * H + 0.2 * H * abs(min(r, turn_r) - turn_r) + (0.5 * H * (r - turn_r) if r > turn_r else 0.0)
+        return {"status": "COMPLETED", "energies_hartree": [e]}
+
+    ea = {"status": "ELECTRONIC_EA_EVALUATED", "system": "XY", "selected_neutral_job": "N", "selected_anion_job": "A",
+          "candidates": {"neutral": [{"job_id": "N", "r_central_angstrom": 2.0}],
+                         "anion": [{"job_id": "A", "r_central_angstrom": 2.0}]}}
+    reqs = [SimpleNamespace(job_id="N", symmetry_label="1Sigma+", charge=0, atoms=("X", "Y")),
+            SimpleNamespace(job_id="A", symmetry_label="2Sigma+", charge=-1, atoms=("X", "Y"))]
+    return run_mr_competitor_stage(electronic_ea=ea, requests=reqs, output_dir=tmp_path, block_fn=block_fn,
+                                   mr_only_labels=["q=-1 4Sigma+"], policy=policy or MRCompetitorPolicy())
+
+
+def test_bound_falling_at_the_window_edge_is_followed_outward(tmp_path):
+    res = _falling_tail_run(tmp_path / "a", turn_r=2.9)
+    blk = res["blocks"][0]
+    assert blk["extra_r_angstrom"] == [2.5, 2.75, 3.25] and res["status"] == "CLEARED"
+    assert abs(blk["lower_bound_margin_ev"] - 1.0) < 0.06  # the well bottom, not the window edge (1.13 eV)
+    res = _falling_tail_run(tmp_path / "b", turn_r=9.0, policy=MRCompetitorPolicy(max_edge_extensions=3))
+    assert res["blocks"][0]["status"] == "UNRESOLVED_BOUND_AT_WINDOW_EDGE" and res["status"] != "CLEARED"
+    # Falling towards its dissociation limit: followed to R >= 10 A, the last value bounds it.
+    res = _falling_tail_run(tmp_path / "c", turn_r=None, asymptote=True)
+    blk = res["blocks"][0]
+    assert blk["extra_r_angstrom"] == [2.5, 2.75, 3.25, 4.25, 6.25, 10.25] and blk["falling_to_asymptote"]
+    assert blk["status"] == "EXCLUDED" and abs(blk["lower_bound_margin_ev"] - 1.0) < 1e-3
