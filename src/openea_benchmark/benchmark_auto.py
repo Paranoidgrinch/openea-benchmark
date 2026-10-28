@@ -89,6 +89,27 @@ def _reference_warning_summary(
     return summary
 
 
+def pending_mr_competitor_labels(electronic_ea: Mapping[str, Any] | None,
+                                 requests: Sequence[Any]) -> tuple[list[str], dict[str, float]]:
+    """MR-only candidate labels ('q=-1 2Sigmag+') of the high-level candidates that only a
+    multireference method can place (PENDING_MR_COMPETITORS), and the R of their lowest
+    reference determinant energy, where the MR layer bounds them as well."""
+    labels, r_of = [], {}
+    by_job = {r.job_id: r for r in requests}
+    for comp in ((electronic_ea or {}).get("high_level_competition") or {}).values():
+        if comp.get("status") != "PENDING_MR_COMPETITORS":
+            continue
+        for item in comp.get("mr_pending", ()):
+            req = by_job.get(item["job_id"])
+            if req is None:
+                continue
+            label = f"q={req.charge} {req.symmetry_label}"
+            labels.append(label)
+            if item.get("scf_lowest_r_angstrom") is not None:
+                r_of[label] = float(item["scf_lowest_r_angstrom"])
+    return labels, r_of
+
+
 def _job_purpose(bridge: Any) -> str:
     if bridge.release_status is Stage3ReleaseStatus.RELEASED:
         return "RELEASED_HIGH_LEVEL_EVIDENCE"
@@ -512,11 +533,13 @@ def run_benchmark_acquisition(
 
     mr_competitors = None
     mr_labels = [f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())]
+    pending_labels, pending_r = pending_mr_competitor_labels(electronic_ea, requests)
+    mr_labels += [label for label in pending_labels if label not in mr_labels]
     if electronic_ea is not None and settings.mr_competitor_stage and mr_labels:
         from .mr_competitors import run_mr_competitor_stage
         mr_competitors = run_mr_competitor_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            mr_only_labels=mr_labels, output_dir=output_dir / "mr_competitors")
+            mr_only_labels=mr_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
 
     # Patch 54: MR-only candidates the lower bound could not exclude are computed
     # relative to the SR state of their charge (term gap); the EA uses the lower one.

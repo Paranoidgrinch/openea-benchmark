@@ -28,3 +28,16 @@ def test_unbound_only_with_closed_state_question():
     assert resolve_final_verdict(electronic_ea=EA, cbs=cbs, adiabatic=None, mr_competitors=None)["outcome"] == "UNBOUND"
     ea = {**EA, "high_level_competition": {"neutral": {"status": "UNRESOLVED"}, "anion": {"status": "CLEARED"}}}
     assert resolve_final_verdict(electronic_ea=ea, cbs=cbs, adiabatic=None, mr_competitors=None)["outcome"] == "UNRESOLVED"
+
+
+def test_pending_mr_competitors_need_the_mr_layer():
+    ea = {**EA, "high_level_competition": {"neutral": {"status": "CLEARED"},
+                                           "anion": {"status": "PENDING_MR_COMPETITORS"}}}
+    res = resolve_final_verdict(electronic_ea=ea, cbs=CBS, adiabatic=ADI, mr_competitors={"status": "CLEARED"},
+                                mr_only_labels=["q=-1 2Sigmag+"])
+    assert res["outcome"] == "EA"
+    res = resolve_final_verdict(electronic_ea=ea, cbs=CBS, adiabatic=ADI,
+                                mr_competitors={"status": "UNRESOLVED_MR_COMPETITOR"}, mr_only_labels=["q=-1 2Sigmag+"])
+    assert res["outcome"] == "UNRESOLVED" and any("MR-only" in b for b in res["blocking"])
+    res = resolve_final_verdict(electronic_ea=ea, cbs=CBS, adiabatic=ADI, mr_competitors=None)
+    assert res["outcome"] == "UNRESOLVED" and any("MR layer not run" in b for b in res["blocking"])

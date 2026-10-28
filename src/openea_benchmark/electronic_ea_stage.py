@@ -365,7 +365,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             if scf_gap_ev is not None and scf_gap_ev > collapsed_scf_margin_ev:
                 multireference_only.append({**item, "basis": "REFERENCE_DETERMINANT_SCF_GAP"})
             else:
-                blocking.append(item)
+                blocking.append({**item, "scf_lowest_r_angstrom": e.get("scf_lowest_r_angstrom")})
             continue
         if floor is None:
             blocking.append({"job_id": e["job_id"], "reason": "no energy evidence"})
@@ -399,8 +399,19 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             excluded.append({"job_id": e["job_id"], "gap_ev": gap_ev, "basis": "LOWEST_SAMPLED_CCSD(T)_POINT"})
             continue
         blocking.append({"job_id": e["job_id"], "gap_ev": gap_ev, "status": e["equilibrium_status"]})
-    return {"status": "CLEARED" if not blocking else "UNRESOLVED",
-            "selected_job_id": lowest["job_id"] if not blocking else None,
+    # Candidates that only a multireference method can place (collapsed CCSD(T), SCF-only
+    # evidence) do not stop the selection: the lowest resolved state is selected
+    # provisionally and they go to the MR competitor layer (verify_v1 Li2-: 2Sigmag+ and
+    # 4Piu collapse at large R, SCF gaps 1.0/1.4 eV).  The final verdict stays open
+    # until that layer excludes them or computes their term gaps.
+    mr_pending = [b for b in blocking if b.get("status") == "MULTIREFERENCE_METHOD_REQUIRED"]
+    if blocking and len(mr_pending) == len(blocking):
+        status = "PENDING_MR_COMPETITORS"
+    else:
+        status = "CLEARED" if not blocking else "UNRESOLVED"
+    return {"status": status,
+            "selected_job_id": lowest["job_id"] if status != "UNRESOLVED" else None,
+            "mr_pending": mr_pending,
             "lowest_job_id": lowest["job_id"], "blocking": blocking, "excluded_by_margin": excluded,
             "reference_branch_siblings": siblings, "multireference_only_excluded": multireference_only,
             "reference_sensitivity_ev": max((abs(x["offset_ev"]) for x in siblings), default=0.0),
@@ -571,15 +582,17 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
                  "energy_central_hartree": None, "energy_lower_hartree": None, "energy_upper_hartree": None,
                  "r_central_angstrom": None, "branch_of": branch_parent(job_id),
                  "reference_branch": job_reqs[0].reference_branch}
-        scf = [point_records[r.request_id]["scf_energy_hartree"] for r in done
+        scf = [(point_records[r.request_id]["scf_energy_hartree"], r.r_angstrom) for r in done
                if point_records[r.request_id].get("scf_energy_hartree") is not None]
         if not done:
             # No CCSD(T) point (e.g. CCSD not converged anywhere): the converged
             # reference determinants are the only energy evidence of this state.
-            scf = [rec["scf_energy_hartree"] for rec in (point_records.get(r.request_id) or {} for r in job_reqs)
+            scf = [(rec["scf_energy_hartree"], r.r_angstrom)
+                   for r, rec in ((r, point_records.get(r.request_id) or {}) for r in job_reqs)
                    if rec.get("scf_converged") and rec.get("scf_energy_hartree") is not None]
             entry["scf_only_evidence"] = bool(scf)
-        entry["scf_lowest_hartree"] = min(scf) if scf else None
+        entry["scf_lowest_hartree"] = min(scf)[0] if scf else None
+        entry["scf_lowest_r_angstrom"] = float(min(scf)[1]) if scf else None
         label = "neutral" if entry["charge"] == 0 else "anion"
         entries[label].append(entry)
         collapsed = [c for c in (reference_collapse_evidence(point_records[r.request_id], policy) for r in done) if c]

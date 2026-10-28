@@ -10,7 +10,8 @@ Collects the layer results and issues exactly one outcome:
 Requirements for ``EA`` (each missing item is one blocking reason):
 
 1. single-basis electronic EA evaluated, high-level state competition CLEARED
-   for neutral and anion;
+   for neutral and anion (or PENDING_MR_COMPETITORS: its collapsed / SCF-only
+   candidates are then MR-only candidates under item 5);
 2. CBS layer CLEARED (state order at CBS, binding);
 3. adiabatic assembly CLEARED (zero-point layer cleared, anion vibrationally
    bound, interval entirely above zero);
@@ -48,7 +49,11 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
         blocking.append(f"electronic EA: {None if not electronic_ea else electronic_ea.get('status')}")
     else:
         for role, comp in (electronic_ea.get("high_level_competition") or {}).items():
-            if comp.get("status") != "CLEARED":
+            # PENDING_MR_COMPETITORS: only candidates that need a multireference method are
+            # open; their labels are MR-only candidates and are checked below.
+            if comp.get("status") == "PENDING_MR_COMPETITORS" and not mr_only_labels:
+                blocking.append(f"{role} state competition: PENDING_MR_COMPETITORS (MR layer not run)")
+            elif comp.get("status") not in ("CLEARED", "PENDING_MR_COMPETITORS"):
                 blocking.append(f"{role} state competition: {comp.get('status')}")
     for role, comp in ((electronic_ea or {}).get("high_level_competition") or {}).items():
         if comp.get("blocking_open_scout_components"):

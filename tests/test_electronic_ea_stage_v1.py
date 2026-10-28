@@ -113,8 +113,16 @@ def test_collapsed_candidate_excluded_only_by_reference_gap():
     assert res["status"] == "CLEARED" and res["multireference_only_excluded"][0]["job_id"] == "c"
     near = {**far, "scf_lowest_hartree": -0.6 + 1.0 * H}
     res = _competition("neutral", [low, near], 1.0, 3.0)
-    assert res["status"] == "UNRESOLVED" and res["blocking"][0]["status"] == "MULTIREFERENCE_METHOD_REQUIRED"
-    assert _competition("neutral", [low, {**far, "scf_lowest_hartree": None}], 1.0, 3.0)["status"] == "UNRESOLVED"
+    # Not separable here: the lowest resolved state is selected provisionally and the
+    # candidate goes to the MR competitor layer.
+    assert res["status"] == "PENDING_MR_COMPETITORS" and res["selected_job_id"] == "x"
+    assert res["blocking"][0]["status"] == "MULTIREFERENCE_METHOD_REQUIRED"
+    assert [b["job_id"] for b in res["mr_pending"]] == ["c"]
+    no_ref = _competition("neutral", [low, {**far, "scf_lowest_hartree": None}], 1.0, 3.0)
+    assert no_ref["status"] == "PENDING_MR_COMPETITORS"
+    # Any other blocker keeps the competition unresolved and nothing selected.
+    mixed = _competition("neutral", [low, near, entry("g", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED")], 1.0, 3.0)
+    assert mixed["status"] == "UNRESOLVED" and mixed["selected_job_id"] is None
 
 
 def test_coupled_cluster_failed_candidate_separated_by_reference_gap():
@@ -126,7 +134,7 @@ def test_coupled_cluster_failed_candidate_separated_by_reference_gap():
     assert res["status"] == "CLEARED"
     assert res["multireference_only_excluded"][0]["evidence"] == "SCF_ONLY_COUPLED_CLUSTER_NOT_CONVERGED"
     near = {**failed, "scf_lowest_hartree": -0.6 + 2.0 * H}
-    assert _competition("anion", [low, near], 1.0, 3.0)["status"] == "UNRESOLVED"
+    assert _competition("anion", [low, near], 1.0, 3.0)["status"] == "PENDING_MR_COMPETITORS"
     # Without converged references the state still blocks.
     assert _competition("anion", [low, entry("g", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED")], 1.0, 3.0)["status"] == "UNRESOLVED"
 
@@ -299,3 +307,18 @@ def test_same_state_from_two_blocks_does_not_block():
     assert _competition("neutral", [a, other_r], 1.0)["status"] == "UNRESOLVED"
     other_spin = {**b, "spin_2s": 3}
     assert _competition("neutral", [a, other_spin], 1.0)["status"] == "UNRESOLVED"
+
+
+def test_pending_mr_competitor_labels_and_r():
+    from types import SimpleNamespace
+    from openea_benchmark.benchmark_auto import pending_mr_competitor_labels
+    ea = {"high_level_competition": {
+        "neutral": {"status": "CLEARED", "mr_pending": []},
+        "anion": {"status": "PENDING_MR_COMPETITORS", "mr_pending": [
+            {"job_id": "g", "status": "MULTIREFERENCE_METHOD_REQUIRED", "scf_lowest_r_angstrom": 4.6},
+            {"job_id": "p", "status": "MULTIREFERENCE_METHOD_REQUIRED", "scf_lowest_r_angstrom": None}]}}}
+    reqs = [SimpleNamespace(job_id="g", charge=-1, symmetry_label="2Sigmag+"),
+            SimpleNamespace(job_id="p", charge=-1, symmetry_label="4Piu")]
+    labels, r_of = pending_mr_competitor_labels(ea, reqs)
+    assert labels == ["q=-1 2Sigmag+", "q=-1 4Piu"] and r_of == {"q=-1 2Sigmag+": 4.6}
+    assert pending_mr_competitor_labels(None, reqs) == ([], {})

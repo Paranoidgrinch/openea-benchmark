@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from openea_benchmark.mr_competitors import (candidate_block, candidate_parity, root_lambda, root_parity,
-                                             run_mr_competitor_stage, selected_block)
+                                             run_mr_competitor_stage, selected_block, MRCompetitorPolicy)
 
 H = 1.0 / 27.211386245988
 
@@ -117,3 +117,37 @@ def test_inversion_parity_from_ci_vector():
     # open-shell 1Sigma_u+ (sigma_g sigma_u singlet) = (|aa> - |bb>)/sqrt2 is ungerade
     ci_u = np.array([[1.0, 0.0], [0.0, -1.0]]) / np.sqrt(2)
     assert root_parity_general(ci_u, 2, (1, 1), inv) == -1
+
+
+def test_collapsed_candidate_is_bounded_at_its_own_r_too(tmp_path):
+    """Li2-: 2Sigmag+ (collapsed CCSD(T)) shares the A1 doublet block with the selected
+    2Sigmau+ and lies lowest far outside its window; the bound includes that R."""
+    def roots(base, spec):
+        return {"status": "COMPLETED", "r": None, "energies_hartree": [base + d * H for d, *_ in spec],
+                "roots": [{"casci_index": i, "e_hartree": base + d * H, "lz2": 0.0, "lambda": lam, "parity": par}
+                          for i, (d, lam, par) in enumerate(spec)]}
+
+    def block_fn(atoms, charge, mult, irrep, r, policy, cache):
+        if charge == 0:
+            return roots(-14.9, [(0.0, 0, 1), (2.0, 0, -1)])
+        if r > 4.0:  # the 2Sigmag+ well: below 2Sigmau+ there, 0.6 eV above its minimum
+            return {**roots(-14.98, [(0.6, 0, 1), (0.9, 0, -1)]), "r": r}
+        return {**roots(-14.98, [(0.0, 0, -1), (1.5, 0, 1)]), "r": r}
+
+    ea = {"status": "ELECTRONIC_EA_EVALUATED", "system": "LiLi", "selected_neutral_job": "N", "selected_anion_job": "A",
+          "candidates": {"neutral": [{"job_id": "N", "r_central_angstrom": 2.67}],
+                         "anion": [{"job_id": "A", "r_central_angstrom": 3.08}]}}
+    reqs = [SimpleNamespace(job_id="N", symmetry_label="1Sigmag+", charge=0, atoms=("Li", "Li")),
+            SimpleNamespace(job_id="A", symmetry_label="2Sigmau+", charge=-1, atoms=("Li", "Li"))]
+    kw = dict(electronic_ea=ea, requests=reqs, block_fn=block_fn, mr_only_labels=["q=-1 2Sigmag+"])
+    window_only = run_mr_competitor_stage(output_dir=tmp_path / "w", **kw)
+    blk = window_only["blocks"][0]
+    assert abs(blk["lower_bound_margin_ev"] - 1.5) < 1e-9 and window_only["status"] == "CLEARED"
+    res = run_mr_competitor_stage(output_dir=tmp_path / "x", candidate_r_angstrom={"q=-1 2Sigmag+": 5.0}, **kw)
+    blk = res["blocks"][0]
+    assert blk["extra_r_angstrom"] == [5.0]
+    assert abs(blk["lower_bound_margin_ev"] - 0.6) < 1e-9 and res["status"] == "CLEARED"
+    # Selected energy stays the window minimum; a well within the margin keeps it open.
+    res = run_mr_competitor_stage(output_dir=tmp_path / "y", policy=MRCompetitorPolicy(exclusion_margin_ev=0.7),
+                                  candidate_r_angstrom={"q=-1 2Sigmag+": 5.0}, **kw)
+    assert res["status"] == "UNRESOLVED_MR_COMPETITOR"

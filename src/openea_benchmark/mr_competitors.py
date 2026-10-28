@@ -352,7 +352,12 @@ def _block_task(atoms, charge, mult, irrep, r, policy, cache):
 
 def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Any],
                             mr_only_labels: Sequence[str], output_dir: Path,
-                            policy: MRCompetitorPolicy = MRCompetitorPolicy(), block_fn=None) -> dict:
+                            policy: MRCompetitorPolicy = MRCompetitorPolicy(), block_fn=None,
+                            candidate_r_angstrom: Mapping[str, float] | None = None) -> dict:
+    """``candidate_r_angstrom``: label -> R where that candidate's own evidence puts it
+    lowest (collapsed CCSD(T) candidates: lowest reference determinant).  Outside the
+    window around the selected state its block is computed there too, and the bound
+    holds over both (Li2- 2Sigmag+ is lowest far outside the 2Sigmau+ window)."""
     from .point_pool import run_parallel
     output_dir = Path(output_dir)
     record: dict[str, Any] = {"stage": "MR_ONLY_COMPETITORS", "policy": asdict(policy),
@@ -389,25 +394,42 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
     jobs, index = [], []
     for (q, mult, irrep) in sorted(keys):
         sel = selected[q]
-        for dr in policy.r_offsets_angstrom:
-            r = round(sel["r"] + dr, 6)
+        window = [round(sel["r"] + dr, 6) for dr in policy.r_offsets_angstrom]
+        extra = sorted({round(float((candidate_r_angstrom or {})[label]), 6)
+                        for label in blocks.get((q, mult, irrep), ()) if label in (candidate_r_angstrom or {})}
+                       - {r for r in window})
+        extra = [r for r in extra if min(abs(r - w) for w in window) > 1.0e-4]
+        for r, is_extra in [(r, False) for r in window] + [(r, True) for r in extra]:
             jobs.append((sel["atoms"], q, mult, irrep, r, policy,
                          str(output_dir / "blocks" / f"q{q}_m{mult}_{irrep}_r{r:.4f}.json")))
-            index.append((q, mult, irrep))
+            index.append(((q, mult, irrep), is_extra))
     for job in jobs:
         print(f"[MR] {electronic_ea.get('system')} q={job[1]} 2S+1={job[2]} {job[3]} R={job[4]:.3f}", flush=True)
     results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
     per_block: dict[tuple, list] = {}
-    for key, res in zip(index, results):
-        per_block.setdefault(key, []).append(res)
+    per_block_extra: dict[tuple, list] = {}
+    for (key, is_extra), res in zip(index, results):
+        (per_block_extra if is_extra else per_block).setdefault(key, []).append(res)
+
+    def extra_lowered(key, value, extra_bound):
+        """A window bound lowered by the candidates' own R points.  There the lowest
+        root may be any state, the selected one included: no root is skipped."""
+        extra = per_block_extra.get(key)
+        if value is None or not extra:
+            return value
+        other = extra_bound(extra)
+        return None if other is None else min(value, other)
 
     def lowest(key, root):
+        return extra_lowered(key, _lowest_of(per_block[key], root), lambda pts: _lowest_of(pts, 0))
+
+    def _lowest_of(points, root):
         """Lowest energy of the given root over the R window; None if any point lacks it.
 
         A block holding only one state in the active space has no second root:
         then nothing else in that block can compete (``inf``)."""
         vals = []
-        for r in per_block[key]:
+        for r in points:
             if r.get("status") != "COMPLETED":
                 return None
             energies = r["energies_hartree"]
@@ -415,9 +437,13 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
         return min(vals) if vals else None
 
     def lambda_bound(key, lam, parity, skip_selected):
+        return extra_lowered(key, _lambda_bound_of(per_block[key], lam, parity, skip_selected),
+                             lambda pts: _lambda_bound_of(pts, lam, parity, False))
+
+    def _lambda_bound_of(points, lam, parity, skip_selected):
         """Lowest energy over the R window of a root that can be a Lambda=lam (g/u) state."""
         vals = []
-        for r in per_block[key]:
+        for r in points:
             if r.get("status") != "COMPLETED" or "roots" not in r:
                 return None
             roots = list(r["roots"])
@@ -435,7 +461,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
 
     verdicts, open_blocks = [], []
     for q, sel in selected.items():
-        e_sel = lowest((q, sel["mult"], sel["irrep"]), 0)
+        e_sel = _lowest_of(per_block[(q, sel["mult"], sel["irrep"])], 0)  # window only
         sel["mr_energy_hartree"] = e_sel
         for key, labels in sorted(blocks.items()):
             if key[0] != q:
@@ -448,7 +474,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
                 bounds = [lambda_bound(key, lam, par, same) for lam, par in kinds]
                 if all(b is not None for b in bounds):
                     e_bound, lambda_resolved = min(bounds), True
-            casci_only = any(r.get("casci_only") for r in per_block[key])
+            casci_only = any(r.get("casci_only") for r in per_block[key] + per_block_extra.get(key, []))
             threshold = policy.casci_only_exclusion_margin_ev if casci_only else policy.exclusion_margin_ev
             if e_sel is None or e_bound is None:
                 status, margin = "UNRESOLVED_NOT_COMPUTED", None
@@ -457,7 +483,8 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
                 status = "EXCLUDED" if margin > threshold else "UNRESOLVED_MR_COMPETITOR"
             verdicts.append({"charge": q, "mult": key[1], "irrep_c2v": key[2], "candidates": labels,
                              "lower_bound_margin_ev": margin, "status": status, "casci_only": casci_only,
-                             "bound_root": "second" if same else "lowest", "lambda_resolved": lambda_resolved})
+                             "bound_root": "second" if same else "lowest", "lambda_resolved": lambda_resolved,
+                             "extra_r_angstrom": [r.get("r") for r in per_block_extra.get(key, [])]})
             if status != "EXCLUDED":
                 open_blocks.append(verdicts[-1])
     record.update(selected={str(q): s for q, s in selected.items()}, blocks=verdicts,
