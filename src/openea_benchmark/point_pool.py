@@ -116,6 +116,16 @@ def meminfo_mb() -> tuple[float, float]:
     return values["MemTotal"], values["MemAvailable"]
 
 
+def memory_headroom_mb() -> float | None:
+    """Memory the gate could still admit now (limit minus in use, outstanding reservations
+    and a pending large one); None without a memory gate."""
+    if not _SLOT_DIR or _MEM_LIMIT_FRAC <= 0.0:
+        return None
+    total, available = meminfo_mb()
+    used = (total - available) + _outstanding_reservations_mb("") + _pending_big_reservation_mb()
+    return max(0.0, _MEM_LIMIT_FRAC * total - used)
+
+
 def _rss_mb(pid: int) -> float | None:
     """Resident memory of a live process in MB, None if it does not exist."""
     try:

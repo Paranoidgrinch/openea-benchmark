@@ -44,6 +44,7 @@ from __future__ import annotations
 
 from ..heavy_elements import apply_hamiltonian, mole_basis_kwargs
 
+import os
 from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from math import isfinite
@@ -863,6 +864,12 @@ POINT_MEMORY_CAP_ENV = "OPENEA_POINT_MEMORY_CAP_MB"
 DEFAULT_POINT_MEMORY_CAP_MB = 16000
 POINT_MEMORY_FLOOR_MB = 2000
 GATE_OVERSHOOT = 1.25
+# A point that needs more than the cap gets up to the stage's own limit when its reservation
+# takes at most this share of what the memory gate could admit now (verify_v1 end phase,
+# 2026-10-28: ten serial 5Z/CV CCSD points ran out of core at 16 GB, ~1.7 h per cycle on
+# GPFS, while 357 GB were free).  Several large starts at once leave room for each other.
+POINT_MEMORY_HEADROOM_SHARE = 0.5
+POINT_MEMORY_ADAPTIVE_ENV = "OPENEA_POINT_MEMORY_ADAPTIVE"
 
 
 def point_memory_cap_mb() -> int:
@@ -896,7 +903,14 @@ def point_memory_budget_mb(request: "Stage3ExecutionRequest", settings: "Stage3E
         return limit
     ncorr = max(mol.nelec) - (valence_frozen_core_orbitals(mol) if settings.frozen_core else 0)
     need = cc_point_memory_need_mb(mol.nao_nr(), ncorr, request.spin_2s > 0 or request.scf_reference != "RHF")
-    return int(min(limit, max(POINT_MEMORY_FLOOR_MB, need)))
+    budget = int(min(limit, max(POINT_MEMORY_FLOOR_MB, need)))
+    raised = int(min(int(settings.max_memory_mb), need))
+    if raised > budget and os.environ.get(POINT_MEMORY_ADAPTIVE_ENV, "1") != "0":
+        from ..point_pool import memory_headroom_mb
+        headroom = memory_headroom_mb()
+        if headroom is not None and raised * GATE_OVERSHOOT <= POINT_MEMORY_HEADROOM_SHARE * headroom:
+            return raised
+    return budget
 
 
 def _ccsd_eris_within_memory(mycc: Any) -> Any:

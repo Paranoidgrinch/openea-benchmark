@@ -47,3 +47,19 @@ def test_point_budget_follows_basis_size_up_to_the_cap(monkeypatch):
     assert s3.point_memory_budget_mb(big, s3.Stage3ExecutionSettings(max_memory_mb=5000)) == 5000
     mid = s3.point_memory_budget_mb(_request(("C", "C"), "aug-cc-pvtz", 2), settings)
     assert s3.POINT_MEMORY_FLOOR_MB < mid < 9000
+
+
+def test_point_budget_exceeds_the_cap_only_with_gate_headroom(monkeypatch):
+    from openea_benchmark import point_pool
+    from openea_benchmark.adaptive import stage3_execution as s3
+    settings = s3.Stage3ExecutionSettings(max_memory_mb=48000)
+    big = _request(("C", "C"), "aug-cc-pv5z", 2)  # needs more than 48 GB
+    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 300000.0)
+    assert s3.point_memory_budget_mb(big, settings) == 48000  # the stage limit, not the 16 GB cap
+    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 100000.0)  # 60 GB > half of it
+    assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
+    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: None)  # no memory gate
+    assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
+    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 300000.0)
+    monkeypatch.setenv(s3.POINT_MEMORY_ADAPTIVE_ENV, "0")
+    assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
