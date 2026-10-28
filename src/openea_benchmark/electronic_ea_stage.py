@@ -338,6 +338,19 @@ def same_resolved_state(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
             and abs(a["r_central_angstrom"] - b["r_central_angstrom"]) < DUPLICATE_STATE_R_ANGSTROM)
 
 
+def resolved_branch_sibling(e: Mapping[str, Any], resolved: Sequence[Mapping[str, Any]],
+                            lowest: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The resolved other reference branch of ``e``'s state if it lies cleanly above
+    ``lowest`` (lower bound above its upper bound), else None."""
+    if e["equilibrium_status"] == "RESOLVED" or not e.get("branch_of"):
+        return None
+    for s in resolved:
+        if (s is not lowest and s is not e and s.get("branch_of") == e["branch_of"]
+                and s["energy_lower_hartree"] > lowest["energy_upper_hartree"]):
+            return s
+    return None
+
+
 def _competition(label: str, entries: list[dict], margin_ev: float,
                  collapsed_scf_margin_ev: float = 3.0) -> dict:
     """Automated high-level D04 review for one charge group."""
@@ -347,7 +360,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
                 "reason": f"no {label} candidate has a resolved equilibrium interval"}
     lowest = min(resolved, key=lambda e: e["energy_central_hartree"])
     upper = lowest["energy_upper_hartree"]
-    blocking, excluded, siblings, multireference_only = [], [], [], []
+    blocking, excluded, siblings, multireference_only, competitor_siblings = [], [], [], [], []
     for e in entries:
         if e is lowest:
             continue
@@ -381,6 +394,15 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             continue
         if e["equilibrium_status"] == "RESOLVED" and gap_ev > 0.0:
             continue  # cleanly separated interval
+        sibling = resolved_branch_sibling(e, resolved, lowest)
+        if sibling is not None and floor > sibling["energy_upper_hartree"]:
+            # Unresolved reference branch of a competitor state whose other branch is resolved
+            # and cleanly above the selected state, with no sampled point below that branch
+            # (verify_v1 NiO- 2Pi refS: continuity failed, lowest point 0.25 eV up, refF
+            # resolved 0.245 eV up).  The state is represented by the resolved branch.
+            competitor_siblings.append({"job_id": e["job_id"], "resolved_branch": sibling["job_id"],
+                                        "offset_ev": (floor - sibling["energy_central_hartree"]) * HARTREE_TO_EV})
+            continue
         if same_resolved_state(e, lowest):
             # The same state reached by two symmetry blocks (verify_v1 FeO- 6Delta/6Sigma-,
             # LaO 2Sigma+/2Delta: 1e-7 Eh, same R): with the same energy it cannot change the EA.
@@ -414,6 +436,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             "mr_pending": mr_pending,
             "lowest_job_id": lowest["job_id"], "blocking": blocking, "excluded_by_margin": excluded,
             "reference_branch_siblings": siblings, "multireference_only_excluded": multireference_only,
+            "competitor_branch_siblings": competitor_siblings,
             "reference_sensitivity_ev": max((abs(x["offset_ev"]) for x in siblings), default=0.0),
             "rule": "AUTOMATED_HIGH_LEVEL_D04: lowest resolved equilibrium interval must lie below every "
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}

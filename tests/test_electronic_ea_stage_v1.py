@@ -322,3 +322,19 @@ def test_pending_mr_competitor_labels_and_r():
     labels, r_of = pending_mr_competitor_labels(ea, reqs)
     assert labels == ["q=-1 2Sigmag+", "q=-1 4Piu"] and r_of == {"q=-1 2Sigmag+": 4.6}
     assert pending_mr_competitor_labels(None, reqs) == ([], {})
+
+
+def test_unresolved_branch_of_a_cleared_competitor_state_does_not_block():
+    # NiO- 2Pi: refF resolved 0.245 eV above 4Sigma-, refS continuity failed, lowest point 0.255 eV up.
+    low = entry("q", center=-1.0, lo=-1.00001, hi=-0.99999)
+    ref_f = {**entry("p__refF", center=-1.0 + 0.245 * H, lo=-1.0 + 0.244 * H, hi=-1.0 + 0.246 * H), "branch_of": "p"}
+    ref_s = {**entry("p__refS", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED", sampled=-1.0 + 0.255 * H), "branch_of": "p"}
+    res = _competition("anion", [low, ref_f, ref_s], 1.0)
+    assert res["status"] == "CLEARED" and res["selected_job_id"] == "q"
+    assert res["competitor_branch_siblings"][0]["resolved_branch"] == "p__refF"
+    assert res["reference_sensitivity_ev"] == 0.0
+    # A sampled point below the resolved branch: the unresolved branch may be lower, it blocks.
+    below = {**ref_s, "lowest_sampled_hartree": -1.0 + 0.2 * H}
+    assert _competition("anion", [low, ref_f, below], 1.0)["status"] == "UNRESOLVED"
+    # Without a resolved sibling the margin rule applies as before.
+    assert _competition("anion", [low, ref_s], 1.0)["status"] == "UNRESOLVED"
