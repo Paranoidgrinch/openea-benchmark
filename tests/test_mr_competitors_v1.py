@@ -186,3 +186,18 @@ def test_bound_falling_at_the_window_edge_is_followed_outward(tmp_path):
     blk = res["blocks"][0]
     assert blk["extra_r_angstrom"] == [2.5, 2.75, 3.25, 4.25, 6.25, 10.25] and blk["falling_to_asymptote"]
     assert blk["status"] == "EXCLUDED" and abs(blk["lower_bound_margin_ev"] - 1.0) < 1e-3
+
+
+def test_divergent_nevpt2_root_is_bounded_from_its_casci_energy():
+    from openea_benchmark.mr_competitors import bound_nevpt2_divergence
+    # SH- B1 at 1.59 A: a high CASCI root with an NEVPT2 "correction" of -36 Eh.
+    rec = {"status": "COMPLETED", "roots": [
+        {"e_casci_hartree": -397.998, "nevpt2_hartree": -0.327, "e_hartree": -398.325},
+        {"e_casci_hartree": -393.766, "nevpt2_hartree": -36.41, "e_hartree": -430.176}]}
+    bound_nevpt2_divergence(rec, -0.334)
+    low, high = rec["roots"]
+    assert not low.get("nevpt2_diverged") and abs(low["e_hartree"] + 398.325) < 1e-9
+    assert high["nevpt2_diverged"] and abs(high["e_hartree"] - (-393.766 - 0.334 - 0.5)) < 1e-9
+    assert rec["energies_hartree"] == [low["e_hartree"], high["e_hartree"]] and rec["nevpt2_diverged_roots"] == 1
+    bound_nevpt2_divergence(rec, -0.334)  # idempotent: the raw correction is kept
+    assert abs(rec["roots"][1]["e_hartree"] - (-394.6)) < 1e-9 and rec["roots"][1]["nevpt2_raw_hartree"] == -36.41

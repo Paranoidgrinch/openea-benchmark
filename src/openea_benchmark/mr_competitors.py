@@ -355,6 +355,34 @@ def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, ca
     return record
 
 
+# NEVPT2 corrections of one charge differ by a fraction of an Eh between valence states;
+# several Eh mean an intruder state or broken orbitals (verify_v1 SH-: -1 to -4 Eh on
+# borrowed A1 orbitals in the 1Delta block, -36 Eh for a high B1 root, normal -0.33 Eh).
+NEVPT2_DIVERGENCE_HARTREE = 0.5
+
+
+def bound_nevpt2_divergence(record: dict, reference_correction_hartree: float,
+                            tolerance: float = NEVPT2_DIVERGENCE_HARTREE) -> None:
+    """In place: a root whose NEVPT2 correction deviates from the reference (the selected
+    state's at this R) by more than ``tolerance`` gets CASCI + reference - tolerance, the
+    lowest value a non-divergent correction could give, and is flagged."""
+    if any("e_casci_hartree" not in x or "nevpt2_hartree" not in x for x in record.get("roots", ())):
+        return
+    for root in record.get("roots", ()):
+        corr = root.get("nevpt2_raw_hartree", root["nevpt2_hartree"])
+        root["nevpt2_raw_hartree"] = corr
+        if abs(corr - reference_correction_hartree) > tolerance:
+            root["nevpt2_diverged"] = True
+            root["e_hartree"] = root["e_casci_hartree"] + reference_correction_hartree - tolerance
+        else:
+            root.pop("nevpt2_diverged", None)
+            root["e_hartree"] = root["e_casci_hartree"] + corr
+    if record.get("roots"):
+        record["roots"].sort(key=lambda x: x["e_hartree"])
+        record["energies_hartree"] = [x["e_hartree"] for x in record["roots"]]
+        record["nevpt2_diverged_roots"] = sum(1 for x in record["roots"] if x.get("nevpt2_diverged"))
+
+
 def _block_task(atoms, charge, mult, irrep, r, policy, cache):
     return block_energies(atoms, charge, mult, irrep, r, policy, Path(cache))
 
@@ -404,6 +432,23 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
     # selected state no root is skipped: there the lowest root may be any state.
     points: dict[tuple, list] = {}
 
+    def sanitize():
+        """Mark roots whose NEVPT2 correction is not a correlation energy of this charge."""
+        for key, pts in points.items():
+            q = key[0]
+            reference = [(r, res) for r, outside, res in points.get((q, selected[q]["mult"], selected[q]["irrep"]), ())
+                         if not outside and res.get("status") == "COMPLETED" and res.get("roots")]
+            for r, _, res in pts:
+                if res.get("status") != "COMPLETED" or not res.get("roots") or not reference:
+                    continue
+                ref = min(reference, key=lambda x: abs(x[0] - r))[1]
+                split = [x for x in ref["roots"] if "e_casci_hartree" in x and "nevpt2_hartree" in x]
+                if not split:
+                    continue  # no CASCI / NEVPT2 decomposition recorded
+                lowest_root = min(split, key=lambda x: x["e_casci_hartree"])
+                c_ref = lowest_root.get("nevpt2_raw_hartree", lowest_root["nevpt2_hartree"])
+                bound_nevpt2_divergence(res, c_ref)
+
     def compute(specs):
         """specs: (key, R, outside_window); results appended to ``points``."""
         jobs = []
@@ -414,6 +459,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
         results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
         for (key, r, outside), res in zip(specs, results):
             points.setdefault(key, []).append((r, outside, res))
+        sanitize()
 
     specs = []
     for (q, mult, irrep) in sorted(keys):
