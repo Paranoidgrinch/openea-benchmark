@@ -339,6 +339,23 @@ def mole_basis_kwargs(atoms: Sequence[str], basis: Any) -> dict:
     return {"basis": per_element, "ecp": ecp}
 
 
+def _implicit_core_by_atom(mol: Any) -> list[int]:
+    """Implicit core orbitals of each atom of ``mol`` (rules of ``implicit_core_orbitals``)."""
+    out = []
+    for i in range(mol.natm):
+        el = mol.atom_pure_symbol(i)
+        z = _z(el)
+        n = 0
+        if z > 36 and int(mol.atom_charge(i)) == z:
+            route = element_route(el)
+            if route["route"] == ROUTE_PSEUDOPOTENTIAL:
+                n = route["ecp_electrons"] // 2
+            elif route["route"] == ROUTE_X2C:
+                n = deep_core_orbitals(z)
+        out.append(n)
+    return out
+
+
 def implicit_core_orbitals(mol: Any) -> int:
     """Core orbitals an ECP replaces for PP-route atoms that ``mol`` treats all-electron.
 
@@ -347,17 +364,33 @@ def implicit_core_orbitals(mol: Any) -> int:
     that core uncorrelated so both members correlate the same orbitals.  Zero for
     molecules of light elements or with the ECPs attached.
     """
-    n = 0
-    for i in range(mol.natm):
-        el = mol.atom_pure_symbol(i)
-        z = _z(el)
-        if z > 36 and int(mol.atom_charge(i)) == z:
-            route = element_route(el)
-            if route["route"] == ROUTE_PSEUDOPOTENTIAL:
-                n += route["ecp_electrons"] // 2
-            elif route["route"] == ROUTE_X2C:
-                n += deep_core_orbitals(z)
-    return n
+    return sum(_implicit_core_by_atom(mol))
+
+
+# D2h labels of the gerade/ungerade pair formed by one C2v (a1, b1, b2, a2) orbital
+# of each atom of a homonuclear molecule on the z axis
+_C2V_TO_D2H = (("Ag", "B1u"), ("B3u", "B2g"), ("B2u", "B3g"), ("B1g", "Au"))
+
+
+def implicit_core_irrep_nelec(mol: Any) -> dict[str, int]:
+    """Electrons per irrep in the ``implicit_core_orbitals`` of a symmetry-adapted
+    diatomic ``mol`` (C2v, or D2h for a homonuclear pair).
+
+    A reference occupation taken over from the ECP chain counts only the electrons
+    outside the ECP core; the all-electron member of the ECP correction needs the
+    core added in each irrep.  Counted from the core shells, not from orbital
+    energies: Au 5s lies below the 4f of its ECP core.  Empty if not resolvable.
+    """
+    per_atom = [ecp_core_irreps_c2v(2 * n) or core_irreps_c2v(n) for n in _implicit_core_by_atom(mol)]
+    if not implicit_core_orbitals(mol) or any(c is None for c in per_atom):
+        return {}
+    total = [sum(c[k] for c in per_atom) for k in range(4)]
+    if mol.groupname == "C2v":
+        return {name: 2 * v for name, v in zip(("A1", "B1", "B2", "A2"), total) if v}
+    if mol.groupname == "D2h" and all(v % 2 == 0 for v in total):
+        # v/2 orbitals of each parity, 2 electrons each
+        return {name: v for pair, v in zip(_C2V_TO_D2H, total) if v for name in pair}
+    return {}
 
 
 def deep_core_orbitals(z: int) -> int:

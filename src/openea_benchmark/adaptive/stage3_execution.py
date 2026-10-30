@@ -609,11 +609,15 @@ def _run_stage3_point_pyscf_body(
     if request.irrep_nelec is not None:
         # Same symmetry block as the scout: the electronic state label is fixed
         # by the irrep occupation, not inferred afterwards.
-        mf.irrep_nelec = (
-            {k: (int(v[0]), int(v[1])) for k, v in request.irrep_nelec.items()}
-            if request.scf_reference == "ROHF"
-            else {k: int(v[0]) + int(v[1]) for k, v in request.irrep_nelec.items()}
-        )
+        occ = {k: (int(v[0]), int(v[1])) for k, v in request.irrep_nelec.items()}
+        if sum(a + b for a, b in occ.values()) < mol.nelectron:
+            # occupation from the ECP chain, all-electron member of the ECP
+            # correction: the ECP core comes on top in each irrep
+            from ..heavy_elements import implicit_core_irrep_nelec
+            for k, c in implicit_core_irrep_nelec(mol).items():
+                a, b = occ.get(k, (0, 0))
+                occ[k] = (a + c // 2, b + c // 2)
+        mf.irrep_nelec = occ if request.scf_reference == "ROHF" else {k: a + b for k, (a, b) in occ.items()}
 
     if settings.scalar_relativistic == "SFX2C1E":
         # Spin-free one-electron X2C.  PySCF propagates the transformed

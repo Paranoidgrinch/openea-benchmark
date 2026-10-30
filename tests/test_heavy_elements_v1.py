@@ -88,6 +88,20 @@ def test_all_electron_member_keeps_the_ecp_core_frozen():
     assert ae.nelectron - 2 * 14 == pp.nelectron
 
 
+def test_ecp_core_is_added_to_the_irrep_occupation_of_the_all_electron_member():
+    # verify_v1 IO/PbO: the ECP-chain occupation of 33/30 electrons failed on the all-electron sfX2C molecule
+    from pyscf import gto
+    from openea_benchmark.heavy_elements import implicit_core_irrep_nelec, mole_basis_kwargs
+    kw = {"verbose": 0, "symmetry": "C2v"}
+    ae = gto.M(atom="Ag 0 0 0; H 0 0 1.6", **mole_basis_kwargs(("Ag", "H"), {"Ag": "dyall-av3z", "H": "aug-cc-pvtz"}), **kw)
+    assert implicit_core_irrep_nelec(ae) == {"A1": 14, "B1": 6, "B2": 6, "A2": 2}
+    ag2 = gto.M(atom="Ag 0 0 0; Ag 0 0 2.5", **mole_basis_kwargs(("Ag",), {"Ag": "dyall-av3z"}), verbose=0, symmetry="D2h")
+    assert implicit_core_irrep_nelec(ag2) == {"Ag": 14, "B1u": 14, "B3u": 6, "B2g": 6, "B2u": 6, "B3g": 6,
+                                             "B1g": 2, "Au": 2}
+    pp = gto.M(atom="Ag 0 0 0; H 0 0 1.6", **mole_basis_kwargs(("Ag", "H"), {"Ag": "aug-cc-pVTZ-PP", "H": "aug-cc-pvtz"}), **kw)
+    assert implicit_core_irrep_nelec(pp) == {}
+
+
 def test_pyscf_valence_space_removes_ecp_cores():
     from pyscf import gto
     from openea_benchmark.heavy_elements import mole_basis_kwargs, pyscf_valence_space
