@@ -85,3 +85,63 @@ def test_cross_model_identity_rejects_kink_and_following():
     ids, checks = cross_model_identity_evidence(
         prim, context("anion", [(r, morse(r, shift=-0.05)) for r in GRID], following=1), ZPEStagePolicy())
     assert ids == () and "instability" in checks["failed"]
+
+
+def test_comparison_curve_drives_extension_of_the_primary_curve(tmp_path, monkeypatch):
+    import openea_benchmark.vibrational_stage as vs
+    from openea_benchmark.adaptive.nuclear_motion import NuclearMotionStatus
+    from openea_benchmark.adaptive.nuclear_motion_orchestration import (
+        NuclearPECModelRunStatus, NuclearPECRefinementRunStatus)
+
+    def solve_result(**over):
+        base = dict(status=NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED, zpe_ev=0.04, numerical_bound_ev=0.0,
+                    grid_difference_ev=0.0, interpolation_difference_ev=0.0, domain_difference_ev=0.0,
+                    left_boundary_clearance_ev=0.4, right_boundary_clearance_ev=0.4,
+                    requires_lower_r_extension=False, requires_upper_r_extension=False, rationale="")
+        return SimpleNamespace(**{**base, **over})
+
+    def assessment(status):
+        return SimpleNamespace(status=status, action=None, correction_ev=0.005, correction_half_width_ev=None,
+                               neutral=solve_result(), anion=solve_result(),
+                               anion_vibrational_binding=SimpleNamespace(status=SimpleNamespace(value="BOUND")),
+                               rationale="")
+
+    def ctx(role, n):
+        pts = tuple(SimpleNamespace(r_angstrom=1.0 + 0.025 * i) for i in range(n))
+        return SimpleNamespace(role=role, state_id=role, pec=SimpleNamespace(points=pts, job_id=role, basis="def2-TZVPPD"))
+
+    seen = []
+    monkeypatch.setattr(vs, "NuclearPECStage3Context", lambda role, job, pec, req, res: ctx(role, 20))
+    monkeypatch.setattr(vs, "nuclear_motion_pec_from_high_level", lambda pec, **k: pec)
+    monkeypatch.setattr(vs, "run_diatomic_nuclear_motion",
+                        lambda **k: assessment(NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED))
+
+    def model_run(**k):
+        n = len(k["primary_anion_context"].pec.points)
+        seen.append(n)
+        if n < 22:
+            return SimpleNamespace(status=NuclearPECModelRunStatus.COMPARISON_PEC_REFINEMENT_REQUIRED,
+                                   comparison_assessment=assessment(NuclearMotionStatus.PEC_REFINEMENT_REQUIRED),
+                                   final_primary_assessment=None)
+        return SimpleNamespace(status=NuclearPECModelRunStatus.MODEL_EVIDENCE_READY, rationale="",
+                               comparison_assessment=assessment(NuclearMotionStatus.CLEARED),
+                               final_primary_assessment=assessment(NuclearMotionStatus.CLEARED))
+
+    def refine(**k):
+        assert k["assessment"].status is NuclearMotionStatus.PEC_REFINEMENT_REQUIRED
+        a = k["anion_context"]
+        return SimpleNamespace(status=NuclearPECRefinementRunStatus.COMPLETED, neutral_context=k["neutral_context"],
+                               anion_context=ctx("anion", len(a.pec.points) + 1))
+
+    monkeypatch.setattr(vs, "run_nuclear_pec_model_convergence", model_run)
+    monkeypatch.setattr(vs, "run_nuclear_pec_refinement", refine)
+    loops = {"n": SimpleNamespace(final_pec=None, requests=(), results=()),
+             "a": SimpleNamespace(final_pec=None, requests=(), results=())}
+    rec = vs.run_vibrational_stage(
+        electronic_ea={"status": "ELECTRONIC_EA_EVALUATED", "system": "XY", "selected_neutral_job": "n",
+                       "selected_anion_job": "a"},
+        loops=loops, atoms=("O", "I"), stage3_settings=vs.Stage3ExecutionSettings(), output_dir=tmp_path,
+        identity_thresholds=object(), branch_thresholds=object())
+    assert seen == [20, 21, 22]
+    assert rec["status"] == "CLEARED" and len(rec["comparison_rounds"]) == 2
+    assert rec["primary_pec"]["anion"]["n_points"] == 22

@@ -72,6 +72,8 @@ class ZPEStagePolicy:
     extension_step_angstrom: float = 0.025
     max_pec_rounds: int = 40
     max_grid_doublings: int = 2
+    # Extensions of the primary curve requested by the comparison-basis curve.
+    max_comparison_extension_rounds: int = 8
     coarse_grid_points: int = 301
     fine_grid_points: int = 601
     grid_convergence_tolerance_ev: float = 2.0e-5
@@ -427,6 +429,43 @@ def _run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[s
                   retry_settings=retry, point_runner=runner,
                   resolver=resolver)
     model_run = run_nuclear_pec_model_convergence(**common)
+    # The comparison curve lives on the primary geometries, so when it needs more
+    # range the primary curve is extended (same D12 tool, driven by the comparison
+    # diagnosis) and both curves are solved again; old points come from the cache.
+    comparison_rounds = []
+    for cmp_round in range(1, policy.max_comparison_extension_rounds + 1):
+        if model_run.status is not NuclearPECModelRunStatus.COMPARISON_PEC_REFINEMENT_REQUIRED:
+            break
+        comparison_rounds.append({"round": cmp_round, **_assessment_summary(model_run.comparison_assessment)})
+        print(f"[ZPE] {electronic_ea.get('system')} extend nuclear PEC for the comparison curve "
+              f"(round {cmp_round})", flush=True)
+        run = run_nuclear_pec_refinement(
+            assessment=model_run.comparison_assessment, neutral_context=contexts["neutral"],
+            anion_context=contexts["anion"], nuclear_settings=nuclear_settings, refinement_settings=refinement,
+            refinement_round=200 + cmp_round, execution_settings=settings,
+            identity_thresholds=identity_thresholds, branch_thresholds=branch_thresholds,
+            retry_settings=retry, point_runner=runner, resolver=resolver)
+        if run.status is not NuclearPECRefinementRunStatus.COMPLETED:
+            record.update(status=f"COMPARISON_PEC_EXTENSION_{run.status.value}", reason=run.rationale,
+                          comparison_rounds=comparison_rounds,
+                          failed_extension=_extension_failure_details(run, contexts, runner, settings,
+                                                                      identity_thresholds, branch_thresholds,
+                                                                      resolver))
+            _save_json(output_dir / "nuclear_motion.json", record)
+            return record
+        contexts = {"neutral": run.neutral_context, "anion": run.anion_context}
+        assessment = solve()
+        record["primary_pec"] = {role: _pec_summary(ctx) for role, ctx in contexts.items()}
+        if assessment.status is not NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED:
+            record.update(status=assessment.status.value, assessment=_assessment_summary(assessment),
+                          comparison_rounds=comparison_rounds,
+                          reason="primary nuclear solve no longer converged after the comparison-driven extension")
+            _save_json(output_dir / "nuclear_motion.json", record)
+            return record
+        common.update(primary_assessment=assessment, primary_neutral_context=contexts["neutral"],
+                      primary_anion_context=contexts["anion"])
+        model_run = run_nuclear_pec_model_convergence(**common)
+    record["comparison_rounds"] = comparison_rounds
     if model_run.status is NuclearPECModelRunStatus.CROSS_MODEL_IDENTITY_REVIEW_REQUIRED:
         evidence, checks = [], {}
         for role, cmp_ctx in (("neutral", model_run.comparison_neutral_context),
