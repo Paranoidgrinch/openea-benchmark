@@ -80,6 +80,13 @@ class ZPEStagePolicy:
     interpolation_sensitivity_tolerance_ev: float = 5.0e-4
     domain_sensitivity_tolerance_ev: float = 2.0e-4
     minimum_boundary_clearance_ev: float = 0.30
+    # Alternative to the energy clearance for flat or heavy curves (Li2-: about
+    # 0.006 eV per 0.025 A step, 0.18 eV after 40 rounds although the v=0 level
+    # was domain converged to 2e-6 eV): a boundary also suffices when the WKB
+    # decay exponent from the turning point reaches this value (amplitude
+    # exp(-4) ~ 2 %, density ~ 3e-4 of the turning-point value).  For stiff
+    # curves 0.30 eV is reached first, so their extension is unchanged.
+    minimum_boundary_tunnelling_exponent: float = 4.0
     trim_fraction: float = 0.08
     comparison_basis: str = "def2-QZVPPD"
     # Cross-model identity checks (primary vs comparison basis, same geometries).
@@ -98,6 +105,7 @@ class ZPEStagePolicy:
             interpolation_sensitivity_tolerance_ev=self.interpolation_sensitivity_tolerance_ev,
             domain_sensitivity_tolerance_ev=self.domain_sensitivity_tolerance_ev,
             minimum_boundary_clearance_ev=self.minimum_boundary_clearance_ev,
+            minimum_boundary_tunnelling_exponent=self.minimum_boundary_tunnelling_exponent,
             trim_fraction=self.trim_fraction, eigenvalue_tolerance_hartree=1.0e-12)
 
 
@@ -117,6 +125,8 @@ def _solve_summary(result) -> dict:
         ("domain_difference_ev", result.domain_difference_ev),
         ("left_boundary_clearance_ev", result.left_boundary_clearance_ev),
         ("right_boundary_clearance_ev", result.right_boundary_clearance_ev),
+        ("left_boundary_tunnelling_exponent", result.left_boundary_tunnelling_exponent),
+        ("right_boundary_tunnelling_exponent", result.right_boundary_tunnelling_exponent),
         ("requires_lower_r_extension", result.requires_lower_r_extension),
         ("requires_upper_r_extension", result.requires_upper_r_extension),
         ("rationale", result.rationale))}

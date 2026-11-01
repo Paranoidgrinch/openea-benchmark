@@ -143,6 +143,12 @@ class NuclearMotionSettings:
     minimum_boundary_clearance_ev: float
     trim_fraction: float
     eigenvalue_tolerance_hartree: float
+    # Alternative boundary test for flat or heavy curves: the WKB decay exponent
+    # S = int sqrt(2 mu (V - E_v0)) dr from the classical turning point to the PEC
+    # end.  The v=0 amplitude there is ~exp(-S) of its turning-point value, so a
+    # boundary with S >= this value is far enough out even below the fixed
+    # energy clearance.  None keeps the energy clearance as the only test.
+    minimum_boundary_tunnelling_exponent: float | None = None
 
     def __post_init__(self) -> None:
         if self.coarse_grid_points < 51:
@@ -161,6 +167,10 @@ class NuclearMotionSettings:
             value = float(getattr(self, name))
             if not isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
+        if self.minimum_boundary_tunnelling_exponent is not None:
+            value = float(self.minimum_boundary_tunnelling_exponent)
+            if not isfinite(value) or value <= 0.0:
+                raise ValueError("minimum_boundary_tunnelling_exponent must be finite and positive")
         if not isfinite(float(self.trim_fraction)) or not (0.0 < self.trim_fraction < 0.25):
             raise ValueError("trim_fraction must lie strictly between 0 and 0.25")
 
@@ -212,6 +222,8 @@ class VibrationalGroundStateResult:
     requires_upper_r_extension: bool
     evidence_ids: tuple[str, ...]
     rationale: str
+    left_boundary_tunnelling_exponent: float | None = None
+    right_boundary_tunnelling_exponent: float | None = None
 
     def __post_init__(self) -> None:
         if self.role not in {"neutral", "anion"}:
@@ -512,6 +524,35 @@ def _solve_ground_state(
     )
 
 
+def _boundary_tunnelling_exponents(
+    x_angstrom: np.ndarray,
+    y_hartree: np.ndarray,
+    *,
+    v0_energy_hartree: float,
+    minimum_r_angstrom: float,
+    reduced_mass_electron_masses: float,
+    grid_points: int,
+) -> tuple[float, float]:
+    """WKB decay exponent from the v=0 turning point to the lower and upper PEC end.
+
+    Zero when the potential is nowhere above the v=0 level on that side or dips
+    below it again (a second well), so such a side never passes this test.
+    """
+    mu = float(reduced_mass_electron_masses)
+    out = []
+    for end in (float(x_angstrom[0]), float(x_angstrom[-1])):
+        r = np.linspace(float(minimum_r_angstrom), end, int(grid_points))
+        excess = _pchip_eval(x_angstrom, y_hartree, r) - float(v0_energy_hartree)
+        above = np.nonzero(excess > 0.0)[0]
+        if not above.size or np.any(excess[above[0]:] <= 0.0):
+            out.append(0.0)
+            continue
+        f = np.sqrt(2.0 * mu * excess[above[0]:])
+        dr = np.abs(np.diff(r[above[0]:])) * ANGSTROM_TO_BOHR
+        out.append(float(np.sum(0.5 * (f[1:] + f[:-1]) * dr)))
+    return out[0], out[1]
+
+
 def _dedup(items: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(x) for x in items if str(x).strip()))
 
@@ -615,8 +656,22 @@ def solve_vibrational_ground_state(
     zpe_h = e_fine - vmin
     zpe_ev = zpe_h * HARTREE_TO_EV
 
-    lower_extension = left_clearance < settings.minimum_boundary_clearance_ev
-    upper_extension = right_clearance < settings.minimum_boundary_clearance_ev
+    left_tunnel, right_tunnel = _boundary_tunnelling_exponents(
+        x, y,
+        v0_energy_hartree=e_fine,
+        minimum_r_angstrom=min_r,
+        reduced_mass_electron_masses=masses.reduced_mass_electron_masses,
+        grid_points=settings.fine_grid_points,
+    )
+    s_min = settings.minimum_boundary_tunnelling_exponent
+    left_decayed = s_min is not None and left_tunnel >= float(s_min)
+    right_decayed = s_min is not None and right_tunnel >= float(s_min)
+    lower_extension = left_clearance < settings.minimum_boundary_clearance_ev and not left_decayed
+    upper_extension = right_clearance < settings.minimum_boundary_clearance_ev and not right_decayed
+    if (left_decayed and left_clearance < settings.minimum_boundary_clearance_ev) or (
+            right_decayed and right_clearance < settings.minimum_boundary_clearance_ev):
+        evidence = evidence + ("BOUNDARY_WKB_DECAY_CLEARED",)
+    tunnel = dict(left_boundary_tunnelling_exponent=left_tunnel, right_boundary_tunnelling_exponent=right_tunnel)
     domain_bad = domain_diff > settings.domain_sensitivity_tolerance_ev
     interp_bad = interp_diff > settings.interpolation_sensitivity_tolerance_ev
     grid_bad = grid_diff > settings.grid_convergence_tolerance_ev
@@ -634,6 +689,7 @@ def solve_vibrational_ground_state(
             lower_extension, upper_extension,
             evidence + ("NUCLEAR_SOLVER_NONPHYSICAL_RESULT",),
             "The radial solver produced a non-finite or non-positive zero-point energy.",
+            **tunnel,
         )
 
     if lower_extension or upper_extension or domain_bad or interp_bad:
@@ -657,6 +713,7 @@ def solve_vibrational_ground_state(
             upper_extension or domain_bad,
             evidence + ("NUCLEAR_PEC_REFINEMENT_REQUIRED",),
             "; ".join(reasons) + ".",
+            **tunnel,
         )
 
     if grid_bad:
@@ -670,6 +727,7 @@ def solve_vibrational_ground_state(
             False, False,
             evidence + ("NUCLEAR_GRID_REFINEMENT_REQUIRED",),
             "Nested finite-difference grids do not yet meet the requested v=0 convergence tolerance.",
+            **tunnel,
         )
 
     numerical_bound = grid_diff + interp_diff + domain_diff
@@ -689,6 +747,7 @@ def solve_vibrational_ground_state(
             "BOUNDARY_CLEARANCE_CLEARED",
         ),
         "J=0 anharmonic v=0 level is numerically and domain converged within the active explicit settings.",
+        **tunnel,
     )
 
 

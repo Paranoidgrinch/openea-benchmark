@@ -310,3 +310,28 @@ def test_anion_v0_binding_is_decided_from_absolute_v0_interval():
         model_evidence=MODEL,
     )
     assert unbound.anion_vibrational_binding.status is VibrationalBindingStatus.UNBOUND
+
+
+def test_wkb_decay_clears_a_soft_heavy_curve_below_the_energy_clearance():
+    from dataclasses import replace
+    masses = DiatomicMassSpecification('Li', 'Li', 7.0, 7.0, ('MASS:TEST',), mass_model='TEST_EXPLICIT_ISOTOPE_MASS')
+    omega = 300.0 / 219474.63
+    pec = harmonic_pec('anion', omega=omega, r0=2.7, mass_spec=masses, n=61, width=1.23)
+    old = solve_vibrational_ground_state(pec, masses=masses, settings=SETTINGS)
+    assert old.status is VibrationalSolveStatus.PEC_REFINEMENT_REQUIRED
+    assert old.right_boundary_clearance_ev < 0.30 and old.requires_upper_r_extension
+    new = solve_vibrational_ground_state(
+        pec, masses=masses, settings=replace(SETTINGS, minimum_boundary_tunnelling_exponent=4.0))
+    assert new.status is VibrationalSolveStatus.CLEARED
+    assert 'BOUNDARY_WKB_DECAY_CLEARED' in new.evidence_ids
+    # Harmonic WKB exponent: S = (q sqrt(q^2-1) - arcosh q)/2, q = x_b sqrt(mu omega).
+    q = 0.615 * ANGSTROM_TO_BOHR * math.sqrt(masses.reduced_mass_electron_masses * omega)
+    s_exact = 0.5 * (q * math.sqrt(q * q - 1.0) - math.acosh(q))
+    assert s_exact > 4.0
+    assert abs(new.right_boundary_tunnelling_exponent - s_exact) < 0.05 * s_exact
+    # A stiff curve keeps needing the energy clearance: exp(-S) is not small there.
+    stiff = harmonic_pec('anion', omega=2000.0 / 219474.63, width=0.30)
+    res = solve_vibrational_ground_state(
+        stiff, masses=MASSES_H2, settings=replace(SETTINGS, minimum_boundary_tunnelling_exponent=4.0))
+    assert res.status is VibrationalSolveStatus.PEC_REFINEMENT_REQUIRED and res.requires_upper_r_extension
+    assert res.right_boundary_clearance_ev < 0.30 and res.right_boundary_tunnelling_exponent < 4.0

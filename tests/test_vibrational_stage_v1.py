@@ -97,7 +97,8 @@ def test_comparison_curve_drives_extension_of_the_primary_curve(tmp_path, monkey
         base = dict(status=NuclearMotionStatus.MODEL_CONVERGENCE_REQUIRED, zpe_ev=0.04, numerical_bound_ev=0.0,
                     grid_difference_ev=0.0, interpolation_difference_ev=0.0, domain_difference_ev=0.0,
                     left_boundary_clearance_ev=0.4, right_boundary_clearance_ev=0.4,
-                    requires_lower_r_extension=False, requires_upper_r_extension=False, rationale="")
+                    requires_lower_r_extension=False, requires_upper_r_extension=False, rationale="",
+                    left_boundary_tunnelling_exponent=5.0, right_boundary_tunnelling_exponent=5.0)
         return SimpleNamespace(**{**base, **over})
 
     def assessment(status):
