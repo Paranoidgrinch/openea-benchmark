@@ -334,7 +334,8 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
             state.update(status="NO_SEED_REFERENCE")
             computed.append(state)
             continue
-        seed = min(recs, key=lambda r: abs(float(r["r_angstrom"]) - state["r"]))
+        # Two initializations at the same R tie; the request id decides, not the record order.
+        seed = min(recs, key=lambda r: (abs(float(r["r_angstrom"]) - state["r"]), str(r.get("request_id"))))
         state["seed_r_angstrom"] = seed["r_angstrom"]
         state["points"] = {}
         if state["selected"]:

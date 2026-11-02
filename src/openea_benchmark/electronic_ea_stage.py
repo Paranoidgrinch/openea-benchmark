@@ -152,6 +152,24 @@ def _rescue_policy_affects(cached: Mapping[str, Any]) -> bool:
             and SCF_SOSCF_RESCUE_WARNING in (result.get("reference_warnings") or ()))
 
 
+# Which checkpoint of a validated state seeds a fixed-geometry point (CBS, CV, SR members)
+# does not define the point: equivalent initializations at the same R tie, and the chosen
+# one depended on record order (verify_v1 CuCu/AgAg/AuAu: the CV points were recomputed
+# for days although identical points were cached).
+_SEED_FIELDS = frozenset({"source_root_id", "source_checkpoint_path", "source_link_status"})
+
+
+def _seed_is_interchangeable(request: Mapping[str, Any]) -> bool:
+    return ("_FROM_VALIDATED_STATE:" in str(request.get("source_origin_guess") or "")
+            or request.get("source_link_status") == "CBS_BASIS_CONTINUATION_FROM_HIGH_LEVEL_REFERENCE")
+
+
+def _without_seed(request: Mapping[str, Any]) -> dict:
+    # JSON round trip: a stored request has lists where to_dict() has tuples.
+    return json.loads(json.dumps({k: v for k, v in request.items() if k not in _SEED_FIELDS},
+                                 sort_keys=True, default=str))
+
+
 class CachedPointRunner:
     """Stage-3 runner that persists every refinement point (resume without recompute).
 
@@ -169,13 +187,17 @@ class CachedPointRunner:
         fingerprint = sha256(json.dumps({"request": request.to_dict(), "settings": settings_fingerprint(settings),
                                          "batch": self.settings_signature}, sort_keys=True, default=str)
                              .encode()).hexdigest()
-        path = self.cache_dir / (sha256(request.request_id.encode()).hexdigest() + f"__{fingerprint[:16]}.json")
+        prefix = sha256(request.request_id.encode()).hexdigest()
+        path = self.cache_dir / f"{prefix}__{fingerprint[:16]}.json"
         if path.exists():
             cached = json.loads(path.read_text())
             # SCF failures cached under an older SCF rescue policy are recomputed once.
             if not (cached.get("scf_rescue_policy") != SCF_RESCUE_POLICY
                     and _rescue_policy_affects(cached)):
                 return _result_from_record(cached["result"])
+        reused = self._same_point_other_seed(request, settings, prefix)
+        if reused is not None:
+            return reused
         from .point_pool import core_slot
         with core_slot():
             result = run_stage3_point(request, settings=settings, runner=self.backend)
@@ -187,6 +209,33 @@ class CachedPointRunner:
                           "scf_rescue_policy": SCF_RESCUE_POLICY,
                           "request": request.to_dict(), "result": result.to_dict()})
         return result
+
+    def _same_point_other_seed(self, request: Stage3ExecutionRequest, settings: Stage3ExecutionSettings,
+                               prefix: str) -> Stage3PointResult | None:
+        """A completed cached point of a validated state that differs only in its seed.
+
+        The stored fingerprint is recomputed from the stored request with the current
+        settings and batch signature, so a hit also proves identical settings."""
+        current = request.to_dict()
+        if not _seed_is_interchangeable(current):
+            return None
+        target = _without_seed(current)
+        settings_fp = settings_fingerprint(settings)
+        for path in sorted(self.cache_dir.glob(f"{prefix}__*.json")):
+            try:
+                cached = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            stored = cached.get("request") or {}
+            if cached.get("result", {}).get("status") != PointExecutionStatus.COMPLETED.value:
+                continue
+            if _without_seed(stored) != target or _rescue_policy_affects(cached):
+                continue
+            check = sha256(json.dumps({"request": stored, "settings": settings_fp, "batch": self.settings_signature},
+                                      sort_keys=True, default=str).encode()).hexdigest()
+            if check == cached.get("fingerprint"):
+                return _result_from_record(cached["result"])
+        return None
 
 
 def cached_point_runner(cache_dir: Path, settings_signature: str,

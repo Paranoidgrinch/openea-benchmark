@@ -115,7 +115,8 @@ def selected_state_specs(electronic_ea: Mapping[str, Any], requests: Sequence[St
         if job_id not in template or not recs:
             return f"{role}: no seed reference for {job_id}"
         r = float(cand["r_central_angstrom"])
-        seed = min(recs, key=lambda rec: abs(float(rec["r_angstrom"]) - r))
+        # Two initializations at the same R tie; the request id decides, not the record order.
+        seed = min(recs, key=lambda rec: (abs(float(rec["r_angstrom"]) - r), str(rec.get("request_id"))))
         states[role] = _state_spec(role, job_id, r, template[job_id], seed, spec_cls)
     return states
 

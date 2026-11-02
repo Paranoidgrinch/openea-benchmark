@@ -296,3 +296,48 @@ def test_projected_soscf_starts_at_the_subset_basis_energy(tmp_path):
     _projected_soscf(mf, big, ref.chkfile, Stage3ExecutionSettings())
     assert mf.converged
     assert ref.e_tot - 1e-3 < mf.e_tot <= ref.e_tot + 1e-8
+
+
+def test_equivalent_seed_does_not_invalidate_a_cached_fixed_geometry_point(tmp_path):
+    from openea_benchmark.electronic_ea_stage import cached_point_runner
+    calls = []
+
+    def backend(req, settings):
+        calls.append(req.source_root_id)
+        return _empty_result(req, PointExecutionStatus.COMPLETED, ccsd_t_total_hartree=-75.0, reference_warnings=())
+
+    runner = cached_point_runner(tmp_path, "sig", backend)
+    cv = replace(request("A", -1, 0), source_origin_guess="CORE_VALENCE_FROM_VALIDATED_STATE:A",
+                 source_root_id="A__seed00", source_checkpoint_path="/hl/A__seed00")
+    other_seed = replace(cv, source_root_id="A__seed01", source_checkpoint_path="/hl/A__seed01")
+    assert runner(cv, Stage3ExecutionSettings()).status is PointExecutionStatus.COMPLETED
+    assert runner(other_seed, Stage3ExecutionSettings()).ccsd_t_total_hartree == -75.0
+    assert calls == ["A__seed00"]
+    # Different settings or a different point are computed.
+    runner(other_seed, Stage3ExecutionSettings(max_memory_mb=999))
+    runner(replace(other_seed, r_angstrom=1.5), Stage3ExecutionSettings())
+    assert len(calls) == 3
+    # A refinement point keeps its seed in the key: the seed defines its branch.
+    refine = replace(request("N", 0, 1), source_root_id="N__seed00", source_checkpoint_path="/hl/N__seed00")
+    runner(refine, Stage3ExecutionSettings())
+    runner(replace(refine, source_root_id="N__seed01", source_checkpoint_path="/hl/N__seed01"),
+           Stage3ExecutionSettings())
+    assert len(calls) == 5
+
+
+def test_tied_seeds_are_chosen_independently_of_record_order(tmp_path):
+    seen = []
+
+    def recording(req, settings):
+        seen.append((req.job_id, req.basis, req.source_checkpoint_path))
+        return backend(req, settings)
+
+    reqs = [request("N", 0, 1), request("C", 0, 1), request("A", -1, 0)]
+    recs = [(f"{j}-{s}", {"job_id": j, "status": "COMPLETED", "r_angstrom": 1.0, "request_id": f"{j}__seed0{s}",
+                          "high_level_checkpoint_path": f"/hl/{j}seed0{s}"}) for j in "NCA" for s in (0, 1)]
+    for order, out in ((recs, "a"), (recs[::-1], "b")):
+        run_cbs_stage(electronic_ea=ea_record(10.0), requests=reqs, point_records=dict(order),
+                      refinement_dir=tmp_path / "none", stage3_settings=Stage3ExecutionSettings(),
+                      output_dir=tmp_path / out, point_backend=recording)
+    first, second = seen[:len(seen) // 2], seen[len(seen) // 2:]
+    assert first == second and all(path.endswith("seed00") for _, _, path in first if path.startswith("/hl/"))
