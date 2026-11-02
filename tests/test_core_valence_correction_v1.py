@@ -34,3 +34,19 @@ def test_cv_definition_all_electron_minus_frozen_core():
         fc_neutral_h=-9.9,fc_anion_h=-10.0,
         hartree_to_ev=27.0)
     assert abs(r.delta_cv_ev)<1e-12
+
+def test_geometric_tail_clears_at_max_cardinal():
+    # verify_v1 PbO: 3Z/4Z/5Z Delta_CV with r ~ 0.37, latest change 3 meV.
+    r=assess_core_valence((cv(3,0.0705),cv(4,0.0785),cv(5,0.08148)),target_change_ev=0.002,max_cardinal=5)
+    assert r.status is CoreValenceStatus.CLEARED and r.central_correction_ev==0.08148
+    assert "GEOMETRIC_TAIL_BOUND_AT_MAX_CARDINAL" in r.evidence
+    change=0.08148-0.0785; ratio=change/0.008
+    assert abs(r.convergence_bound_ev-max(change,change*ratio/(1-ratio)))<1e-12
+
+def test_geometric_tail_needs_monotonic_series_and_small_bound():
+    oscillating=assess_core_valence((cv(3,0.0),cv(4,0.010),cv(5,0.006)),max_cardinal=5)
+    assert oscillating.action=="MAX_CARDINAL_REACHED_UNRESOLVED"
+    slow=assess_core_valence((cv(3,0.0),cv(4,0.020),cv(5,0.035)),max_cardinal=5)  # r=0.75, tail 45 meV
+    assert slow.action=="MAX_CARDINAL_REACHED_UNRESOLVED"
+    below_max=assess_core_valence((cv(3,0.0705),cv(4,0.0785),cv(5,0.08148)),max_cardinal=6)
+    assert below_max.action=="COMPUTE_X6"

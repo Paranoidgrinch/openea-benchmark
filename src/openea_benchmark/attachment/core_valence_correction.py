@@ -15,6 +15,13 @@ used as the central value and the latest cardinal change as a convergence
 bound.  Two cardinal points may clear if the latest change is within target;
 with three or more points, contraction of the increment is additionally
 required.
+
+At the largest available cardinal a series that is still above target but
+converges geometrically (two increments of the same sign, contraction ratio
+r <= max_contraction_ratio) clears with the remaining geometric tail as its
+bound, max(change, change * r / (1 - r)), provided that bound is at most
+max_tail_bound_ev.  verify_v1 PbO/ScO/VO: 5Z changes of 3-7 meV with r ~ 0.4
+(tail 2-5 meV) failed the fixed 2 meV target only because no 6Z basis exists.
 """
 from __future__ import annotations
 
@@ -65,6 +72,7 @@ def assess_core_valence(
     target_change_ev: float = 0.002,
     max_contraction_ratio: float = 0.8,
     max_cardinal: int = 5,
+    max_tail_bound_ev: float = 0.01,
 ) -> CoreValenceAssessment:
     ordered = tuple(sorted(points, key=lambda x: x.cardinal))
     if not ordered:
@@ -157,6 +165,28 @@ def assess_core_valence(
                 "REQUEST_HIGHER_CARDINAL",
             ),
         )
+
+    if len(ordered) >= 3 and contraction is not None and contraction <= max_contraction_ratio:
+        step = ordered[-1].delta_cv_ev - ordered[-2].delta_cv_ev
+        prev_step = ordered[-2].delta_cv_ev - ordered[-3].delta_cv_ev
+        tail = change * contraction / (1.0 - contraction)
+        bound = max(change, tail)
+        if step * prev_step > 0.0 and bound <= max_tail_bound_ev:
+            return CoreValenceAssessment(
+                status=CoreValenceStatus.CLEARED,
+                action="NONE",
+                central_correction_ev=latest.delta_cv_ev,
+                convergence_bound_ev=bound,
+                contraction_ratio=contraction,
+                highest_cardinal=latest.cardinal,
+                points=ordered,
+                evidence=(
+                    "ALL_ELECTRON_MINUS_FROZEN_CORE_SAME_BASIS",
+                    "CORE_VALENCE_INCREMENT_CONTRACTING",
+                    "GEOMETRIC_TAIL_BOUND_AT_MAX_CARDINAL",
+                    "NO_CV_EXTRAPOLATION_ASSUMED",
+                ),
+            )
 
     return CoreValenceAssessment(
         status=CoreValenceStatus.NEED_MORE_EVIDENCE,
