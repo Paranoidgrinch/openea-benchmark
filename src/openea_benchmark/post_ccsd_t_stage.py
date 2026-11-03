@@ -15,10 +15,17 @@ Delta_Q(first affordable of aug-cc-pVDZ, cc-pVDZ), bound 50 % of |Delta_Q| (pilo
 incomplete).  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
 showed its DZ->TZ transfer disagreeing with exact CCSDTQ by 0.1 eV.
 
-Triples and quadruples partly cancel, so the layer is included in EA_0 only
-when *both* are available.  Exact CCSDTQ amplitudes grow as (o v)^4; when the
-estimated storage exceeds ``q_memory_limit_mb`` the layer reports
-``QUADRUPLES_NOT_AFFORDABLE`` with Delta_T as evidence only (fail closed).
+Exact CCSDTQ amplitudes grow as (o v)^4 and CCpy keeps them in RAM (only the DIIS
+vectors can go to scratch).  When neither quadruples basis fits the machine (RAM
+estimate above the limit, OPENEA_Q_MEMORY_LIMIT_MB overrides the policy value, or
+the out-of-core DIIS files above half the free scratch), Delta_Q is not computed
+(user decision 2026-11-03): the layer applies Delta_T and widens its bound by a
+quadruples allowance max(Q_ALLOWANCE_MIN_EV, |Delta_T|), status
+CLEARED_WITH_QUADRUPLES_ALLOWANCE, reported as a warning in the final verdict.
+Exact Delta_Q(DZ) in verify_v1 stayed below 0.011 eV (NH, PO, SS, SH, CH, BO, SiH,
+BrO, IO); CR-CC(2,4)-CR-CC(2,3) is no substitute (NH, SH, OH: 0.05-0.1 eV off with
+the wrong sign; CCpy's CR-CC(3,4) is closed-shell only).  On a machine with enough
+memory the exact CCSDTQ runs as before.
 """
 from __future__ import annotations
 
@@ -133,6 +140,11 @@ OUT_OF_CORE_COPIES = 6
 # GPFS scratch, removed when the point ends.  OPENEA_DIIS_OUT_OF_CORE=0/1 forces
 # the choice (benchmark in-core vs scratch).
 DIIS_OUT_OF_CORE_MB = 10000
+# Resource limits of the quadruples decision; kept out of PostCCSDTStagePolicy because
+# the policy is part of every post-CC point signature (aTZ CCSDT points take days).
+Q_MEMORY_LIMIT_ENV = "OPENEA_Q_MEMORY_LIMIT_MB"
+SCRATCH_SHARE = 0.5
+Q_ALLOWANCE_MIN_EV = 0.02
 CC_SCRATCH_ROOT = Path(os.environ.get("OPENEA_CC_SCRATCH", f"/scratch/{os.environ.get('USER', 'openea')}/openea_cc"))
 
 
@@ -153,6 +165,23 @@ def diis_out_of_core(amplitude_mb: float) -> bool:
     if forced in ("0", "1"):
         return forced == "1"
     return DIIS_COPIES * amplitude_mb > DIIS_OUT_OF_CORE_MB
+
+
+def q_memory_limit_mb(policy: "PostCCSDTStagePolicy") -> int:
+    return int(os.environ.get(Q_MEMORY_LIMIT_ENV, policy.q_memory_limit_mb))
+
+
+def cc_scratch_need_mb(spec: Any, basis: str, method: str) -> float:
+    """Scratch for the DIIS file of an out-of-core point (amplitude and residual vectors)."""
+    one = _amplitude_mb(spec, basis, method)
+    return DIIS_COPIES * one if diis_out_of_core(one) else 0.0
+
+
+def scratch_free_mb() -> float:
+    path = CC_SCRATCH_ROOT
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return shutil.disk_usage(path).free / 1.0e6
 
 
 def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
@@ -298,16 +327,29 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     def need(basis, method):
         return max(cc_storage_mb(s, basis, method) for s in states.values())
 
+    limit_mb, free_mb = q_memory_limit_mb(policy), scratch_free_mb()
+
+    def affordable(basis, method):
+        # A completed point is only read; otherwise RAM and the DIIS scratch must fit.
+        if all(cached_point(s, basis, method, policy,
+                            str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json"))
+               for role, s in states.items()):
+            return True
+        return (need(basis, method) <= limit_mb
+                and sum(cc_scratch_need_mb(s, basis, method) for s in states.values()) <= SCRATCH_SHARE * free_mb)
+
     estimates = {b: need(b, "CCSDTQ") for b in policy.quadruples_bases}
     record["quadruples_storage_estimate_mb"] = estimates
-    q_basis = next((b for b in policy.quadruples_bases if estimates[b] <= policy.q_memory_limit_mb), None)
+    record["resource_limits"] = {"ram_limit_mb": limit_mb, "scratch_free_mb": free_mb,
+                                 "scratch_share": SCRATCH_SHARE}
+    q_basis = next((b for b in policy.quadruples_bases if affordable(b, "CCSDTQ")), None)
     run_q = q_basis is not None
     record["quadruples_basis"] = q_basis
-    t_bases = tuple(b for b in policy.triples_bases if need(b, "CCSDT") <= policy.q_memory_limit_mb)
+    t_bases = tuple(b for b in policy.triples_bases if affordable(b, "CCSDT"))
     record["triples_bases_affordable"] = list(t_bases)
     if not t_bases:
         return done(status="TRIPLES_NOT_AFFORDABLE", delta_post_ev=None, bound_ev=None,
-                    reason=f"CCSDT exceeds {policy.q_memory_limit_mb} MB in every triples basis")
+                    reason=f"CCSDT exceeds {limit_mb} MB RAM or the scratch share in every triples basis")
     tasks = [(basis, method) for basis in t_bases for method in ("CCSD(T)", "CCSDT")]
     if run_q:
         if q_basis not in t_bases:
@@ -345,10 +387,13 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
                else 0.5 * abs(t_central))
     record.update(delta_t_by_basis_ev=delta_t, delta_t_ev=t_central, delta_t_bound_ev=t_bound)
     if not run_q:
-        return done(status="QUADRUPLES_NOT_AFFORDABLE", delta_post_ev=None, bound_ev=None,
-                    reason=f"CCSDTQ storage {estimates} MB > {policy.q_memory_limit_mb} MB; "
-                           "triples alone are not applied (partial cancellation with quadruples)")
+        allowance = max(Q_ALLOWANCE_MIN_EV, abs(t_central))
+        return done(status="CLEARED_WITH_QUADRUPLES_ALLOWANCE", quadruples_computed=False,
+                    delta_q_ev=None, quadruples_allowance_ev=allowance,
+                    delta_post_ev=t_central, bound_ev=t_bound + allowance,
+                    reason=f"CCSDTQ storage {estimates} MB exceeds {limit_mb} MB RAM or the scratch share; "
+                           f"Delta_T applied, quadruples allowance {allowance:.4f} eV added to the bound")
     delta_q = ea(q_basis, "CCSDTQ") - ea(q_basis, "CCSDT")
     q_bound = policy.quadruples_relative_bound * abs(delta_q)
-    return done(status="CLEARED", delta_q_ev=delta_q, delta_q_bound_ev=q_bound,
+    return done(status="CLEARED", quadruples_computed=True, delta_q_ev=delta_q, delta_q_bound_ev=q_bound,
                 delta_post_ev=t_central + delta_q, bound_ev=t_bound + q_bound)

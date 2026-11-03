@@ -41,3 +41,10 @@ def test_pending_mr_competitors_need_the_mr_layer():
     assert res["outcome"] == "UNRESOLVED" and any("MR-only" in b for b in res["blocking"])
     res = resolve_final_verdict(electronic_ea=ea, cbs=CBS, adiabatic=ADI, mr_competitors=None)
     assert res["outcome"] == "UNRESOLVED" and any("MR layer not run" in b for b in res["blocking"])
+
+
+def test_quadruples_allowance_is_reported_as_a_warning():
+    adi = {**ADI, "post_ccsd_t_status": "CLEARED_WITH_QUADRUPLES_ALLOWANCE",
+           "post_ccsd_t_quadruples_allowance_ev": 0.027}
+    res = resolve_final_verdict(electronic_ea=EA, cbs=CBS, adiabatic=adi, mr_competitors=None)
+    assert res["outcome"] == "EA" and any("quadruples not computed" in w and "0.027" in w for w in res["warnings"])

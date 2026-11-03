@@ -25,10 +25,13 @@ def fake_point(spec, basis, method, policy, path):
     return {"role": spec.role, "basis": basis, "method": method, "status": "COMPLETED", "total_hartree": e}
 
 
-def run(tmp_path, monkeypatch, limit):
+def run(tmp_path, monkeypatch, limit, scratch_free_mb=1.0e9):
     monkeypatch.setattr(post_ccsd_t_stage, "cc_storage_mb",
                         lambda spec, basis, method: (50000.0 if basis == "aug-cc-pvdz" else 10000.0)
                         if method == "CCSDTQ" else 1000.0)
+    monkeypatch.setattr(post_ccsd_t_stage, "cc_scratch_need_mb",
+                        lambda spec, basis, method: 100000.0 if method == "CCSDTQ" else 0.0)
+    monkeypatch.setattr(post_ccsd_t_stage, "scratch_free_mb", lambda: scratch_free_mb)
     reqs = [request("N", 0, 1), request("A", -1, 0)]
     recs = {f"{j}-{i}": {"job_id": j, "request_id": f"{j}-{i}", "status": "COMPLETED", "r_angstrom": r,
                          "high_level_checkpoint_path": f"/hl/{j}{r}"} for j in "NA" for i, r in enumerate((0.9, 1.0))}
@@ -46,15 +49,30 @@ def test_triples_tz_central_and_quadruples_in_first_affordable_basis(tmp_path, m
     assert res["quadruples_basis"] == "cc-pvdz" and abs(res["delta_q_ev"] - 0.008) < 1e-9
 
 
-def test_no_affordable_quadruples_applies_nothing(tmp_path, monkeypatch):
+def test_unaffordable_quadruples_apply_triples_with_a_quadruples_allowance(tmp_path, monkeypatch):
     res = run(tmp_path, monkeypatch, limit=5000)
-    assert res["status"] == "QUADRUPLES_NOT_AFFORDABLE" and res["delta_post_ev"] is None
-    assert abs(res["delta_t_ev"] + 0.006) < 1e-9  # evidence only
+    assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE" and not res["quadruples_computed"]
+    assert abs(res["delta_post_ev"] + 0.006) < 1e-9  # Delta_T applied
+    allowance = post_ccsd_t_stage.Q_ALLOWANCE_MIN_EV  # |Delta_T| = 6 meV is below the floor
+    assert abs(res["quadruples_allowance_ev"] - allowance) < 1e-12
+    assert abs(res["bound_ev"] - (0.002 + allowance)) < 1e-9
     cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
            "ea_cbs_upper_ev": 1.01}
     nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
     out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, post_ccsd_t=res)
-    assert not out["includes_post_ccsd_t"] and out["ea0_ev"] == 1.0
+    assert out["includes_post_ccsd_t"] and abs(out["ea0_ev"] - 0.994) < 1e-9
+    assert abs(out["ea0_upper_ev"] - (1.01 - 0.006 + 0.002 + allowance)) < 1e-9
+    assert out["post_ccsd_t_quadruples_allowance_ev"] == res["quadruples_allowance_ev"]
+
+
+def test_quadruples_need_ram_and_scratch(tmp_path, monkeypatch):
+    # RAM fits, but the DIIS file needs more than half of the free scratch.
+    res = run(tmp_path, monkeypatch, limit=60000, scratch_free_mb=150000.0)
+    assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE"
+    # A larger machine: the environment raises the RAM limit, exact CCSDTQ runs.
+    monkeypatch.setenv(post_ccsd_t_stage.Q_MEMORY_LIMIT_ENV, "60000")
+    res = run(tmp_path, monkeypatch, limit=5000)
+    assert res["status"] == "CLEARED" and res["quadruples_computed"]
 
 
 def test_point_files_are_distinct_per_method():

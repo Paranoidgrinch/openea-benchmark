@@ -90,6 +90,9 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
         for flag, status_key, name in CORRECTION_FLAGS:
             if not adiabatic.get(flag):
                 blocking.append(f"{name} correction not included: {adiabatic.get(status_key)}")
+        if adiabatic.get("post_ccsd_t_quadruples_allowance_ev") is not None:
+            warnings.append("post-CCSD(T): connected quadruples not computed (CCSDTQ exceeds RAM/scratch); "
+                            f"+-{adiabatic['post_ccsd_t_quadruples_allowance_ev']:.3f} eV allowance in the interval")
 
     if blocking:
         return {"outcome": "UNRESOLVED", "blocking": blocking, "warnings": warnings}

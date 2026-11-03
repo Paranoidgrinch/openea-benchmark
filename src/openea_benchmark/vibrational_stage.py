@@ -518,7 +518,7 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     cv_ok = bool(core_valence) and core_valence.get("status") == "CORE_VALENCE_CLEARED"
     so_ok = bool(spin_orbit) and spin_orbit.get("status") == "CLEARED"
     sr_ok = bool(scalar_relativity) and scalar_relativity.get("status") == "SCALAR_RELATIVITY_CLEARED"
-    pc_ok = bool(post_ccsd_t) and post_ccsd_t.get("status") == "CLEARED"
+    pc_ok = bool(post_ccsd_t) and post_ccsd_t.get("status") in ("CLEARED", "CLEARED_WITH_QUADRUPLES_ALLOWANCE")
     missing = [name for name, ok in (("CV", cv_ok), ("SR", sr_ok), ("SOC", so_ok), ("POST_CCSD_T", pc_ok))
                if not ok]
     record: dict[str, Any] = {
@@ -575,5 +575,7 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
                 delta_so_ev=dso if so_ok else None, delta_so_bound_ev=sob if so_ok else None,
                 delta_sr_ev=dsr if sr_ok else None, delta_sr_bound_ev=srb if sr_ok else None,
                 delta_post_ccsd_t_ev=dpc if pc_ok else None, delta_post_ccsd_t_bound_ev=pcb if pc_ok else None,
+                post_ccsd_t_quadruples_allowance_ev=(post_ccsd_t.get("quadruples_allowance_ev")
+                                                     if pc_ok else None),
                 anion_vibrational_binding=vib, cbs_status=cbs.get("status"),
                 multireference_screening=cbs.get("multireference_screening"))
