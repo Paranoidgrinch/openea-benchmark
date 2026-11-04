@@ -67,6 +67,9 @@ CARDINAL_LETTER = {2: "d", 3: "t", 4: "q", 5: "5", 6: "6"}
 TIGHT_D_ELEMENTS = frozenset({"Al", "Si", "P", "S", "Cl", "Ar"})
 # Superset-basis variational check (d-aug vs aug at one cardinal): projection noise is ~1e-8 Eh.
 SUBSET_BASIS_SCF_TOLERANCE_HARTREE = 1.0e-6
+# The CBS model-sensitivity bound is part of the interval half-width; above the 5 meV
+# target it widens the interval instead of blocking, up to this cap.
+CBS_MODEL_BOUND_CAP_EV = 0.02
 
 
 @dataclass(frozen=True)
@@ -460,6 +463,9 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     mr = {role: s.get("mr_diagnostic") for role, s in selected.items()}
     mr_exceeded = sorted(f"{role}:{name}" for role, d in mr.items() if d for name in d["exceeded"])
     mr_missing = sorted(role for role, d in mr.items() if not (d and d["available"]))
+    model_bound = cbs.get("cbs_model_sensitivity_bound_ev")
+    model_widened = (cbs["status"] != "CLEARED" and model_bound is not None
+                     and model_bound <= CBS_MODEL_BOUND_CAP_EV)
     if not order_ok:
         status = "UNRESOLVED_STATE_ORDER_AT_CBS"
     elif binding == "UNBOUND":
@@ -467,8 +473,8 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     elif binding == "UNDETERMINED":
         status = "NEED_MORE_EVIDENCE_BINDING"
     else:
-        status = cbs["status"]
-    record.update(
+        status = "CLEARED" if model_widened else cbs["status"]
+    record.update(cbs_model_bound_above_target_in_interval=model_widened,
         status=status, cbs=cbs, cbs_model_status=cbs["status"],
         ea_cbs_ev=ea_cbs if binding != "UNBOUND" else None, ea_cbs_raw_ev=ea_cbs,
         ea_cbs_lower_ev=lower, ea_cbs_upper_ev=upper,

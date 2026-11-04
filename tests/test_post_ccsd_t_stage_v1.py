@@ -182,3 +182,15 @@ def test_reference_orbitals_are_handed_to_ccpy_in_occupation_order():
     assert list(ordered.mo_occ[:6]) == [2, 2, 2, 1, 1, 0]
     driver = Driver.from_pyscf(ordered, nfrozen=1)
     assert abs(driver.system.reference_energy - energy) < 1e-6
+
+
+def test_no_affordable_triples_gives_a_post_cc_allowance(tmp_path, monkeypatch):
+    res = run(tmp_path, monkeypatch, limit=500)  # even CCSDT (1000 MB) does not fit
+    assert res["status"] == "CLEARED_WITH_POST_CC_ALLOWANCE" and res["delta_post_ev"] == 0.0
+    assert res["bound_ev"] == post_ccsd_t_stage.POST_CC_ALLOWANCE_EV
+    cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
+           "ea_cbs_upper_ev": 1.01}
+    nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
+    out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, post_ccsd_t=res)
+    assert out["includes_post_ccsd_t"] and out["post_ccsd_t_triples_computed"] is False
+    assert abs(out["ea0_upper_ev"] - (1.01 + post_ccsd_t_stage.POST_CC_ALLOWANCE_EV)) < 1e-12

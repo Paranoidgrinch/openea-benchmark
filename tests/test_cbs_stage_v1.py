@@ -341,3 +341,17 @@ def test_tied_seeds_are_chosen_independently_of_record_order(tmp_path):
                       output_dir=tmp_path / out, point_backend=recording)
     first, second = seen[:len(seen) // 2], seen[len(seen) // 2:]
     assert first == second and all(path.endswith("seed00") for _, _, path in first if path.startswith("/hl/"))
+
+
+def test_cbs_model_bound_above_target_widens_instead_of_blocking(tmp_path, monkeypatch):
+    from openea_benchmark import cbs_stage
+    real = cbs_stage.resolve_cbs
+
+    def loose(**kw):
+        from dataclasses import replace as dc_replace
+        res = real(**kw)
+        return dc_replace(res, status=type(res.status)("NEED_MORE_EVIDENCE"))
+    monkeypatch.setattr(cbs_stage, "resolve_cbs", loose)
+    res = run(tmp_path, 10.0)
+    assert res["cbs"]["status"] == "NEED_MORE_EVIDENCE"
+    assert res["status"] == "CLEARED" and res["cbs_model_bound_above_target_in_interval"]

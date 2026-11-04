@@ -145,6 +145,9 @@ DIIS_OUT_OF_CORE_MB = 10000
 Q_MEMORY_LIMIT_ENV = "OPENEA_Q_MEMORY_LIMIT_MB"
 SCRATCH_SHARE = 0.5
 Q_ALLOWANCE_MIN_EV = 0.02
+# No triples basis fits either: no post-CCSD(T) correction, this allowance instead
+# (verify_v1 |Delta_T| + |Delta_Q| <= 0.042 eV: IO 0.041, BrO 0.032, CuO aDZ 0.027).
+POST_CC_ALLOWANCE_EV = 0.05
 CC_SCRATCH_ROOT = Path(os.environ.get("OPENEA_CC_SCRATCH", f"/scratch/{os.environ.get('USER', 'openea')}/openea_cc"))
 
 
@@ -348,8 +351,10 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     t_bases = tuple(b for b in policy.triples_bases if affordable(b, "CCSDT"))
     record["triples_bases_affordable"] = list(t_bases)
     if not t_bases:
-        return done(status="TRIPLES_NOT_AFFORDABLE", delta_post_ev=None, bound_ev=None,
-                    reason=f"CCSDT exceeds {limit_mb} MB RAM or the scratch share in every triples basis")
+        return done(status="CLEARED_WITH_POST_CC_ALLOWANCE", quadruples_computed=False, triples_computed=False,
+                    delta_post_ev=0.0, bound_ev=POST_CC_ALLOWANCE_EV, post_cc_allowance_ev=POST_CC_ALLOWANCE_EV,
+                    reason=f"CCSDT exceeds {limit_mb} MB RAM or the scratch share in every triples basis; "
+                           f"no correction, allowance {POST_CC_ALLOWANCE_EV} eV in the bound")
     tasks = [(basis, method) for basis in t_bases for method in ("CCSD(T)", "CCSDT")]
     if run_q:
         if q_basis not in t_bases:
@@ -389,7 +394,7 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     if not run_q:
         allowance = max(Q_ALLOWANCE_MIN_EV, abs(t_central))
         return done(status="CLEARED_WITH_QUADRUPLES_ALLOWANCE", quadruples_computed=False,
-                    delta_q_ev=None, quadruples_allowance_ev=allowance,
+                    delta_q_ev=None, quadruples_allowance_ev=allowance, post_cc_allowance_ev=allowance,
                     delta_post_ev=t_central, bound_ev=t_bound + allowance,
                     reason=f"CCSDTQ storage {estimates} MB exceeds {limit_mb} MB RAM or the scratch share; "
                            f"Delta_T applied, quadruples allowance {allowance:.4f} eV added to the bound")
