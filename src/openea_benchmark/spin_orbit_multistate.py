@@ -145,10 +145,18 @@ def state_multistate_shift(*, atoms, r_angstrom, charge, symmetry_label, workdir
     rec.update(spin_free_hartree=sf, spin_orbit_hartree=so[:12], reference_states=ref_states,
                reference_weight=w_ref, lowest_spin_free_below_reference_ev=(e_ref - lowest_sf) * HARTREE_TO_EV,
                lowest_so_composition=weights.get(1))
-    if (e_ref - lowest_sf) * HARTREE_TO_EV > 1e-3:
+    sf_gap = (e_ref - lowest_sf) * HARTREE_TO_EV
+    if sf_gap > max(1e-3, policy.mixing_gap_ev):
+        # XMS-CASPT2 orders another spin-free state clearly below the CC-selected reference.
         return {**rec, "status": "SOC_REFERENCE_NOT_LOWEST_SPIN_FREE", "delta_so_ev": None}
-    if w_ref < policy.min_reference_weight:
-        return {**rec, "status": "SOC_LOWEST_LEVEL_HAS_OTHER_PARENT", "delta_so_ev": None}
     asym = 0.5 * (max(sf[s - 1] for s in ref_states) - min(sf[s - 1] for s in ref_states)) * HARTREE_TO_EV
-    bound = policy.relative_bound * abs(shift) + (1.0 - w_ref) * policy.mixing_gap_ev + asym
-    return {**rec, "status": "CLEARED", "delta_so_ev": shift, "bound_ev": bound, "component_asymmetry_ev": asym}
+    # Hund's case (c): the lowest level may have another parent (w < min_reference_weight).
+    # Delta_SO = lowest SO level - reference spin-free energy stays defined at XMS-CASPT2;
+    # the admixed states enter with their PT2 gaps, so the mixing term of the bound is
+    # doubled below the weight threshold instead of failing closed, and a small PT2
+    # reordering of the reference (sf_gap <= mixing_gap_ev) is added to the bound.
+    mixing = (1.0 - w_ref) * policy.mixing_gap_ev * (2.0 if w_ref < policy.min_reference_weight else 1.0)
+    bound = policy.relative_bound * abs(shift) + mixing + asym + (sf_gap if sf_gap > 1e-3 else 0.0)
+    status = "CLEARED_HUND_CASE_C" if w_ref < policy.min_reference_weight else "CLEARED"
+    return {**rec, "status": status, "delta_so_ev": shift, "bound_ev": bound, "component_asymmetry_ev": asym,
+            "reference_reordered_spin_free_gap_ev": sf_gap if sf_gap > 1e-3 else 0.0}

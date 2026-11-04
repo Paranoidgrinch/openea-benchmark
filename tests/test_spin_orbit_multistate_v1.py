@@ -42,3 +42,26 @@ def test_input_has_one_jobiph_per_block():
                             [(2, 2, 4), (2, 1, 4), (4, 2, 4), (4, 1, 1)], MultistateSpinOrbitPolicy())
     assert text.count("&CASPT2") == 4 and "XMultistate" in text and "MultiState" in text
     assert "Nr of JobIph\n4 4 4 4 1" in text and "EJob" in text and ">>> COPY $Project.JobMix JOB004" in text
+
+
+def test_hund_case_c_widens_the_bound_instead_of_failing(monkeypatch, tmp_path):
+    import openea_benchmark.spin_orbit_multistate as ms
+    # 2Pi reference (roots 1, 2 of its block); lowest SO level only 40 % reference.
+    def fake_molcas(workdir, inp, policy, name):
+        return "text"
+    def blocks_sf(n_per, n_blocks, ref):
+        e = [-1.0 + 0.01 * k for k in range(n_per * n_blocks)]
+        return e
+    monkeypatch.setattr(ms, "_run_molcas", fake_molcas)
+    monkeypatch.setattr(ms, "full_valence_space", lambda atoms, charge: {"inactive": (5, 2, 2, 0), "ras2": (2, 1, 1, 0), "active_electrons": 3})
+    monkeypatch.setattr(ms, "spin_blocks", lambda mult, ne, no: [mult])
+    sf = [-1.0, -1.0] + [-0.9 + 0.01 * k for k in range(10)]
+    monkeypatch.setattr(ms, "parse_rassi", lambda text: (sf, [-1.02, -1.02, -0.99]))
+    monkeypatch.setattr(ms, "reference_roots", lambda e, lam, tol: [0, 1])
+    monkeypatch.setattr(ms, "parse_so_weights", lambda text: {1: [(1, 0.0, 0.2), (2, 0.0, 0.2), (3, 0.0, 0.6)]})
+    rec = ms.state_multistate_shift(atoms=("Bi", "Bi"), r_angstrom=2.66, charge=0, symmetry_label="2Pi",
+                                    workdir=tmp_path)
+    p = ms.MultistateSpinOrbitPolicy()
+    assert rec["status"] == "CLEARED_HUND_CASE_C" and rec["delta_so_ev"] is not None
+    expected = p.relative_bound * abs(rec["delta_so_ev"]) + 0.6 * p.mixing_gap_ev * 2.0
+    assert abs(rec["bound_ev"] - expected) < 1e-9
