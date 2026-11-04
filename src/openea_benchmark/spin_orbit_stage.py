@@ -43,7 +43,8 @@ from typing import Any, Mapping, Sequence
 
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 
-LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3}
+LAMBDA_NAMES = ("Sigma", "Pi", "Delta", "Phi", "Gamma", "H", "I", "K")
+LAMBDA_OF = {name: lam for lam, name in enumerate(LAMBDA_NAMES)}
 # D2h irreps (molecular axis z, PySCF convention) collapsed onto C2v.
 D2H_TO_C2V = {"Ag": "A1", "B1u": "A1", "B1g": "A2", "Au": "A2",
               "B3u": "B1", "B2g": "B1", "B2u": "B2", "B3g": "B2"}
@@ -66,7 +67,8 @@ class SpinOrbitStagePolicy:
 
 def parse_term_symbol(label: str) -> tuple[int, int] | None:
     """(2S+1, Lambda) from labels like '2Pi', '3Sigmag-', '2Pig'."""
-    m = re.fullmatch(r"(\d+)(Sigma|Pi|Delta|Phi)[gu]?[+-]?", label or "")
+    # Every Lambda (a selected Gamma state was SOC_TERM_SYMBOL_UNKNOWN, i.e. blocked).
+    m = re.fullmatch(r"(\d+)(" + "|".join(LAMBDA_NAMES) + r")[gu]?[+-]?", label or "")
     return None if m is None else (int(m.group(1)), LAMBDA_OF[m.group(2)])
 
 

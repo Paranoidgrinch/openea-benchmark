@@ -48,3 +48,19 @@ def test_quadruples_allowance_is_reported_as_a_warning():
            "post_ccsd_t_quadruples_allowance_ev": 0.027}
     res = resolve_final_verdict(electronic_ea=EA, cbs=CBS, adiabatic=adi, mr_competitors=None)
     assert res["outcome"] == "EA" and any("quadruples not computed" in w and "0.027" in w for w in res["warnings"])
+
+
+def test_same_state_twins_keep_the_label_of_their_determinant():
+    from openea_benchmark.electronic_ea_stage import _competition
+    from openea_benchmark.cbs_stage import _states_to_compute, CBSStagePolicy
+    def cand(job, e, match):
+        return {"job_id": job, "charge": 0, "spin_2s": 1, "equilibrium_status": "RESOLVED", "branch_of": None,
+                "energy_central_hartree": e, "energy_lower_hartree": e - 1e-5, "energy_upper_hartree": e + 1e-5,
+                "r_central_angstrom": 1.8324, "label_matches_determinant": match}
+    delta = cand("LaO__q+0__2S1__q+0__2Delta__c68", -8565.94005160, False)  # converged onto 2Sigma+
+    sigma = cand("LaO__q+0__2S1__q+0__2Sigma+__c68", -8565.94005154, True)
+    comp = _competition("neutral", [delta, sigma], 0.3)
+    assert comp["status"] == "CLEARED" and comp["selected_job_id"] == sigma["job_id"]
+    ea = {"selected_neutral_job": sigma["job_id"], "selected_anion_job": "A",
+          "candidates": {"neutral": [delta, sigma], "anion": [{**cand("A", -8565.97, True), "charge": -1}]}}
+    assert [s["job_id"] for s in _states_to_compute(ea, CBSStagePolicy()) if s["role"] == "neutral"] == [sigma["job_id"]]

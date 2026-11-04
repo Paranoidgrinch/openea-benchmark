@@ -81,3 +81,8 @@ def test_assembly_adds_soc_and_widens():
     assert res["includes_soc"] and abs(res["ea0_ev"] - 0.992) < 1e-12
     assert abs(res["ea0_upper_ev"] - (1.01 - 0.008 + 0.0024)) < 1e-12
     assert res["verdict"] == "NOT_ISSUED_NO_CV_SR_POST_CCSD_T_LAYERS"
+
+
+def test_term_symbols_of_every_lambda_are_parsed():
+    from openea_benchmark.spin_orbit_stage import parse_term_symbol
+    assert parse_term_symbol("2Gamma") == (2, 4) and parse_term_symbol("3Hu") == (3, 5)

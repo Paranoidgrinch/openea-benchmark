@@ -387,6 +387,31 @@ def same_resolved_state(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
             and abs(a["r_central_angstrom"] - b["r_central_angstrom"]) < DUPLICATE_STATE_R_ANGSTROM)
 
 
+def determinant_label(results: Sequence[Stage3PointResult], r_angstrom: float, point_group: str | None,
+                      like_nuclei: bool) -> str | None:
+    """Lambda-S label of the completed high-level determinant nearest ``r_angstrom``
+    (from its checkpoint, by <Lz^2>); None when unavailable or Lambda-mixed."""
+    try:
+        from pyscf import lib
+        from pyscf.scf import chkfile
+        from .symmetry_states import label_of_determinant
+        done = [r for r in results if r.status is PointExecutionStatus.COMPLETED and r.high_level_checkpoint_path]
+        best = min(done, key=lambda r: abs(float(r.r_angstrom) - float(r_angstrom)))
+        mol = lib.chkfile.load_mol(best.high_level_checkpoint_path)
+        scf = chkfile.load(best.high_level_checkpoint_path, "scf")
+        mol.symmetry = point_group or False
+        mol.build(False, False)
+        sym = label_of_determinant(mol, scf["mo_coeff"], scf["mo_occ"], like_nuclei=like_nuclei)
+        return None if sym is None else sym.label
+    except Exception:  # noqa: BLE001 - no label evidence, nothing is changed
+        return None
+
+
+def job_label(job_id: str) -> str:
+    """'LaO__q+0__2S1__q+0__2Delta__c681990aef4b' -> '2Delta'."""
+    return job_id.split("__")[4]
+
+
 def resolved_branch_sibling(e: Mapping[str, Any], resolved: Sequence[Mapping[str, Any]],
                             lowest: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """The resolved other reference branch of ``e``'s state if it lies cleanly above
@@ -408,6 +433,12 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
         return {"status": "UNRESOLVED", "selected_job_id": None,
                 "reason": f"no {label} candidate has a resolved equilibrium interval"}
     lowest = min(resolved, key=lambda e: e["energy_central_hartree"])
+    if lowest.get("label_matches_determinant") is False:
+        # The same state reached by two symmetry blocks keeps the label its high-level
+        # determinant carries (verify_v1 LaO: the 2Delta block converged onto X2Sigma+,
+        # 6e-8 Eh below the 2Sigma+ job, and was selected under the wrong label).
+        lowest = next((e for e in resolved if e is not lowest and same_resolved_state(e, lowest)
+                       and e.get("label_matches_determinant")), lowest)
     upper = lowest["energy_upper_hartree"]
     blocking, excluded, siblings, multireference_only, competitor_siblings = [], [], [], [], []
     for e in entries:
@@ -692,6 +723,17 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
     with ThreadPoolExecutor(max_workers=max(1, min(len(work), pool_workers()))) as executor:
         for _ in executor.map(lambda item: refine(*item), work):
             pass
+
+    # Label check only where it decides something: same state reached by two blocks.
+    for items in entries.values():
+        for e in items:
+            twins = [o for o in items if o is not e and same_resolved_state(o, e)]
+            if twins and e["job_id"] in loops:
+                det = determinant_label(loops[e["job_id"]].results, e["r_central_angstrom"],
+                                        by_job[e["job_id"]][0].point_group, atoms[0] == atoms[1])
+                if det is not None:
+                    e["determinant_label"] = det
+                    e["label_matches_determinant"] = det == job_label(e["job_id"])
 
     if loops_out is not None:
         loops_out.update(loops)

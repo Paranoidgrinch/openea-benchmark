@@ -59,7 +59,7 @@ from .attachment.component_resolved_cbs import (
     ComponentPair,
     resolve_cbs,
 )
-from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner
+from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner, same_resolved_state
 from .point_pool import run_parallel
 
 MR_DIAGNOSTIC_LABEL = "MRDIAG_STAGE3_BASIS"
@@ -185,6 +185,8 @@ def _states_to_compute(ea: Mapping[str, Any], policy: CBSStagePolicy) -> list[di
                 continue
             if sel.get("branch_of") and c.get("branch_of") == sel["branch_of"]:
                 continue  # other reference branch of the same state, not a competitor
+            if same_resolved_state(c, sel):
+                continue  # same state reached by two symmetry blocks (verify_v1 LaO 2Sigma+/2Delta)
             gap = (c["energy_central_hartree"] - sel["energy_central_hartree"]) * HARTREE_TO_EV
             if gap <= policy.competitor_window_ev:
                 states.append({"role": label, "job_id": c["job_id"], "r": c["r_central_angstrom"],
