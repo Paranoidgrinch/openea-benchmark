@@ -192,3 +192,18 @@ def test_f_block_ground_configurations():
     configs = {el: {s.configuration.split()[-1] if el != "Th" else " ".join(s.configuration.split()[-2:])
                     for s in atomic_states(el, 0)} for el in ("La", "Th")}
     assert "5d1" in configs["La"] and "7s2 6d2" in configs["Th"]
+
+
+def test_light_elements_without_nr_series_take_the_x2c_route():
+    from openea_benchmark.heavy_elements import ROUTE_ALL_ELECTRON, ROUTE_X2C, element_route, requires_x2c, routed
+    assert element_route("K")["route"] == ROUTE_X2C and element_route("Ca")["route"] == ROUTE_X2C
+    assert requires_x2c(("K", "H")) and routed("Ca")
+    for el in ("H", "Li", "Na", "Mg", "O", "Sc", "Fe", "Cu", "Br"):
+        assert element_route(el)["route"] == ROUTE_ALL_ELECTRON and not routed(el)
+
+
+def test_mr_active_space_of_x2c_route_elements_keeps_every_electron():
+    from openea_benchmark.heavy_elements import pyscf_valence_space
+    cs = pyscf_valence_space(("Cs", "O"), 0, "def2-tzvppd")  # def2 ECP46 is not used on the X2C route
+    assert cs is not None and cs["active_electrons"] == 7
+    assert pyscf_valence_space(("Pb", "O"), 0, "def2-tzvppd")["active_electrons"] == 10  # PP route keeps its ECP

@@ -5,7 +5,10 @@ Every rule here is per element and molecule-independent.
 Route (``element_route``):
 
 * ALL_ELECTRON - Z <= 36, the existing all-electron chain (frozen core, aug-cc-pVXZ,
-  CV in aug-cc-pwCVXZ, scalar relativity as sfX2C(DK basis) - NR).
+  CV in aug-cc-pwCVXZ, scalar relativity as sfX2C(DK basis) - NR).  A light element
+  without the nonrelativistic aug-cc-pVDZ/TZ series (K, Ca: no aug-, DK or pwCV sets)
+  takes the X2C route below when its X2C series exists.  Code that must know whether
+  an element leaves the plain all-electron chain asks ``routed``, not Z > 36.
 * PSEUDOPOTENTIAL - Z > 36 when the correlation-consistent PP series
   aug-cc-pV{T,Q,5}Z-PP loads for the element (PySCF library, else Basis Set
   Exchange).  The ECP replaces the inner core and carries scalar relativity; the
@@ -37,6 +40,8 @@ F_BLOCK = frozenset(range(57, 72)) | frozenset(range(89, 104))
 X2C_ROUTE_SERIES = "cc-pV{x}Z-X2C"
 X2C_ROUTE_CARDINALS = (2, 3, 4)
 PP_ROUTE_SERIES = "aug-cc-pV{x}Z-PP"
+# Nonrelativistic series a light element needs for the plain all-electron chain.
+NR_ROUTE_SERIES = ("aug-cc-pVDZ", "aug-cc-pVTZ")
 PP_ROUTE_CARDINALS = (3, 4, 5)
 CARDINAL_LETTER = {2: "D", 3: "T", 4: "Q", 5: "5", 6: "6"}
 
@@ -230,7 +235,12 @@ def element_route(element: str) -> dict:
     """{"route", "reason", "ecp_electrons"} for one element (rules in the module docstring)."""
     z = _z(element)
     if z <= 36:
-        return {"route": ROUTE_ALL_ELECTRON, "reason": "Z<=36", "ecp_electrons": 0}
+        if all(load_basis(name, element) is not None for name in NR_ROUTE_SERIES):
+            return {"route": ROUTE_ALL_ELECTRON, "reason": "Z<=36", "ecp_electrons": 0}
+        x2c = [load_basis(X2C_ROUTE_SERIES.format(x=CARDINAL_LETTER[x]), element) for x in X2C_ROUTE_CARDINALS]
+        if all(b is not None and b.ecp is None for b in x2c):
+            return {"route": ROUTE_X2C, "reason": "Z<=36_NO_NR_SERIES_X2C_SERIES_AVAILABLE", "ecp_electrons": 0}
+        return {"route": None, "reason": "Z<=36_NO_NR_OR_X2C_SERIES", "ecp_electrons": None}
     if valence_core_orbitals(z) is None:
         return {"route": None, "reason": "BEYOND_LR", "ecp_electrons": None}
     loaded = [load_basis(PP_ROUTE_SERIES.format(x=CARDINAL_LETTER[x]), element) for x in PP_ROUTE_CARDINALS]
@@ -319,7 +329,7 @@ def mole_basis_kwargs(atoms: Sequence[str], basis: Any) -> dict:
     name or a missing basis raise ValueError (fail closed: PySCF would otherwise
     silently treat an ECP basis as all-electron).
     """
-    heavy = [el for el in dict.fromkeys(atoms) if _z(el) > 36]
+    heavy = [el for el in dict.fromkeys(atoms) if routed(el)]
     if not heavy:
         return {"basis": basis}
     per_element = dict(basis) if isinstance(basis, dict) else {el: basis for el in dict.fromkeys(atoms)}
@@ -424,7 +434,10 @@ def pyscf_valence_space(atoms: Sequence[str], charge: int, basis: str) -> dict |
     """``full_valence_space`` for a PySCF molecule in the named ``basis`` (with its ECPs)."""
     ecp = {}
     for el in dict.fromkeys(atoms):
-        if _z(el) > 36:
+        # The core the molecule is actually built with (``mole_basis_kwargs``): X2C-route
+        # elements get the all-electron X2C member of the family, not its def2 ECP
+        # (Cs, Ba, La: def2 ECP46 was counted although the calculation keeps every electron).
+        if routed(el) and element_route(el)["route"] != ROUTE_X2C:
             loaded = load_basis(basis, el)
             if loaded is None:
                 return None
@@ -436,7 +449,12 @@ def pyscf_valence_space(atoms: Sequence[str], charge: int, basis: str) -> dict |
 
 def requires_x2c(atoms: Sequence[str]) -> bool:
     """True when an X2C-route element is present: the whole molecule then uses sfX2C."""
-    return any(_z(el) > 36 and element_route(el)["route"] == ROUTE_X2C for el in dict.fromkeys(atoms))
+    return any(element_route(el)["route"] == ROUTE_X2C for el in dict.fromkeys(atoms))
+
+
+def routed(element: str) -> bool:
+    """True when the element leaves the plain all-electron chain (PP or X2C route)."""
+    return element_route(element)["route"] != ROUTE_ALL_ELECTRON
 
 
 MODEL_HAMILTONIAN_ENV = "OPENEA_MODEL_HAMILTONIAN"

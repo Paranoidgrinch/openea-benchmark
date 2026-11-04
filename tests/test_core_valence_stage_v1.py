@@ -14,7 +14,8 @@ def test_basis_rule_per_element():
     assert cv_element_series("H", (3, 4))[3][1].startswith("aug-cc-pVTZ")
     assert cv_element_series("O", (3, 4))[4][1].startswith("aug-cc-pwCVQZ")
     assert cv_element_series("Mg", (3, 4))[3][1].startswith("aug-cc-pCVTZ")  # no pwCV for Mg
-    assert cv_element_series("K", (3, 4)) is None
+    # K has no nonrelativistic CV set; it takes the X2C route and its pwCV-X2C series.
+    assert cv_element_series("K", (3, 4))[3][0] == "aug-cc-pwCVTZ-X2C"
 
 
 def test_basis_specs_share_one_family_and_stop_at_common_cardinal():
@@ -23,7 +24,8 @@ def test_basis_specs_share_one_family_and_stop_at_common_cardinal():
     assert len({s.family_id for s in specs}) == 1 and "aug-cc-pwCVXZ" in specs[0].family_id
     specs, _ = basis_specs_for(("Li", "H"), CoreValenceStagePolicy())  # aug-cc-pCV5Z missing for Li
     assert [s.cardinal for s in specs] == [3, 4]
-    assert basis_specs_for(("K", "H"), CoreValenceStagePolicy()) is None
+    specs, _ = basis_specs_for(("K", "H"), CoreValenceStagePolicy())  # X2C series: D, T, Q only
+    assert [s.cardinal for s in specs] == [3, 4] and "X2C" in specs[0].family_id
 
 
 CV_SHIFT = {3: 0.0000, 4: 0.0040, 5: 0.0045}  # eV, AE minus FC EA per cardinal
