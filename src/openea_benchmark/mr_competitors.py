@@ -51,8 +51,14 @@ from .mr_nuclear_curve import C2V_IRREPS
 # 6: g/u from the CI vector when active orbitals mix g and u
 ROOT_CLASSIFICATION = 6
 EDGE_TOLERANCE_HARTREE = 1.0e-6
-LAMBDA_OF = {"Sigma": 0, "Pi": 1, "Delta": 2, "Phi": 3, "Gamma": 4}
-LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2", "Pi": "B1", "Delta": "A2", "Phi": "B1", "Gamma": "A2"}
+# Lambda = 0, 1, 2, ...: Sigma, Pi, Delta, Phi, Gamma, H, I, K (verify_v1 CuO: excited
+# asymptotes give 2H, 2I, 4H, 4I, 6H, which were left unclassified).  Odd Lambda lies in
+# B1 (and B2), even Lambda > 0 in A1 and A2 (the A2 component is used).
+LAMBDA_NAMES = ("Sigma", "Pi", "Delta", "Phi", "Gamma", "H", "I", "K")
+LAMBDA_OF = {name: lam for lam, name in enumerate(LAMBDA_NAMES)}
+LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2",
+                **{name: ("B1" if lam % 2 else "A2") for lam, name in enumerate(LAMBDA_NAMES) if lam}}
+_LAMBDA_RE = "(" + "|".join(LAMBDA_NAMES) + ")"
 
 
 @dataclass(frozen=True)
@@ -81,14 +87,14 @@ class MRCompetitorPolicy:
 
 def candidate_lambda(label: str) -> int | None:
     import re
-    m = re.search(r"(Sigma|Pi|Delta|Phi|Gamma)", label)
+    m = re.search(_LAMBDA_RE, label)
     return None if m is None else LAMBDA_OF[m.group(1)]
 
 
 def candidate_parity(label: str) -> int | None:
     """+1 for g, -1 for u, None for unlike atoms."""
     import re
-    m = re.search(r"(Sigma|Pi|Delta|Phi|Gamma)([gu])", label)
+    m = re.search(_LAMBDA_RE + "([gu])", label)
     return None if m is None else (1 if m.group(2) == "g" else -1)
 
 
@@ -181,7 +187,7 @@ def root_lambda(lz2: float, tolerance: float, irrep: str | None = None) -> int |
 def candidate_block(label: str) -> tuple[int, int, str] | None:
     """'q=-1 2Deltag' -> (charge, 2S+1, C2v irrep)."""
     import re
-    m = re.fullmatch(r"q=(-?\d+) (\d+)(Sigma|Pi|Delta|Phi|Gamma)[gu]?([+-]?)", label.strip())
+    m = re.fullmatch(r"q=(-?\d+) (\d+)" + _LAMBDA_RE + r"[gu]?([+-]?)", label.strip())
     if m is None:
         return None
     lam = m.group(3) + (m.group(4) if m.group(3) == "Sigma" else "")
@@ -191,7 +197,7 @@ def candidate_block(label: str) -> tuple[int, int, str] | None:
 
 def selected_block(label: str) -> tuple[int, str] | None:
     import re
-    m = re.fullmatch(r"(\d+)(Sigma|Pi|Delta|Phi|Gamma)[gu]?([+-]?)", label)
+    m = re.fullmatch(r"(\d+)" + _LAMBDA_RE + r"[gu]?([+-]?)", label)
     if m is None:
         return None
     lam = m.group(2) + (m.group(3) if m.group(2) == "Sigma" else "")

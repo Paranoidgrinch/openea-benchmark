@@ -201,3 +201,10 @@ def test_divergent_nevpt2_root_is_bounded_from_its_casci_energy():
     assert rec["energies_hartree"] == [low["e_hartree"], high["e_hartree"]] and rec["nevpt2_diverged_roots"] == 1
     bound_nevpt2_divergence(rec, -0.334)  # idempotent: the raw correction is kept
     assert abs(rec["roots"][1]["e_hartree"] - (-394.6)) < 1e-9 and rec["roots"][1]["nevpt2_raw_hartree"] == -36.41
+
+
+def test_high_lambda_labels_are_classified():
+    # verify_v1 CuO: excited asymptotes give H (Lambda 5) and I (Lambda 6) states.
+    assert candidate_block("q=0 2H") == (0, 2, "B1")
+    assert candidate_block("q=0 4I") == (0, 4, "A2")
+    assert candidate_block("q=0 2Ig") == (0, 2, "A2") and candidate_parity("q=0 2Hu") == -1
