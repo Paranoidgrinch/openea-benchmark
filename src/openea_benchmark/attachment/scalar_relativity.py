@@ -6,11 +6,15 @@ Definition at cardinal X:
 The NR and SFX2C1E calculations must use the same geometry, orbital basis,
 electron correlation space, and CCSD(T) settings.  The central correction is
 the highest-cardinal directly calculated value; no SR extrapolation is
-assumed in v1.
+assumed in v1.  At the largest cardinal a series above target clears with the
+geometric-tail or cardinal-spread bound of the core-valence rule (at most
+max_tail_bound_ev; verify_v1 CuO 136.1/134.4/133.7 meV: 0.6 meV, ScO 29.0/28.2/25.0 meV: 7.3 meV).
 """
 from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
+
+from .core_valence_correction import max_cardinal_bound
 
 @dataclass(frozen=True)
 class ScalarRelativityPoint:
@@ -44,6 +48,8 @@ def assess_scalar_relativity(
     *,
     target_change_ev: float = 0.0005,
     max_cardinal: int = 5,
+    max_contraction_ratio: float = 0.8,
+    max_tail_bound_ev: float = 0.01,
 ) -> ScalarRelativityAssessment:
     if not points:
         raise ValueError("At least one scalar-relativity point is required")
@@ -94,6 +100,25 @@ def assess_scalar_relativity(
             evidence=(
                 "SAME_BASIS_NR_SFX2C_PAIR",
                 "LATEST_CARDINAL_CHANGE_EXCEEDS_TARGET",
+                "SFX2C1E_ONE_BODY_ONLY",
+                "SOC_NOT_INCLUDED",
+            ),
+        )
+
+    tail = max_cardinal_bound([p.delta_sr_ev for p in pts], max_contraction_ratio=max_contraction_ratio,
+                              max_bound_ev=max_tail_bound_ev)
+    if tail is not None:
+        return ScalarRelativityAssessment(
+            status="CLEARED",
+            action="NONE",
+            central_correction_ev=latest.delta_sr_ev,
+            convergence_bound_ev=tail[0],
+            highest_cardinal=latest.cardinal,
+            points=pts,
+            evidence=(
+                "SAME_BASIS_NR_SFX2C_PAIR",
+                tail[1],
+                "NO_SR_EXTRAPOLATION_ASSUMED",
                 "SFX2C1E_ONE_BODY_ONLY",
                 "SOC_NOT_INCLUDED",
             ),

@@ -53,3 +53,16 @@ def test_nr_member_uses_the_nonrelativistic_partner_basis():
                             irrep_nelec=None, reference_branch=None)
     assert _request_for(state, spec, ScalarRelativityHamiltonian.NONRELATIVISTIC).basis_by_element == {"O": "nr", "H": "nrh"}
     assert _request_for(state, spec, ScalarRelativityHamiltonian.SFX2C1E).basis_by_element == {"O": "dk", "H": "dkh"}
+
+
+def test_scalar_relativity_series_at_max_cardinal_uses_tail_or_spread():
+    from openea_benchmark.attachment.scalar_relativity import ScalarRelativityPoint, assess_scalar_relativity
+    def series(vals):
+        return [ScalarRelativityPoint(x, "b", 0.0, d, d) for x, d in zip((3, 4, 5), vals)]
+    cuo = assess_scalar_relativity(series((0.13609, 0.13436, 0.13373)))  # contracting, last step 0.6 meV
+    assert cuo.status == "CLEARED" and "GEOMETRIC_TAIL_BOUND_AT_MAX_CARDINAL" in cuo.evidence
+    assert abs(cuo.convergence_bound_ev - 0.00063) < 1e-9
+    sco = assess_scalar_relativity(series((0.02895, 0.02821, 0.02495)))  # drifting: spread 4.0 + step 3.3 meV
+    assert sco.status == "CLEARED" and "CARDINAL_SPREAD_BOUND_AT_MAX_CARDINAL" in sco.evidence
+    assert abs(sco.convergence_bound_ev - (0.00400 + 0.00326)) < 1e-9
+    assert assess_scalar_relativity(series((0.0, 0.02, 0.005))).status == "UNRESOLVED"

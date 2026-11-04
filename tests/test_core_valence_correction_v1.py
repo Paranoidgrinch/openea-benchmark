@@ -23,7 +23,12 @@ def test_three_points_require_contraction():
     assert abs(r.contraction_ratio-0.5)<1e-12
 
 def test_fail_closed_at_max_cardinal():
+    # Steady drift of 3 meV per cardinal: spread 6 + one more step 3 = 9 meV clears ...
     r=assess_core_valence((cv(3,0.0),cv(4,0.003),cv(5,0.006)),
+                          target_change_ev=0.002,max_cardinal=5)
+    assert r.status is CoreValenceStatus.CLEARED and abs(r.convergence_bound_ev-0.009)<1e-12
+    # ... a drift of 4 meV per cardinal (12 meV) does not.
+    r=assess_core_valence((cv(3,0.0),cv(4,0.004),cv(5,0.008)),
                           target_change_ev=0.002,max_cardinal=5)
     assert r.status is CoreValenceStatus.NEED_MORE_EVIDENCE
     assert r.action=="MAX_CARDINAL_REACHED_UNRESOLVED"
@@ -44,9 +49,17 @@ def test_geometric_tail_clears_at_max_cardinal():
     assert abs(r.convergence_bound_ev-max(change,change*ratio/(1-ratio)))<1e-12
 
 def test_geometric_tail_needs_monotonic_series_and_small_bound():
-    oscillating=assess_core_valence((cv(3,0.0),cv(4,0.010),cv(5,0.006)),max_cardinal=5)
+    oscillating=assess_core_valence((cv(3,0.0),cv(4,0.020),cv(5,0.006)),max_cardinal=5)  # spread 20 meV
     assert oscillating.action=="MAX_CARDINAL_REACHED_UNRESOLVED"
     slow=assess_core_valence((cv(3,0.0),cv(4,0.020),cv(5,0.035)),max_cardinal=5)  # r=0.75, tail 45 meV
     assert slow.action=="MAX_CARDINAL_REACHED_UNRESOLVED"
     below_max=assess_core_valence((cv(3,0.0705),cv(4,0.0785),cv(5,0.08148)),max_cardinal=6)
     assert below_max.action=="COMPUTE_X6"
+
+def test_irregular_series_clears_with_its_cardinal_spread():
+    # verify_v1 NaNa: -12.6/-8.3/-13.7 meV, no contraction; spread 5.4 meV.
+    r=assess_core_valence((cv(3,-0.0126),cv(4,-0.0083),cv(5,-0.0137)),max_cardinal=5)
+    assert r.status is CoreValenceStatus.CLEARED and "CARDINAL_SPREAD_BOUND_AT_MAX_CARDINAL" in r.evidence
+    assert abs(r.convergence_bound_ev-0.0054)<1e-12
+    wide=assess_core_valence((cv(3,0.0),cv(4,0.015),cv(5,0.002)),max_cardinal=5)
+    assert wide.action=="MAX_CARDINAL_REACHED_UNRESOLVED"

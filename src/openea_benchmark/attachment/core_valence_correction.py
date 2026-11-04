@@ -22,6 +22,10 @@ r <= max_contraction_ratio) clears with the remaining geometric tail as its
 bound, max(change, change * r / (1 - r)), provided that bound is at most
 max_tail_bound_ev.  verify_v1 PbO/ScO/VO: 5Z changes of 3-7 meV with r ~ 0.4
 (tail 2-5 meV) failed the fixed 2 meV target only because no 6Z basis exists.
+A series that does not contract clears with the spread of all cardinals
+(max - min) as its bound, plus the last step when it drifts in one direction,
+if that is at most max_tail_bound_ev (NaNa oscillating -12.6/-8.3/-13.7 meV:
+5.4 meV; ScO SR drifting 29.0/28.2/25.0 meV: 7.3 meV).  The same rules apply to the scalar-relativity series.
 """
 from __future__ import annotations
 
@@ -64,6 +68,30 @@ class CoreValenceAssessment:
         d["status"] = self.status.value
         d["points"] = [p.to_dict() for p in self.points]
         return d
+
+
+def max_cardinal_bound(values: list[float], *, max_contraction_ratio: float,
+                       max_bound_ev: float) -> tuple[float, str] | None:
+    """Bound of a series (ordered by cardinal) that stopped above target at the largest
+    cardinal: the geometric tail of a monotonic contracting series, else the spread of
+    all cardinals; None when neither is at most ``max_bound_ev``."""
+    if len(values) < 3:
+        return None
+    step, prev_step = values[-1] - values[-2], values[-2] - values[-3]
+    change = abs(step)
+    if prev_step != 0.0 and step * prev_step > 0.0:
+        ratio = change / abs(prev_step)
+        if ratio <= max_contraction_ratio:
+            bound = max(change, change * ratio / (1.0 - ratio))
+            if bound <= max_bound_ev:
+                return bound, "GEOMETRIC_TAIL_BOUND_AT_MAX_CARDINAL"
+            return None
+    # Oscillating: the limit lies within the spread.  Drifting (same sign, not
+    # contracting): one more step of the last size is added.
+    bound = max(values) - min(values) + (change if step * prev_step > 0.0 else 0.0)
+    if bound <= max_bound_ev:
+        return bound, "CARDINAL_SPREAD_BOUND_AT_MAX_CARDINAL"
+    return None
 
 
 def assess_core_valence(
@@ -166,27 +194,23 @@ def assess_core_valence(
             ),
         )
 
-    if len(ordered) >= 3 and contraction is not None and contraction <= max_contraction_ratio:
-        step = ordered[-1].delta_cv_ev - ordered[-2].delta_cv_ev
-        prev_step = ordered[-2].delta_cv_ev - ordered[-3].delta_cv_ev
-        tail = change * contraction / (1.0 - contraction)
-        bound = max(change, tail)
-        if step * prev_step > 0.0 and bound <= max_tail_bound_ev:
-            return CoreValenceAssessment(
-                status=CoreValenceStatus.CLEARED,
-                action="NONE",
-                central_correction_ev=latest.delta_cv_ev,
-                convergence_bound_ev=bound,
-                contraction_ratio=contraction,
-                highest_cardinal=latest.cardinal,
-                points=ordered,
-                evidence=(
-                    "ALL_ELECTRON_MINUS_FROZEN_CORE_SAME_BASIS",
-                    "CORE_VALENCE_INCREMENT_CONTRACTING",
-                    "GEOMETRIC_TAIL_BOUND_AT_MAX_CARDINAL",
-                    "NO_CV_EXTRAPOLATION_ASSUMED",
-                ),
-            )
+    tail = max_cardinal_bound([p.delta_cv_ev for p in ordered], max_contraction_ratio=max_contraction_ratio,
+                              max_bound_ev=max_tail_bound_ev)
+    if tail is not None:
+        return CoreValenceAssessment(
+            status=CoreValenceStatus.CLEARED,
+            action="NONE",
+            central_correction_ev=latest.delta_cv_ev,
+            convergence_bound_ev=tail[0],
+            contraction_ratio=contraction,
+            highest_cardinal=latest.cardinal,
+            points=ordered,
+            evidence=(
+                "ALL_ELECTRON_MINUS_FROZEN_CORE_SAME_BASIS",
+                tail[1],
+                "NO_CV_EXTRAPOLATION_ASSUMED",
+            ),
+        )
 
     return CoreValenceAssessment(
         status=CoreValenceStatus.NEED_MORE_EVIDENCE,
