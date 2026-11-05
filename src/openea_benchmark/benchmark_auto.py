@@ -30,6 +30,18 @@ from .reference_branches import (
 from .state_selection import build_state_selection_report
 
 
+def no_bound_state_groups(selection: Mapping[str, Any]) -> tuple[str, ...]:
+    """Charge groups whose every scouted component fell to its fragments: no bracketed
+    minimum, nothing open, at least one component on its computed asymptote."""
+    out = []
+    for label, group in (selection.get("charge_groups") or {}).items():
+        if not group.get("bracketed_candidates") and not group.get("unresolved_components") and any(
+                c.get("minimum_status") == "dissociative_to_asymptote"
+                for c in group.get("resolved_open_components") or ()):
+            out.append(label)
+    return tuple(sorted(out))
+
+
 def _digest(value: Any) -> str:
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
@@ -566,7 +578,8 @@ def run_benchmark_acquisition(
     from .final_resolver import resolve_final_verdict
     final_verdict = resolve_final_verdict(electronic_ea=electronic_ea, cbs=cbs, adiabatic=adiabatic,
                                           mr_competitors=mr_competitors, mr_only_labels=mr_labels,
-                                          mr_term_gap=mr_term_gap)
+                                          mr_term_gap=mr_term_gap,
+                                          no_bound_state=no_bound_state_groups(selection))
     outcome = final_verdict["outcome"]
     state = {
         "system": system, **identity, "outcome": outcome, "final_verdict": final_verdict,

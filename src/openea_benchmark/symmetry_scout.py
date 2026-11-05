@@ -119,6 +119,50 @@ LABEL_RULE = "DETERMINANT_LZ2_V1"
 # extent are continued from their stored points (no rescan of existing geometries).
 SCAN_EXTENT_FIELDS = ("max_r_angstrom", "max_points_per_side", "max_bracket_refinements")
 
+# A charge whose blocks show no bracketed minimum at all (every curve flattens or falls
+# toward its fragments) is scanned again with an empirical pair dispersion added to the
+# DFT energy: the functional misses the long-range correlation that binds van der Waals
+# pairs (He2, Ne2, Mg2, Zn2, Hg2, rare gas + anion), so their wells (meV to ~0.1 eV) are
+# lost or flattened into a plateau.  The dispersion term only places the seed geometry;
+# every energy that enters the EA comes from the coupled-cluster layers, which contain
+# dispersion without any empirical term.  No plateau stop on this scan (the well is
+# shallower than the plateau tolerance); a curve still falling at the R limit ends as
+# ``DISPERSION_R_LIMIT`` and is checked against the fragment asymptote like a plateau.
+DISPERSION_MODEL = "d3bj"
+DISPERSION_R_LIMIT = "R_LIMIT_WITH_DISPERSION"
+BOUND_SCAN_STATUSES = ("BRACKETED_SINGLE_MINIMUM", "BRACKETED_RELABELLED")
+
+
+def _falls_to_large_r(block: Mapping[str, Any]) -> bool:
+    ok = sorted((p for p in block["points"] if p["converged"]), key=lambda p: p["r_angstrom"])
+    return len(ok) >= 2 and (block.get("side_status") or {}).get("higher_r") in ("PLATEAU", "R_LIMIT") \
+        and min(range(len(ok)), key=lambda k: ok[k]["energy_hartree"]) == len(ok) - 1
+
+
+def needs_dispersion_rescan(entry: Mapping[str, Any]) -> bool:
+    """No block of this charge brackets a minimum and at least one falls toward its fragments
+    (a block that fails or changes label at short R is not a van der Waals question)."""
+    blocks = [b for b in (entry.get("blocks") or {}).values() if b.get("status") != "SCF_FAILED_AT_START"]
+    return any(_falls_to_large_r(b) for b in blocks) and not any(
+        classify_block_scan(b["points"], (b.get("side_status") or {}).get("higher_r"), b["label"])
+        in BOUND_SCAN_STATUSES for b in blocks)
+
+
+def dispersion_available() -> bool:
+    try:
+        import pyscf.dispersion  # noqa: F401  (package pyscf-dispersion)
+    except ImportError:
+        return False
+    return True
+
+
+def summary_blocks(entry: Mapping[str, Any]) -> tuple[dict, str | None]:
+    """The block scans that represent a charge: the dispersion rescan when it exists."""
+    disp = entry.get("dispersion") or {}
+    if disp.get("blocks"):
+        return disp["blocks"], disp.get("model")
+    return entry.get("blocks") or {}, None
+
 
 def _relabel_block_from_checkpoints(block: dict) -> bool:
     """Relabel the stored points of a block with the current rule; False if a checkpoint is missing."""
@@ -231,14 +275,14 @@ def classify_block_scan(points: Sequence[Mapping[str, Any]], higher_r_status: st
         return "BRACKETED_RELABELLED" if bracket_label(points) not in (None, target) else "LABEL_CHANGED"
     if any(p["label"] != target for p in ok):
         return "LABEL_CHANGED"
-    if higher_r_status == "PLATEAU" and i_min == len(ok) - 1:
+    if higher_r_status in ("PLATEAU", DISPERSION_R_LIMIT) and i_min == len(ok) - 1:
         return "DISSOCIATIVE_PLATEAU"
     return "UNRESOLVED"
 
 
 def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: SymmetryScoutPolicy,
                checkpoint_dir: Path, scf_runner: Callable[..., Any] | None = None,
-               existing: Mapping[str, Any] | None = None) -> dict:
+               existing: Mapping[str, Any] | None = None, dispersion: str | None = None) -> dict:
     """Seeded R scan inside one symmetry block until a bracketed minimum or a large-R plateau.
 
     ``existing`` (a stored block scan) is continued: its points are kept, sides that
@@ -253,7 +297,8 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
             dm0 = _scf.hf.init_guess_by_chkfile(mol, seed, project=None)
         chk = str(checkpoint_dir / f"{_block_id(charge, occ)}__R{r:.4f}.chk")
         res = run_block_scf(mol, occ, method="DFT", xc=policy.functional, dm0=dm0, checkpoint=chk,
-                            following_steps=policy.following_steps, grid_level=policy.grid_level)
+                            following_steps=policy.following_steps, grid_level=policy.grid_level,
+                            dispersion=dispersion)
         return res
     runner = scf_runner or default_runner
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +361,7 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
                 step = min(step * policy.step_growth, policy.max_step_angstrom)
             r = round(r + direction * step, 4)
             if r < policy.min_r_angstrom or r > policy.max_r_angstrom:
-                status[direction] = "R_LIMIT"
+                status[direction] = DISPERSION_R_LIMIT if dispersion and direction > 0 else "R_LIMIT"
                 break
             p = compute(r, prev["checkpoint"])
             if not p["converged"]:
@@ -332,8 +377,8 @@ def scan_block(atoms, charge: int, occ: BlockOccupation, r0: float, policy: Symm
             if p["energy_hartree"] > prev["energy_hartree"]:
                 status[direction] = "RISES"
                 break
-            if direction > 0 and abs(p["energy_hartree"] - prev["energy_hartree"]) * HARTREE_TO_EV \
-                    < policy.plateau_energy_tolerance_ev and r > r0 + 1.0:
+            if not dispersion and direction > 0 and abs(p["energy_hartree"] - prev["energy_hartree"]) \
+                    * HARTREE_TO_EV < policy.plateau_energy_tolerance_ev and r > r0 + 1.0:
                 status[direction] = "PLATEAU"
                 break
             prev = p
@@ -464,6 +509,40 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
                 store(index, scan_block(*item))
         else:
             run_parallel(scan_block, args, on_result=store)
+    for charge in charges:
+        entry = record["charges"][str(charge)]
+        if not needs_dispersion_rescan(entry):
+            continue
+        if scf_runner_factory is None and not dispersion_available():
+            entry["dispersion"] = {"model": DISPERSION_MODEL, "blocks": {}, "status": "DISPERSION_UNAVAILABLE"}
+            _save(path, record)
+            continue
+        disp = entry.setdefault("dispersion", {"model": DISPERSION_MODEL, "blocks": {}})
+        disp.pop("status", None)
+        todo = []
+        for b in entry["plan"]["blocks"]:
+            occ = BlockOccupation(_symmetry_from_label(b["label"]),
+                                  tuple((k, tuple(v)) for k, v in b["irrep_nelec"]), b["orbital_energy_sum"])
+            bid = _block_id(charge, occ)
+            if bid not in disp["blocks"]:
+                print(f"[SYMMETRY SCOUT] {atom_a}{atom_b} q={charge:+d} {b['label']} {bid} +{DISPERSION_MODEL}",
+                      flush=True)
+                todo.append((b, bid, occ))
+
+        def store_disp(index: int, scan: dict, disp=disp, todo=todo) -> None:
+            b, bid, _ = todo[index]
+            disp["blocks"][bid] = {"label": b["label"], "two_s": b["two_s"], "irrep_nelec": b["irrep_nelec"],
+                                   **scan, "extent": {k: getattr(policy, k) for k in SCAN_EXTENT_FIELDS}}
+            _save(path, record)
+
+        args = [((atom_a, atom_b), charge, occ, r0, policy, output_dir / f"symmetry_checkpoints_{DISPERSION_MODEL}",
+                 scf_runner_factory(charge, occ, dispersion=DISPERSION_MODEL) if scf_runner_factory else None,
+                 None, DISPERSION_MODEL) for _, _, occ in todo]
+        if scf_runner_factory:
+            for index, item in enumerate(args):
+                store_disp(index, scan_block(*item))
+        else:
+            run_parallel(scan_block, args, on_result=store_disp)
     return record
 
 
@@ -523,7 +602,9 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
         # block whose lowest sampled energy is above that limit by more than a
         # DFT margin cannot be the ground state of this charge.
         limit = lowest_dissociation_limit(atomic, atom_a, atom_b, charge) if atomic else None
-        for bid, block in entry["blocks"].items():
+        blocks, dispersion = summary_blocks(entry)
+        charge_method = method if dispersion is None else {**method, "dispersion": dispersion}
+        for bid, block in blocks.items():
             two_s = int(block["two_s"])
             sector = sectors.setdefault((charge, two_s), {
                 "charge": charge, "spin_2s": two_s, "tracking_mode": "manifold",
@@ -531,7 +612,7 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                 "manifold_branch_graph": {"discontinuous_edges": [], "bridged_edges": []},
                 "sector_status": "dft_scout_complete",
                 "adaptive_grid": {"stop_reason": "SYMMETRY_BLOCK_SCAN"},
-                "method": method, "label": f"{record['system']} q={charge:+d} 2S={two_s}",
+                "method": charge_method, "label": f"{record['system']} q={charge:+d} 2S={two_s}",
                 "manifold_pec_scouts": [], "manifolds": [], "representative_roots": []})
             pts = []
             for p in block["points"]:
@@ -566,7 +647,8 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
                 # blocked until that layer clears it.
                 minimum_scout = {**minimum_scout, "status": LAMBDA_MIXED_STATUS}
             lowest = min((p["energy_center_hartree"] for p in pts), default=None)
-            reaches_large_r = block.get("side_status", {}).get("higher_r") in ("R_LIMIT", "PLATEAU", "RISES")
+            reaches_large_r = block.get("side_status", {}).get("higher_r") in ("R_LIMIT", "PLATEAU", "RISES",
+                                                                              DISPERSION_R_LIMIT)
             if (limit is not None and lowest is not None and reaches_large_r
                     and (lowest - limit["energy_hartree"]) * HARTREE_TO_EV > above_limit_margin_ev):
                 minimum_scout = {"status": "above_lowest_dissociation_limit", "component_id": bid, "candidates": [],

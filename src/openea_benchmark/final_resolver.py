@@ -5,7 +5,14 @@ Collects the layer results and issues exactly one outcome:
 * ``EA``         - adiabatic EA_0 with an interval, when every layer cleared;
 * ``UNBOUND``    - the anion is not bound at the CBS level (continuum rule) and
                    no state competition is open;
+* ``NO_BOUND_MOLECULE`` - neither charge has a bound state: every scouted curve of
+                   both charges (with the dispersion rescan) falls to its fragments;
 * ``UNRESOLVED`` - otherwise, with every blocking reason listed.
+
+A charge without any bound state is a result, not a gap: an anion whose every curve
+falls to its fragments does not exist as a molecule (``UNBOUND``, reason
+``ANION_HAS_NO_BOUND_STATE``); a neutral without one has the separated atoms as its
+ground state (EA against that limit is not implemented: listed as a blocking reason).
 
 Requirements for ``EA`` (each missing item is one blocking reason):
 
@@ -41,9 +48,20 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
                           adiabatic: Mapping[str, Any] | None,
                           mr_competitors: Mapping[str, Any] | None,
                           mr_only_labels: list[str] | tuple[str, ...] = (),
-                          mr_term_gap: Mapping[str, Any] | None = None) -> dict:
+                          mr_term_gap: Mapping[str, Any] | None = None,
+                          no_bound_state: tuple[str, ...] | list[str] = ()) -> dict:
     blocking: list[str] = []
     warnings: list[str] = []
+
+    if "anion" in no_bound_state:
+        reason = "ANION_HAS_NO_BOUND_STATE: every scouted anion curve falls to its fragments"
+        if "neutral" in no_bound_state:
+            return {"outcome": "NO_BOUND_MOLECULE", "blocking": [], "warnings": warnings,
+                    "reason": reason + "; NEUTRAL_HAS_NO_BOUND_STATE as well"}
+        return {"outcome": "UNBOUND", "blocking": [], "warnings": warnings, "reason": reason}
+    if "neutral" in no_bound_state:
+        blocking.append("neutral has no bound state (separated atoms are its ground state): "
+                        "EA against the atom limit not implemented")
 
     if not electronic_ea or electronic_ea.get("status") != "ELECTRONIC_EA_EVALUATED":
         blocking.append(f"electronic EA: {None if not electronic_ea else electronic_ea.get('status')}")

@@ -285,7 +285,7 @@ def label_of_determinant(mol, mo_coeff, mo_occ, *, like_nuclei: bool) -> Molecul
 def run_block_scf(mol, occupation: BlockOccupation, *, method: str = "HF", xc: str | None = None,
                   dm0=None, checkpoint: str | None = None, max_cycle: int = 200, conv_tol: float = 1e-10,
                   following_steps: int = 4, probe_symmetry_breaking: bool = True,
-                  grid_level: int | None = None) -> BlockSCFResult:
+                  grid_level: int | None = None, dispersion: str | None = None) -> BlockSCFResult:
     """Converge one symmetry block with the abelian irrep occupation imposed."""
     from pyscf import dft, scf
 
@@ -297,6 +297,8 @@ def run_block_scf(mol, occupation: BlockOccupation, *, method: str = "HF", xc: s
         mf.xc = xc
         if grid_level is not None:
             mf.grids.level = grid_level
+        if dispersion:  # pair-additive energy term (pyscf-dispersion); density unchanged
+            mf.disp = dispersion
     mf = apply_hamiltonian(mf)
     occ = occupation.as_dict()
     mf.irrep_nelec = {k: (v if target.two_s else v[0] + v[1]) for k, v in occ.items()}

@@ -64,3 +64,26 @@ def test_same_state_twins_keep_the_label_of_their_determinant():
     ea = {"selected_neutral_job": sigma["job_id"], "selected_anion_job": "A",
           "candidates": {"neutral": [delta, sigma], "anion": [{**cand("A", -8565.97, True), "charge": -1}]}}
     assert [s["job_id"] for s in _states_to_compute(ea, CBSStagePolicy()) if s["role"] == "neutral"] == [sigma["job_id"]]
+
+
+def test_charge_without_bound_state_is_a_result():
+    # Every scouted anion curve falls to its fragments: no molecular anion exists.
+    v = resolve_final_verdict(electronic_ea=None, cbs=None, adiabatic=None, mr_competitors=None,
+                              no_bound_state=("anion",))
+    assert v["outcome"] == "UNBOUND" and v["reason"].startswith("ANION_HAS_NO_BOUND_STATE")
+    v = resolve_final_verdict(electronic_ea=None, cbs=None, adiabatic=None, mr_competitors=None,
+                              no_bound_state=("anion", "neutral"))
+    assert v["outcome"] == "NO_BOUND_MOLECULE"
+    v = resolve_final_verdict(electronic_ea=None, cbs=None, adiabatic=None, mr_competitors=None,
+                              no_bound_state=("neutral",))
+    assert v["outcome"] == "UNRESOLVED" and any("atom limit" in b for b in v["blocking"])
+
+
+def test_no_bound_state_groups_needs_every_component_on_its_asymptote():
+    from openea_benchmark.benchmark_auto import no_bound_state_groups
+    dissociative = {"bracketed_candidates": [], "unresolved_components": [],
+                    "resolved_open_components": [{"minimum_status": "dissociative_to_asymptote"}]}
+    assert no_bound_state_groups({"charge_groups": {"anion": dissociative,
+                                                    "neutral": {"bracketed_candidates": [{}]}}}) == ("anion",)
+    open_one = {**dissociative, "unresolved_components": [{"minimum_status": "unresolved"}]}
+    assert no_bound_state_groups({"charge_groups": {"anion": open_one}}) == ()

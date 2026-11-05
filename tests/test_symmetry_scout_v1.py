@@ -249,3 +249,52 @@ def test_curve_energy_is_interpolated_only_next_to_a_point():
     assert abs(_energy_on_curve(pts, 1.6005) - (-1.005)) < 1e-12
     assert _energy_on_curve(pts, 1.65) is None          # far from every point: no comparison
     assert _energy_on_curve(pts, 1.7005) is None        # outside the curve
+
+
+def _vdw(r, depth=0.002, r_e=3.0):
+    """Lennard-Jones-like pair curve (Eh): repulsive wall, shallow well at r_e."""
+    return depth * ((r_e / r) ** 12 - 2 * (r_e / r) ** 6)
+
+
+def test_dispersion_scan_has_no_plateau_stop_and_brackets_the_well(tmp_path):
+    from openea_benchmark.symmetry_scout import DISPERSION_MODEL
+    # Without dispersion the shallow tail looks like a plateau; with it the scan walks on
+    # until the energy rises again behind the well.
+    res = scan_block(("Mg", "Mg"), 0, _occ(), 2.0, POLICY, tmp_path, _runner(_vdw, label="2Pi"),
+                     dispersion=DISPERSION_MODEL)
+    assert res["status"] == "BRACKETED_SINGLE_MINIMUM"
+    assert abs(res["minimum"]["r_angstrom"] - 3.0) <= POLICY.step_angstrom
+
+
+def test_dispersion_scan_still_falling_at_r_limit_is_dissociative(tmp_path):
+    import math
+    from openea_benchmark.symmetry_scout import DISPERSION_MODEL, DISPERSION_R_LIMIT
+    res = scan_block(("He", "He"), 0, _occ(), 1.0, POLICY, tmp_path, _runner(lambda r: math.exp(-3 * r)),
+                     dispersion=DISPERSION_MODEL)
+    assert res["side_status"]["higher_r"] == DISPERSION_R_LIMIT
+    assert res["status"] == "DISSOCIATIVE_PLATEAU"
+
+
+def test_dispersion_rescan_trigger():
+    from openea_benchmark.symmetry_scout import needs_dispersion_rescan, summary_blocks
+    falling = _block("1Sigmag+", 0, [(2.0, -0.9), (2.5, -0.95), (3.0, -0.951)], "DISSOCIATIVE_PLATEAU",
+                     higher="PLATEAU")
+    bound = _block("2Pi", 1, [(0.9, -0.9), (0.97, -1.0), (1.05, -0.95)], "BRACKETED_SINGLE_MINIMUM")
+    label_edge = _block("2Pi", 1, [(0.9, -0.9), (0.97, -1.0)], "UNRESOLVED", higher="SCF_FAILED")
+    assert needs_dispersion_rescan({"blocks": {"a": falling}})
+    assert not needs_dispersion_rescan({"blocks": {"a": falling, "b": bound}})
+    assert not needs_dispersion_rescan({"blocks": {"c": label_edge}})  # not a van der Waals question
+    entry = {"blocks": {"a": falling}, "dispersion": {"model": "d3bj", "blocks": {"a": bound}}}
+    assert summary_blocks(entry) == ({"a": bound}, "d3bj")
+    assert summary_blocks({"blocks": {"a": falling}}) == ({"a": falling}, None)
+
+
+def test_summary_uses_dispersion_blocks_and_marks_the_method():
+    from openea_benchmark.symmetry_scout import to_legacy_summary
+    falling = _block("2Pi", 1, [(2.0, -0.9), (2.5, -0.95), (3.0, -0.951)], "DISSOCIATIVE_PLATEAU", higher="PLATEAU")
+    well = _block("2Pi", 1, [(2.9, -0.951), (3.0, -0.952), (3.1, -0.9515)], "BRACKETED_SINGLE_MINIMUM")
+    record = _record({"g": falling})
+    record["charges"]["0"]["dispersion"] = {"model": "d3bj", "blocks": {"g": well}}
+    sector = to_legacy_summary(record)["sectors"][0]
+    assert sector["method"]["dispersion"] == "d3bj"
+    assert sector["manifold_pec_scouts"][0]["minimum_scout"]["status"] == "bracketed_single_minimum"
