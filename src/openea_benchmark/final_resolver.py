@@ -7,12 +7,15 @@ Collects the layer results and issues exactly one outcome:
                    no state competition is open;
 * ``NO_BOUND_MOLECULE`` - neither charge has a bound state: every scouted curve of
                    both charges (with the dispersion rescan) falls to its fragments;
+* ``NO_BOUND_NEUTRAL`` - the neutral has no bound state but the anion has one: there
+                   is no neutral molecule, so a molecular EA is not defined (the anion
+                   detaches onto a repulsive neutral curve);
 * ``UNRESOLVED`` - otherwise, with every blocking reason listed.
 
 A charge without any bound state is a result, not a gap: an anion whose every curve
 falls to its fragments does not exist as a molecule (``UNBOUND``, reason
 ``ANION_HAS_NO_BOUND_STATE``); a neutral without one has the separated atoms as its
-ground state (EA against that limit is not implemented: listed as a blocking reason).
+ground state, and the molecular EA is not defined (``NO_BOUND_NEUTRAL``).
 
 Requirements for ``EA`` (each missing item is one blocking reason):
 
@@ -60,8 +63,9 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
                     "reason": reason + "; NEUTRAL_HAS_NO_BOUND_STATE as well"}
         return {"outcome": "UNBOUND", "blocking": [], "warnings": warnings, "reason": reason}
     if "neutral" in no_bound_state:
-        blocking.append("neutral has no bound state (separated atoms are its ground state): "
-                        "EA against the atom limit not implemented")
+        return {"outcome": "NO_BOUND_NEUTRAL", "blocking": [], "warnings": warnings,
+                "reason": ("NEUTRAL_HAS_NO_BOUND_STATE: every scouted neutral curve falls to its fragments; "
+                           "no neutral molecule, molecular EA not defined")}
 
     if not electronic_ea or electronic_ea.get("status") != "ELECTRONIC_EA_EVALUATED":
         blocking.append(f"electronic EA: {None if not electronic_ea else electronic_ea.get('status')}")

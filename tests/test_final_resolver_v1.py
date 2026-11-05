@@ -76,7 +76,7 @@ def test_charge_without_bound_state_is_a_result():
     assert v["outcome"] == "NO_BOUND_MOLECULE"
     v = resolve_final_verdict(electronic_ea=None, cbs=None, adiabatic=None, mr_competitors=None,
                               no_bound_state=("neutral",))
-    assert v["outcome"] == "UNRESOLVED" and any("atom limit" in b for b in v["blocking"])
+    assert v["outcome"] == "NO_BOUND_NEUTRAL" and v["reason"].startswith("NEUTRAL_HAS_NO_BOUND_STATE")
 
 
 def test_no_bound_state_groups_needs_every_component_on_its_asymptote():
