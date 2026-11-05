@@ -135,3 +135,23 @@ def test_energy_upper_bound_tracks_sampled_minimum_plus_explicit_tolerance():
     result = resolve_stage3_equilibrium(rec, settings=SETTINGS)
     expected = rec.discrete_minimum_energy_hartree + SETTINGS.point_energy_tolerance_hartree
     assert abs(result.energy_interval_hartree.upper_hartree - expected) < 1.0e-14
+
+
+def test_flat_van_der_waals_minimum_gets_convexity_bound():
+    # He2-like well, curvature 2e-4 Eh/A^2 (below the 0.01 floor): resolved by the
+    # convexity bound across the nearest bracket, geometry = bracket.
+    r0, e0 = 1.003, -5.798
+    fn = lambda r: e0 + 2.0e-4 * (r - r0) ** 2
+    result = resolve_stage3_equilibrium(record_from_function(fn), settings=SETTINGS)
+    assert result.status is EquilibriumStatus.RESOLVED
+    assert result.evidence_quality == "CONVEXITY_BOUND"
+    lo, hi = result.energy_interval_hartree.lower_hartree, result.energy_interval_hartree.upper_hartree
+    assert lo <= e0 <= hi and hi - lo < 1.0e-7
+    assert result.geometry_interval_angstrom == (0.99, 1.01)
+
+
+def test_flat_segment_with_vertex_outside_bracket_stays_unresolved():
+    # Nearly linear, tiny curvature: the vertex lies outside the bracket -> no minimum here.
+    fn = lambda r: -5.0 + 1.0e-3 * (r - 1.0) + 2.0e-4 * (r - 1.0) ** 2
+    result = resolve_stage3_equilibrium(record_from_function(fn), settings=SETTINGS)
+    assert result.status is EquilibriumStatus.UNRESOLVED

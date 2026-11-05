@@ -185,6 +185,40 @@ def _fit_three_point_quadratic(
     )
 
 
+def _flat_minimum_convexity_bound(job_id, model, center_r, center_e, left, right, bracket, settings,
+                                  generated, rejected) -> EquilibriumEstimate | None:
+    """A minimum too flat for the curvature floor (van der Waals wells: He2 ~2e-4 Eh/A^2
+    against 1e-3) still has a rigorous energy bound when the curve is convex across
+    the nearest-neighbour bracket: if the continuous minimum m lies left of the
+    sampled minimum c, convexity on [m, r_R] gives E(c) - E(m) <= dE_R (c - r_L)/(r_R - c),
+    and symmetrically on the right.  The geometry interval is the bracket itself.
+    Only taken when the nearest model is a proper minimum (positive curvature, vertex
+    inside the bracket, not above the sampled minimum)."""
+    (r_l, e_l), (r_r, e_r) = left, right
+    tol = settings.point_energy_tolerance_hartree
+    if not (bracket[0] - 1.0e-12 <= model.vertex_r_angstrom <= bracket[1] + 1.0e-12):
+        return None
+    if model.vertex_energy_hartree > center_e + tol:
+        return None
+    h_l, h_r = center_r - r_l, r_r - center_r
+    rise_l, rise_r = max(e_l - center_e, 0.0), max(e_r - center_e, 0.0)
+    depth = max(rise_r * h_l / h_r, rise_l * h_r / h_l)
+    lower, upper = center_e - depth - tol, center_e + tol
+    return EquilibriumEstimate(
+        status=EquilibriumStatus.RESOLVED, job_id=job_id,
+        geometry_interval_angstrom=(r_l, r_r), geometry_central_angstrom=model.vertex_r_angstrom,
+        energy_interval_hartree=EnergyInterval(lower_hartree=lower, upper_hartree=upper),
+        energy_central_hartree=max(model.vertex_energy_hartree, lower),
+        models=(model,), generated_model_count=generated, rejected_model_count=rejected,
+        evidence_quality="CONVEXITY_BOUND",
+        evidence=("STAGE3_BRACKET_TARGET_MET", "FLAT_MINIMUM_BELOW_CURVATURE_FLOOR",
+                  "ENERGY_LOWER_BOUND_FROM_CONVEXITY_ACROSS_NEAREST_BRACKET",
+                  "ENERGY_UPPER_BOUND_FROM_SAMPLED_MINIMUM"),
+        rationale=("Minimum flatter than the curvature floor: energy bounded by convexity across the "
+                   "nearest-neighbour bracket, geometry by the bracket"),
+    )
+
+
 def resolve_stage3_equilibrium(
     record: Stage3AttachmentRecord,
     *,
@@ -286,6 +320,7 @@ def resolve_stage3_equilibrium(
     rejected = 0
     admitted: list[QuadraticMinimumModel] = []
     nearest_model_admitted = False
+    nearest_flat_model: QuadraticMinimumModel | None = None
 
     for left_r, left_e in left_pool:
         for right_r, right_e in right_pool:
@@ -312,6 +347,8 @@ def resolve_stage3_equilibrium(
                 model.curvature_hartree_per_angstrom2
                 < settings.minimum_curvature_hartree_per_angstrom2
             ):
+                if nearest:
+                    nearest_flat_model = model
                 rejected += 1
                 continue
 
@@ -334,6 +371,13 @@ def resolve_stage3_equilibrium(
             nearest_model_admitted = nearest_model_admitted or nearest
 
     admitted_tuple = tuple(admitted)
+
+    if not nearest_model_admitted and nearest_flat_model is not None:
+        flat = _flat_minimum_convexity_bound(
+            job_id, nearest_flat_model, center_r, center_e, left_pool[0], right_pool[0],
+            (left_bracket, right_bracket), settings, generated, rejected)
+        if flat is not None:
+            return flat
 
     if not nearest_model_admitted:
         return _unresolved(

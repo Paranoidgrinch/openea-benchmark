@@ -87,3 +87,15 @@ def test_no_bound_state_groups_needs_every_component_on_its_asymptote():
                                                     "neutral": {"bracketed_candidates": [{}]}}}) == ("anion",)
     open_one = {**dissociative, "unresolved_components": [{"minimum_status": "unresolved"}]}
     assert no_bound_state_groups({"charge_groups": {"anion": open_one}}) == ()
+
+
+def test_open_neutral_mr_states_cannot_block_unbound():
+    unbound = {"status": "ANION_UNBOUND_AT_CBS", "binding_reason": "CBS_INTERVAL_NEGATIVE"}
+    v = resolve_final_verdict(electronic_ea=EA, cbs=unbound, adiabatic=None,
+                              mr_competitors={"status": "UNRESOLVED_MR_COMPETITOR"},
+                              mr_only_labels=["q=0 1Sigmau+", "q=0 1Pig"])
+    assert v["outcome"] == "UNBOUND" and v["warnings"]
+    v = resolve_final_verdict(electronic_ea=EA, cbs=unbound, adiabatic=None,
+                              mr_competitors={"status": "UNRESOLVED_MR_COMPETITOR"},
+                              mr_only_labels=["q=-1 2Deltag"])
+    assert v["outcome"] == "UNRESOLVED"

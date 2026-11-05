@@ -81,18 +81,25 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
             warnings.append(f"{role}: {len(comp['open_scout_components_without_energy'])} scout component(s) "
                             "without any converged energy (not compared)")
 
+    mr_blocking = None
     if mr_only_labels:
         status = None if not mr_competitors else mr_competitors.get("status")
         gap_status = None if not mr_term_gap else mr_term_gap.get("status")
         if status != "CLEARED" and gap_status != "CLEARED":
-            blocking.append(f"MR-only competitor states: {status or 'NOT_COMPUTED'}"
-                            + (f", term gap {gap_status}" if gap_status else ""))
+            mr_blocking = (f"MR-only competitor states: {status or 'NOT_COMPUTED'}"
+                           + (f", term gap {gap_status}" if gap_status else ""))
+            blocking.append(mr_blocking)
 
     if cbs and cbs.get("multireference_exceeded"):
         warnings.append("multireference screening above thresholds: " + ", ".join(cbs["multireference_exceeded"]))
 
     cbs_status = None if not cbs else cbs.get("status")
     if cbs_status == "ANION_UNBOUND_AT_CBS":
+        # A lower neutral state only lowers E0(neutral) and makes the EA more negative:
+        # open MR-only candidates of the neutral cannot change UNBOUND, anion ones can.
+        if mr_blocking and not any(str(label).startswith("q=-1") for label in mr_only_labels):
+            blocking.remove(mr_blocking)
+            warnings.append(mr_blocking + " (neutral only: cannot bind the anion)")
         if blocking:
             return {"outcome": "UNRESOLVED", "blocking": blocking, "warnings": warnings,
                     "note": "anion unbound at CBS, but the state assignment is open"}
