@@ -70,6 +70,15 @@ SUBSET_BASIS_SCF_TOLERANCE_HARTREE = 1.0e-6
 # The CBS model-sensitivity bound is part of the interval half-width; above the 5 meV
 # target it widens the interval instead of blocking, up to this cap.
 CBS_MODEL_BOUND_CAP_EV = 0.02
+# Geometry relaxation at the low CBS cardinal: probes around the single-basis
+# equilibrium until the low-cardinal minimum is bracketed.  The first step is small
+# (covalent curves); unbracketed minima are followed outward with growing steps
+# (van der Waals curves, verify Mg2: def2-TZVPPD 4.40 A, aug-cc-pVQZ ~3.98 A).
+GEOMETRY_FIRST_STEP_ANGSTROM = 0.02
+GEOMETRY_MAX_STEP_ANGSTROM = 0.5
+GEOMETRY_MAX_PROBES = 6
+# Below this the curve counts as flat over the probes (CC convergence is 1e-8 Eh).
+GEOMETRY_FLAT_TOLERANCE_HARTREE = 1.0e-7
 
 
 @dataclass(frozen=True)
@@ -94,6 +103,9 @@ class CBSStagePolicy:
     # aug-QZ -> aug-5Z change of the fixed-basis EA (at least this floor) is added to the
     # interval as the unknown diffuse residual.
     missing_diffuse_floor_ev: float = 0.01
+    # Relax each selected state's bond length at the low cardinal (extra points there);
+    # the relaxation energy corrects the CBS energies taken at the single-basis geometry.
+    geometry_relaxation: bool = True
 
 
 def family_label(cardinal: int, *, daug: bool = False) -> str:
@@ -283,6 +295,95 @@ def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]
     return out
 
 
+def _parabola(points: Sequence[tuple[float, float]]) -> tuple[float, float, float] | None:
+    """(curvature a, vertex r, vertex energy) of the parabola through three points."""
+    (x0, y0), (x1, y1), (x2, y2) = points
+    d = (x0 - x1) * (x0 - x2) * (x1 - x2)
+    if abs(d) < 1e-14:
+        return None
+    a = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / d
+    b = (x2 ** 2 * (y0 - y1) + x1 ** 2 * (y2 - y0) + x0 ** 2 * (y1 - y2)) / d
+    if a <= 0.0:
+        return a, float("nan"), float("nan")
+    rv = -b / (2 * a)
+    c = y0 - a * x0 ** 2 - b * x0
+    return a, rv, c - b * b / (4 * a)
+
+
+def relaxation_from_points(points: Mapping[float, float], r0: float) -> dict:
+    """Relaxation energy E(min) - E(r0) of a sampled curve, or the next probe radius.
+
+    Returns ``{"status": "BRACKETED"|"FLAT"|"NEXT", ...}``: BRACKETED gives the vertex of the
+    parabola through the lowest point and its two neighbours (``relaxation_hartree`` <= 0,
+    ``model_uncertainty_hartree`` = |vertex - lowest sampled|); NEXT gives ``next_r``."""
+    rs = sorted(points)
+    es = [points[r] for r in rs]
+    e0 = points[r0]
+    if max(es) - min(es) < GEOMETRY_FLAT_TOLERANCE_HARTREE:
+        return {"status": "FLAT", "relaxation_hartree": 0.0, "model_uncertainty_hartree": 0.0, "r_min": r0}
+    i = min(range(len(rs)), key=lambda k: es[k])
+    if 0 < i < len(rs) - 1:
+        fit = _parabola([(rs[i - 1], es[i - 1]), (rs[i], es[i]), (rs[i + 1], es[i + 1])])
+        if fit is not None and fit[0] > 0.0 and rs[i - 1] <= fit[1] <= rs[i + 1]:
+            ev = min(fit[2], es[i])
+            return {"status": "BRACKETED", "relaxation_hartree": ev - e0,
+                    "model_uncertainty_hartree": es[i] - ev, "r_min": fit[1]}
+    # lowest point at an edge: step outward, by the parabola through the three points at
+    # that edge when it curves upward, else by twice the last spacing
+    edge = rs[:3] if i == 0 else rs[-3:]
+    spacing = abs(edge[1] - edge[0]) if i == 0 else abs(edge[-1] - edge[-2])
+    fit = _parabola([(r, points[r]) for r in edge]) if len(edge) == 3 else None
+    step = 2.0 * spacing
+    if fit is not None and fit[0] > 0.0:
+        step = min(max(abs(fit[1] - rs[i]) * 1.2, spacing), 4.0 * spacing)
+    step = min(max(step, GEOMETRY_FIRST_STEP_ANGSTROM), GEOMETRY_MAX_STEP_ANGSTROM)
+    return {"status": "NEXT", "next_r": rs[i] - step if i == 0 else rs[i] + step,
+            "lowest_hartree": es[i], "r_lowest": rs[i]}
+
+
+def _relaxation_chain(runner, base_request, r0: float, e0: float, settings) -> dict:
+    """Probe one state's curve at the low cardinal around ``r0`` (energy ``e0`` known)."""
+    points = {r0: e0}
+    probes: list[dict] = []
+    pending = [r0 - GEOMETRY_FIRST_STEP_ANGSTROM, r0 + GEOMETRY_FIRST_STEP_ANGSTROM]
+    verdict: dict = {"status": "NEXT"}
+    while pending and len(probes) < GEOMETRY_MAX_PROBES:
+        r = round(pending.pop(0), 5)
+        if r <= 0.0 or r in points:
+            break
+        req = replace(base_request, request_id=f"{base_request.request_id}__GEOM_R{r:.5f}", r_angstrom=r)
+        result = runner(req, settings)
+        probes.append({"r_angstrom": r, "status": result.status.value,
+                       "ccsd_t_total_hartree": result.ccsd_t_total_hartree})
+        if result.status is not PointExecutionStatus.COMPLETED or result.ccsd_t_total_hartree is None:
+            verdict = {"status": "PROBE_FAILED"}
+            break
+        points[r] = float(result.ccsd_t_total_hartree)
+        if pending:
+            continue
+        verdict = relaxation_from_points(points, r0)
+        if verdict["status"] == "NEXT":
+            pending.append(verdict["next_r"])
+    if verdict["status"] in ("NEXT", "PROBE_FAILED"):
+        low = min(points.values())
+        # not bracketed: the lowest sampled energy bounds the relaxation from one side only
+        verdict = {**verdict, "status": "NOT_BRACKETED" if verdict["status"] == "NEXT" else "PROBE_FAILED",
+                   "relaxation_hartree": low - e0, "model_uncertainty_hartree": abs(low - e0),
+                   "r_min": min(points, key=points.get)}
+    return {**verdict, "r0_angstrom": r0, "probes": probes}
+
+
+def geometry_relaxation_correction(relax: Mapping[str, Mapping[str, Any]]) -> tuple[float, float]:
+    """(EA correction, half-width) in eV from the neutral/anion relaxation records.
+
+    EA = E(neutral) - E(anion): relaxing the neutral lowers the EA, the anion raises it.
+    Half-width: the full relaxation of each state (the remaining low-cardinal -> CBS change
+    of the bond length is not computed) plus the vertex-model uncertainty."""
+    corr = (relax["neutral"]["relaxation_hartree"] - relax["anion"]["relaxation_hartree"]) * HARTREE_TO_EV
+    half = sum(abs(r["relaxation_hartree"]) + r["model_uncertainty_hartree"] for r in relax.values()) * HARTREE_TO_EV
+    return corr, half
+
+
 def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3ExecutionRequest],
                   point_records: Mapping[str, Mapping[str, Any]], refinement_dir: Path,
                   stage3_settings: Stage3ExecutionSettings, output_dir: Path,
@@ -388,6 +489,7 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
             "ccsd_t_total_hartree": res["ccsd_t_total_hartree"],
             "reference_warnings": res["reference_warnings"], "error_message": res.get("error_message")}
     record["states"] = computed
+    requests_by_label = {(id(state), label): req for state, label, _, req in jobs}
 
     def ok(state, label):
         p = (state.get("points") or {}).get(label)
@@ -457,8 +559,17 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     # Two ROHF reference branches of one state: their single-basis offset is not
     # recomputed at CBS and widens the interval on both sides (as in the EA stage).
     sensitivity = float(electronic_ea.get("reference_sensitivity_ev") or 0.0)
-    ea_cbs = cbs["ea_cbs_plus_diffuse_primary_ev"]
-    lower, upper = cbs["lower_intermediate_ev"] - sensitivity, cbs["upper_intermediate_ev"] + sensitivity
+    geo_corr = geo_half = 0.0
+    if policy.geometry_relaxation:
+        chains = [(runner, requests_by_label[(id(s), low)], float(s["r"]),
+                   float(s["points"][low]["ccsd_t_total_hartree"]), settings) for s in selected.values()]
+        relax = dict(zip(selected, run_parallel(_relaxation_chain, chains)))
+        geo_corr, geo_half = geometry_relaxation_correction(relax)
+        record["geometry_relaxation"] = {"basis": low, "states": relax, "ea_correction_ev": geo_corr,
+                                         "half_width_ev": geo_half}
+    ea_cbs = cbs["ea_cbs_plus_diffuse_primary_ev"] + geo_corr
+    lower = cbs["lower_intermediate_ev"] - sensitivity + geo_corr - geo_half
+    upper = cbs["upper_intermediate_ev"] + sensitivity + geo_corr + geo_half
     binding, binding_reason = _binding(ea_cbs, lower, upper, cbs["diffuse_correction_ev"], policy)
     mr = {role: s.get("mr_diagnostic") for role, s in selected.items()}
     mr_exceeded = sorted(f"{role}:{name}" for role, d in mr.items() if d for name in d["exceeded"])
