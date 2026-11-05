@@ -451,6 +451,9 @@ def _run_symmetry_auto(args) -> int:
         "final_verdict": state.get("final_verdict"),
         "adiabatic_ea": state.get("adiabatic_ea"),
     }, default=str), flush=True)
+    if state.get("state_inventory"):
+        from .state_inventory import format_state_table
+        print("[STATE INVENTORY]\n" + format_state_table(state["state_inventory"]), flush=True)
     return 0
 
 

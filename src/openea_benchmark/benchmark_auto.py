@@ -581,8 +581,15 @@ def run_benchmark_acquisition(
                                           mr_term_gap=mr_term_gap,
                                           no_bound_state=no_bound_state_groups(selection))
     outcome = final_verdict["outcome"]
+    # Report only: every other state found, at its single-basis CCSD(T) level.
+    from .state_inventory import build_state_inventory
+    state_inventory = build_state_inventory(electronic_ea, final_verdict=final_verdict, mr_term_gap=mr_term_gap,
+                                            mr_competitors=mr_competitors, mr_only_labels=mr_labels)
+    if state_inventory is not None:
+        _save(output_dir / "state_inventory.json", state_inventory)
     state = {
         "system": system, **identity, "outcome": outcome, "final_verdict": final_verdict,
+        "state_inventory": state_inventory,
         "run_stage": "STAGE3_POINT_EVIDENCE_ACQUISITION",
         "stage3_purpose": stage3_purpose,
         "stage3_release": bridge.release_status.value,
