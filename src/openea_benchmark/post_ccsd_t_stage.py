@@ -26,6 +26,14 @@ Exact Delta_Q(DZ) in verify_v1 stayed below 0.011 eV (NH, PO, SS, SH, CH, BO, Si
 BrO, IO); CR-CC(2,4)-CR-CC(2,3) is no substitute (NH, SH, OH: 0.05-0.1 eV off with
 the wrong sign; CCpy's CR-CC(3,4) is closed-shell only).  On a machine with enough
 memory the exact CCSDTQ runs as before.
+
+Route A (2026-11-06): before falling back to that allowance, the beyond-CCSDT increment
+E(DMRG) - E(CCSDT) is computed in frozen-natural-orbital spaces of the last quadruples
+basis at two truncation levels (``fno_dmrg_increment``); status CLEARED_FNO_DMRG, bound =
+level change + DMRG extrapolation distances + the relative quadruples bound.  PO cc-pVDZ:
+8 / 12 virtual NOs gave -0.0083 / -0.0091 eV against exact CCSDTQ - CCSDT -0.0084 eV
+(minutes and < 1 GB instead of 40 h).  The allowance remains the fallback when a DMRG
+point fails.
 """
 from __future__ import annotations
 
@@ -148,6 +156,10 @@ Q_ALLOWANCE_MIN_EV = 0.02
 # No triples basis fits either: no post-CCSD(T) correction, this allowance instead
 # (verify_v1 |Delta_T| + |Delta_Q| <= 0.042 eV: IO 0.041, BrO 0.032, CuO aDZ 0.027).
 POST_CC_ALLOWANCE_EV = 0.05
+# Route A: when CCSDTQ does not fit, E(DMRG) - E(CCSDT) in frozen natural orbitals
+# (fno_dmrg_increment) replaces the quadruples allowance.  Not a policy field: the
+# policy is part of every post-CC point signature.  OPENEA_FNO_DMRG=0 disables it.
+FNO_DMRG_BEYOND_TRIPLES = os.environ.get("OPENEA_FNO_DMRG", "1") != "0"
 CC_SCRATCH_ROOT = Path(os.environ.get("OPENEA_CC_SCRATCH", f"/scratch/{os.environ.get('USER', 'openea')}/openea_cc"))
 
 
@@ -310,6 +322,35 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
     return record
 
 
+def _fno_dmrg_increment(states: Mapping[str, Any], policy: PostCCSDTStagePolicy, output_dir: Path) -> dict:
+    """Beyond-CCSDT EA increment from FNO-DMRG at two truncation levels (both states)."""
+    from .fno_dmrg_increment import FNODMRGPolicy, ea_increment, run_fno_dmrg_point
+    from .adaptive.stage3_execution import valence_frozen_core_orbitals
+    fno_policy, basis = FNODMRGPolicy(), policy.quadruples_bases[-1]
+    n_occ_active_max = 0
+    for spec in states.values():
+        mol = _mol(spec, basis, False, 1000)
+        n_occ_active_max = max(n_occ_active_max, mol.nelec[0] - valence_frozen_core_orbitals(mol))
+    jobs, keys = [], []
+    for role, spec in states.items():
+        for level in (0, 1):
+            path = str(output_dir / "fno_dmrg" / f"{role}__{basis}__L{level}.json")
+            scratch = str(CC_SCRATCH_ROOT / f"dmrg_{socket.gethostname()}_{uuid.uuid4().hex[:8]}")
+            print(f"[POST-CC] {spec.system} {role} {basis} FNO-DMRG level {level}", flush=True)
+            jobs.append((spec, basis, level, n_occ_active_max, fno_policy, policy, path, scratch))
+            keys.append((role, level))
+    results = run_parallel(run_fno_dmrg_point, jobs,
+                           reserve_mb=[fno_policy.dmrg_stack_memory_mb + policy.max_memory_mb] * len(jobs))
+    points = dict(zip(keys, results))
+    out = {"policy": asdict(fno_policy), "basis": basis,
+           "points": {f"{r}:L{lv}": {k: v for k, v in p.items() if k != "signature"} for (r, lv), p in points.items()}}
+    failed = [f"{r} L{lv}: {p.get('error')}" for (r, lv), p in points.items() if p.get("status") != "COMPLETED"]
+    if failed:
+        return {**out, "status": "FAILED", "reason": "; ".join(failed)}
+    from .electronic_ea_stage import HARTREE_TO_EV as h2ev
+    return {**out, "status": "COMPLETED", **ea_increment(points, h2ev)}
+
+
 def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Any],
                           point_records: Mapping[str, Mapping[str, Any]], refinement_dir: Path, output_dir: Path,
                           policy: PostCCSDTStagePolicy = PostCCSDTStagePolicy(), point_fn=None) -> dict:
@@ -391,6 +432,17 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
     t_bound = (abs(delta_t[t_bases[-1]] - delta_t[t_bases[0]]) if len(t_bases) > 1
                else 0.5 * abs(t_central))
     record.update(delta_t_by_basis_ev=delta_t, delta_t_ev=t_central, delta_t_bound_ev=t_bound)
+    if not run_q and FNO_DMRG_BEYOND_TRIPLES:
+        fno = _fno_dmrg_increment(states, policy, output_dir)
+        record["fno_dmrg"] = fno
+        if fno["status"] == "COMPLETED":
+            q_basis_used = policy.quadruples_bases[-1]
+            q_bound = fno["half_width_ev"] + policy.quadruples_relative_bound * abs(fno["delta_ev"])
+            return done(status="CLEARED_FNO_DMRG", quadruples_computed=False, beyond_triples_computed=True,
+                        quadruples_basis=q_basis_used, delta_q_ev=fno["delta_ev"], delta_q_bound_ev=q_bound,
+                        delta_post_ev=t_central + fno["delta_ev"], bound_ev=t_bound + q_bound,
+                        reason=f"CCSDTQ storage {estimates} MB exceeds {limit_mb} MB; beyond-CCSDT increment "
+                               f"E(DMRG) - E(CCSDT) in frozen-natural-orbital spaces ({q_basis_used})")
     if not run_q:
         allowance = max(Q_ALLOWANCE_MIN_EV, abs(t_central))
         return done(status="CLEARED_WITH_QUADRUPLES_ALLOWANCE", quadruples_computed=False,

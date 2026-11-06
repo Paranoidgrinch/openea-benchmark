@@ -25,6 +25,11 @@ def fake_point(spec, basis, method, policy, path):
     return {"role": spec.role, "basis": basis, "method": method, "status": "COMPLETED", "total_hartree": e}
 
 
+@pytest.fixture(autouse=True)
+def _no_fno_dmrg_by_default(monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", False)
+
+
 def run(tmp_path, monkeypatch, limit, scratch_free_mb=1.0e9):
     monkeypatch.setattr(post_ccsd_t_stage, "cc_storage_mb",
                         lambda spec, basis, method: (50000.0 if basis == "aug-cc-pvdz" else 10000.0)
@@ -194,3 +199,26 @@ def test_no_affordable_triples_gives_a_post_cc_allowance(tmp_path, monkeypatch):
     out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, post_ccsd_t=res)
     assert out["includes_post_ccsd_t"] and out["post_ccsd_t_triples_computed"] is False
     assert abs(out["ea0_upper_ev"] - (1.01 + post_ccsd_t_stage.POST_CC_ALLOWANCE_EV)) < 1e-12
+
+
+def test_unaffordable_quadruples_use_fno_dmrg_increment(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", True)
+    monkeypatch.setattr(post_ccsd_t_stage, "_fno_dmrg_increment",
+                        lambda states, policy, out: {"status": "COMPLETED", "delta_ev": -0.008, "half_width_ev": 0.001})
+    res = run(tmp_path, monkeypatch, limit=5000)
+    assert res["status"] == "CLEARED_FNO_DMRG" and res["beyond_triples_computed"]
+    assert abs(res["delta_post_ev"] - (-0.006 - 0.008)) < 1e-9
+    assert abs(res["bound_ev"] - (0.002 + 0.001 + 0.5 * 0.008)) < 1e-9
+    cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
+           "ea_cbs_upper_ev": 1.01}
+    nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
+    out = assemble_adiabatic_ea(cbs=cbs, nuclear=nuc, post_ccsd_t=res)
+    assert out["includes_post_ccsd_t"] and abs(out["ea0_ev"] - 0.986) < 1e-9
+
+
+def test_failed_fno_dmrg_falls_back_to_the_allowance(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", True)
+    monkeypatch.setattr(post_ccsd_t_stage, "_fno_dmrg_increment",
+                        lambda states, policy, out: {"status": "FAILED", "reason": "x"})
+    res = run(tmp_path, monkeypatch, limit=5000)
+    assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE" and res["fno_dmrg"]["status"] == "FAILED"
