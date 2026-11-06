@@ -121,9 +121,11 @@ def dmrg_energy(mf, nfrozen: int, n_active: int, policy: FNODMRGPolicy, scratch:
     noises = [1e-5] * third + [1e-6] * third + [0.0] * (n - 2 * third)
     rows = []
     for m in policy.bond_dimensions:
+        t0 = time.perf_counter()
         e = driver.dmrg(mpo, ket, n_sweeps=n, bond_dims=[m] * n, noises=noises, thrds=[1e-8] * n, iprint=0)
         rows.append({"bond_dimension": m, "energy_hartree": float(e),
-                     "discarded_weight": float(driver.get_dmrg_results()[1][-1])})
+                     "discarded_weight": float(driver.get_dmrg_results()[1][-1]),
+                     "wall_seconds": time.perf_counter() - t0})
     tail = rows[-3:]
     slope, e0 = np.polyfit([r["discarded_weight"] for r in tail], [r["energy_hartree"] for r in tail], 1)
     last = rows[-1]["energy_hartree"]
