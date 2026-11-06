@@ -26,8 +26,8 @@ def fake_point(spec, basis, method, policy, path):
 
 
 @pytest.fixture(autouse=True)
-def _no_fno_dmrg_by_default(monkeypatch):
-    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", False)
+def _no_fno_by_default(monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_BEYOND_TRIPLES", False)
 
 
 def run(tmp_path, monkeypatch, limit, scratch_free_mb=1.0e9):
@@ -201,12 +201,12 @@ def test_no_affordable_triples_gives_a_post_cc_allowance(tmp_path, monkeypatch):
     assert abs(out["ea0_upper_ev"] - (1.01 + post_ccsd_t_stage.POST_CC_ALLOWANCE_EV)) < 1e-12
 
 
-def test_unaffordable_quadruples_use_fno_dmrg_increment(tmp_path, monkeypatch):
-    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", True)
-    monkeypatch.setattr(post_ccsd_t_stage, "_fno_dmrg_increment",
+def test_unaffordable_quadruples_use_fno_ccsdtq_increment(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_BEYOND_TRIPLES", True)
+    monkeypatch.setattr(post_ccsd_t_stage, "_fno_increment",
                         lambda states, policy, out: {"status": "COMPLETED", "delta_ev": -0.008, "half_width_ev": 0.001})
     res = run(tmp_path, monkeypatch, limit=5000)
-    assert res["status"] == "CLEARED_FNO_DMRG" and res["beyond_triples_computed"]
+    assert res["status"] == "CLEARED_FNO_CCSDTQ" and res["beyond_triples_computed"]
     assert abs(res["delta_post_ev"] - (-0.006 - 0.008)) < 1e-9
     assert abs(res["bound_ev"] - (0.002 + 0.001 + 0.5 * 0.008)) < 1e-9
     cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
@@ -216,9 +216,9 @@ def test_unaffordable_quadruples_use_fno_dmrg_increment(tmp_path, monkeypatch):
     assert out["includes_post_ccsd_t"] and abs(out["ea0_ev"] - 0.986) < 1e-9
 
 
-def test_failed_fno_dmrg_falls_back_to_the_allowance(tmp_path, monkeypatch):
-    monkeypatch.setattr(post_ccsd_t_stage, "FNO_DMRG_BEYOND_TRIPLES", True)
-    monkeypatch.setattr(post_ccsd_t_stage, "_fno_dmrg_increment",
+def test_failed_fno_falls_back_to_the_allowance(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_ccsd_t_stage, "FNO_BEYOND_TRIPLES", True)
+    monkeypatch.setattr(post_ccsd_t_stage, "_fno_increment",
                         lambda states, policy, out: {"status": "FAILED", "reason": "x"})
     res = run(tmp_path, monkeypatch, limit=5000)
-    assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE" and res["fno_dmrg"]["status"] == "FAILED"
+    assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE" and res["fno_ccsdtq"]["status"] == "FAILED"

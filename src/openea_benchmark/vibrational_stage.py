@@ -519,7 +519,7 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     so_ok = bool(spin_orbit) and spin_orbit.get("status") == "CLEARED"
     sr_ok = bool(scalar_relativity) and scalar_relativity.get("status") == "SCALAR_RELATIVITY_CLEARED"
     pc_ok = bool(post_ccsd_t) and post_ccsd_t.get("status") in (
-        "CLEARED", "CLEARED_FNO_DMRG", "CLEARED_WITH_QUADRUPLES_ALLOWANCE", "CLEARED_WITH_POST_CC_ALLOWANCE")
+        "CLEARED", "CLEARED_FNO_CCSDTQ", "CLEARED_WITH_QUADRUPLES_ALLOWANCE", "CLEARED_WITH_POST_CC_ALLOWANCE")
     missing = [name for name, ok in (("CV", cv_ok), ("SR", sr_ok), ("SOC", so_ok), ("POST_CCSD_T", pc_ok))
                if not ok]
     record: dict[str, Any] = {
