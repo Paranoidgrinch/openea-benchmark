@@ -1,6 +1,6 @@
 {
- "source": "NIST Atomic Spectra Database, energy levels (ASD v5.12); measured levels only",
- "rules": "levels are kept (ASD level help, levelshelp.html, version 5.12):\n  [..]  semi-empirical (interpolation/extrapolation)  -> rejected\n  (..)  ab-initio calculation / not evaluated experimental data -> rejected\n  ?     level may not be real                         -> rejected\n  +x    unknown offset to the main level system       -> rejected\n  a     autoionization broadened; o undocumented      -> rejected\nA configuration label with \"?\" (questionable assignment) is rejected as well, as is an f shell\nwritten without occupation whose parent term does not identify it (e.g. \"4f.(8S*)\").\nAn f shell missing from the label is empty, except for Yb, No, Lr (closed f14 shell omitted).",
+ "source": "measured atomic levels: NIST ASD (v5.12) and Blaise & Wyart actinide tables (LAC)",
+ "rules": "(downloads/fetch_fshell_data.sh, downloads/fetch_lac_tables.sh):\n\n1. NIST ASD energy-level tables ``{El}_{I,II}.tsv`` (Ce–Yb, Ac–Lr).  Only measured levels are\n   kept (ASD level help, levelshelp.html, version 5.12):\n     [..]  semi-empirical (interpolation/extrapolation)  -> rejected\n     (..)  ab-initio calculation / not evaluated experimental data -> rejected\n     ?     level may not be real                         -> rejected\n     +x    unknown offset to the main level system       -> rejected\n     a     autoionization broadened; o undocumented      -> rejected\n2. Blaise & Wyart, \"Selected Constants: Energy Levels and Atomic Spectra of Actinides\"\n   (Laboratoire Aimé Cotton; archived copy of lac.universite-paris-saclay.fr/Data/Database),\n   energy-level tables of the first and second spectra (Tab-energy/*/*-tables/Xx{1,2}{e,o}*.html,\n   Ac–Es).  These list levels observed in spectra with their discovery reference; Table I of\n   the compilation, which also holds predicted configuration onsets (given with ±), is not used.\n   A row is kept only if its energy is a plain number (no ?, typos or shifted columns) and its\n   configuration label identifies the f count.  Laser-spectroscopy lists without\n   configurations are not used.\n\nCommon rules: a configuration label that does not parse into subshells (e.g. \"5f 9 6d 7S\")\nor carries \"?\" is rejected, as is an f shell written without\noccupation whose parent term does not identify it (e.g. \"4f.(8S*)\").  An f shell missing\nfrom the label is empty, except for Yb, No, Lr (closed f14 shell omitted).",
  "elements": {
   "Ce": {
    "f_shell": "4f",
@@ -21,6 +21,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 77179.442,
       "energy_ev": 9.569031252305978
@@ -34,6 +35,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 82520.55,
       "energy_ev": 10.231244246459802
@@ -49,6 +51,7 @@
       "J": "4",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -62,6 +65,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 2369.068,
       "energy_ev": 0.2937269970264623
@@ -75,6 +79,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13513.875,
       "energy_ev": 1.675506959674008
@@ -88,6 +93,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 19014.863,
       "energy_ev": 2.3575425474741913
@@ -101,6 +107,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 44672.0,
       "energy_ev": 5.538622112647726
@@ -114,6 +121,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 47054.246,
       "energy_ev": 5.833982973441212
@@ -127,6 +135,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 54450.986000000004,
       "energy_ev": 6.751061853399708
@@ -140,6 +149,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 69335.053,
       "energy_ev": 8.596450969900655
@@ -153,6 +163,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 75417.286,
       "energy_ev": 9.350551753122263
@@ -168,6 +179,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 4762.718,
       "energy_ev": 0.5905017736189414
@@ -181,6 +193,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 12114.115,
       "energy_ev": 1.5019588380676376
@@ -194,6 +207,7 @@
       "J": "5",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18284.583,
       "energy_ev": 2.2669993670384736
@@ -207,6 +221,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 27499.17,
       "energy_ev": 3.4094625501759257
@@ -220,6 +235,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48526.012,
       "energy_ev": 6.01645870124035
@@ -233,6 +249,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 51683.804000000004,
       "energy_ev": 6.407975011196074
@@ -246,6 +263,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 70438.355,
       "energy_ev": 8.733242984006324
@@ -261,6 +279,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 82866.728,
       "energy_ev": 10.274164848306869
@@ -287,6 +306,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 4432.22,
       "energy_ev": 0.5495252440033915
@@ -300,6 +320,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 6714.22,
       "energy_ev": 0.8324571848402045
@@ -313,6 +334,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18125.55,
       "energy_ev": 2.2472817880081926
@@ -328,6 +350,7 @@
       "J": "9/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -341,6 +364,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 8080.49,
       "energy_ev": 1.0018530756408672
@@ -354,6 +378,7 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 27201.91,
       "energy_ev": 3.372607007348077
@@ -380,6 +405,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 6764.211,
       "energy_ev": 0.838655278904347
@@ -393,6 +419,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 8800.392,
       "energy_ev": 1.0911095480651896
@@ -406,6 +433,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 20271.673,
       "energy_ev": 2.513367127913768
@@ -419,6 +447,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 24856.36,
       "energy_ev": 3.081795870700493
@@ -432,6 +461,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 52569.92,
       "energy_ev": 6.517839393179663
@@ -445,6 +475,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 54614.305,
       "energy_ev": 6.771310828704497
@@ -458,6 +489,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 78123.63500000001,
       "energy_ev": 9.686096264582286
@@ -471,6 +503,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 85856.73999999999,
       "energy_ev": 10.644879089448569
@@ -486,6 +519,7 @@
       "J": "4",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -499,6 +533,7 @@
       "J": "5",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 8475.355,
       "energy_ev": 1.0508100961573126
@@ -512,6 +547,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13672.851,
       "energy_ev": 1.695217471604978
@@ -525,6 +561,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 21889.659,
       "energy_ev": 2.713971825208594
@@ -538,6 +575,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 23553.851,
       "energy_ev": 2.920305336376472
@@ -551,6 +589,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 28027.403,
       "energy_ev": 3.474955095269726
@@ -564,6 +603,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 44560.11,
       "energy_ev": 5.524749520684434
@@ -577,6 +617,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48997.67,
       "energy_ev": 6.074936840307488
@@ -590,6 +631,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 67790.09,
       "energy_ev": 8.404899970728408
@@ -616,6 +658,7 @@
       "J": "5/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -629,6 +672,7 @@
       "J": "2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 45020.8,
       "energy_ev": 5.581867801063099
@@ -642,6 +686,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 50353.16,
       "energy_ev": 6.242996181448984
@@ -668,6 +713,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18075.67,
       "energy_ev": 2.2410974561900767
@@ -683,6 +729,7 @@
       "J": "0",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -696,6 +743,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 10801.1,
       "energy_ev": 1.3391657257548208
@@ -709,6 +757,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13796.36,
       "energy_ev": 1.710530635969927
@@ -722,6 +771,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 28708.2,
       "energy_ev": 3.5593631656141085
@@ -735,6 +785,7 @@
       "J": "1/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 45519.69,
       "energy_ev": 5.643722277822116
@@ -748,6 +799,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 52654.75,
       "energy_ev": 6.528356972733207
@@ -763,6 +815,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 63808.54,
       "energy_ev": 7.911250685435327
@@ -789,6 +842,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 27852.9,
       "energy_ev": 3.453319480689601
@@ -802,6 +856,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31203.49,
       "energy_ev": 3.8687396961358838
@@ -815,6 +870,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 77593.41,
       "energy_ev": 9.620356742965194
@@ -828,6 +884,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 84032.1,
       "energy_ev": 10.41865256160962
@@ -843,6 +900,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -856,6 +914,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 12923.72,
       "energy_ev": 1.6023370650444946
@@ -869,6 +928,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 14067.86,
       "energy_ev": 1.7441923458459985
@@ -882,6 +942,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 28519.97,
       "energy_ev": 3.536025619942017
@@ -895,6 +956,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 28763.82,
       "energy_ev": 3.5662591667312613
@@ -908,6 +970,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31848.81,
       "energy_ev": 3.9487491790722604
@@ -921,6 +984,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 34422.94,
       "energy_ev": 4.2679006237989325
@@ -934,6 +998,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 35612.47,
       "energy_ev": 4.415383547367563
@@ -947,6 +1012,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 36659.31,
       "energy_ev": 4.545175165660993
@@ -960,6 +1026,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 39203.83,
       "energy_ev": 4.8606554382719
@@ -973,6 +1040,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 39267.62,
       "energy_ev": 4.868564390290296
@@ -986,6 +1054,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 40298.02,
       "energy_ev": 4.9963177083613965
@@ -999,6 +1068,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 41515.52,
       "energy_ev": 5.147268469960354
@@ -1012,6 +1082,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 42787.0,
       "energy_ev": 5.304911898591024
@@ -1025,6 +1096,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 43559.52,
       "energy_ev": 5.400692171568787
@@ -1038,6 +1110,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44061.21,
       "energy_ev": 5.462893804083433
@@ -1051,6 +1124,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44411.55,
       "energy_ev": 5.506330428164401
@@ -1064,6 +1138,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44659.84,
       "energy_ev": 5.537114464794713
@@ -1077,6 +1152,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44843.61,
       "energy_ev": 5.559899040941769
@@ -1090,6 +1166,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44996.32,
       "energy_ev": 5.578832667885322
@@ -1103,6 +1180,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45106.83,
       "energy_ev": 5.592534161654769
@@ -1116,6 +1194,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45658.74,
       "energy_ev": 5.660962280614998
@@ -1129,6 +1208,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45662.57,
       "energy_ev": 5.6614371400950185
@@ -1142,6 +1222,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45666.13,
       "energy_ev": 5.66187852384146
@@ -1155,6 +1236,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45669.43,
       "energy_ev": 5.6622876716963075
@@ -1168,6 +1250,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45672.53,
       "energy_ev": 5.662672022711466
@@ -1181,6 +1264,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45675.37,
       "energy_ev": 5.663024137835032
@@ -1194,6 +1278,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45678.0,
       "energy_ev": 5.663350216276926
@@ -1207,6 +1292,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45680.53,
       "energy_ev": 5.663663896298975
@@ -1220,6 +1306,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45682.86,
       "energy_ev": 5.663952779481337
@@ -1233,6 +1320,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45685.03,
       "energy_ev": 5.664221825191949
@@ -1246,6 +1334,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45687.12,
       "energy_ev": 5.664480952166686
@@ -1259,6 +1348,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45689.05,
       "energy_ev": 5.664720241669672
@@ -1272,6 +1362,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45690.82,
       "energy_ev": 5.664939693700908
@@ -1285,6 +1376,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45692.5,
       "energy_ev": 5.665147987154285
@@ -1298,6 +1390,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45694.05,
       "energy_ev": 5.665340162661865
@@ -1311,6 +1404,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45695.5,
       "energy_ev": 5.6655199397496006
@@ -1324,6 +1418,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45696.87,
       "energy_ev": 5.665689798101462
@@ -1337,6 +1432,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45698.16,
       "energy_ev": 5.665849737717448
@@ -1350,6 +1446,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45699.4,
       "energy_ev": 5.666003478123511
@@ -1363,6 +1460,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45700.57,
       "energy_ev": 5.666148539635684
@@ -1376,6 +1474,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45701.7,
       "energy_ev": 5.66628864177992
@@ -1389,6 +1488,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47373.1,
       "energy_ev": 5.873515831050143
@@ -1402,6 +1502,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47374.1,
       "energy_ev": 5.873639815248581
@@ -1415,6 +1516,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47375.04,
       "energy_ev": 5.873756360395114
@@ -1428,6 +1530,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47375.96,
       "energy_ev": 5.873870425857677
@@ -1441,6 +1544,7 @@
       "J": "5/2 or 7/2 or 9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47376.87,
       "energy_ev": 5.873983251478257
@@ -1454,6 +1558,7 @@
       "J": "4",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 47404.1,
       "energy_ev": 5.877359341201738
@@ -1467,6 +1572,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 57327.1,
       "energy_ev": 7.107654542307652
@@ -1480,6 +1586,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 71178.38,
       "energy_ev": 8.824994390455826
@@ -1493,6 +1600,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 96532.13,
       "energy_ev": 11.96845876161768
@@ -1506,6 +1614,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 101678.08,
       "energy_ev": 12.606475247572629
@@ -1519,6 +1628,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 114002.1,
       "energy_ev": 14.134458988813515
@@ -1545,6 +1655,7 @@
       "J": "2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -1558,6 +1669,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 6378.146,
       "energy_ev": 0.790789319334161
@@ -1571,6 +1683,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13433.851,
       "energy_ev": 1.6655852481781601
@@ -1584,6 +1697,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 14036.026,
       "energy_ev": 1.740245432872905
@@ -1597,6 +1711,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 22429.156,
       "energy_ev": 2.780860928313606
@@ -1610,6 +1725,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 23103.66,
       "energy_ev": 2.8644887660972143
@@ -1623,6 +1739,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31907.02,
       "energy_ev": 3.9559662992633697
@@ -1636,6 +1753,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 34719.128,
       "energy_ev": 4.304623255566055
@@ -1649,6 +1767,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 35561.302,
       "energy_ev": 4.409039523901859
@@ -1662,6 +1781,7 @@
       "J": "5/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 49601.45,
       "energy_ev": 6.149796019640727
@@ -1675,6 +1795,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 53045.685,
       "energy_ev": 6.576826735349789
@@ -1688,6 +1809,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 53628.611,
       "energy_ev": 6.64910034820879
@@ -1701,6 +1823,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 75270.14199999999,
       "energy_ev": 9.332308222227217
@@ -1714,6 +1837,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 75561.523,
       "energy_ev": 9.368434861952448
@@ -1729,6 +1853,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 10947.21,
       "energy_ev": 1.35728105698868
@@ -1742,6 +1867,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 24255.103,
       "energy_ev": 3.007249503499915
@@ -1755,6 +1881,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 25658.055,
       "energy_ev": 3.181193382667701
@@ -1768,6 +1895,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 40439.513,
       "energy_ev": 5.0138606045510645
@@ -1781,6 +1909,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 57593.71799999999,
       "energy_ev": 7.1407109613269455
@@ -1794,6 +1923,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 67968.304,
       "energy_ev": 8.42699569066894
@@ -1807,6 +1937,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 82196.798,
       "energy_ev": 10.191104114246919
@@ -1833,6 +1964,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 285.5,
       "energy_ev": 0.035397488654211266
@@ -1846,6 +1978,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 8190.465,
       "energy_ev": 1.0154882378641488
@@ -1859,6 +1992,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13616.27,
       "energy_ev": 1.6882023216731252
@@ -1872,6 +2006,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": "L8844",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 50530.19,
       "energy_ev": 6.264945104098563
@@ -1885,6 +2020,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 53193.35,
       "energy_ev": 6.5951348620122205
@@ -1900,6 +2036,7 @@
       "J": "15/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -1913,6 +2050,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 23043.43,
       "energy_ev": 2.8570211978252593
@@ -1926,6 +2064,7 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 30095.53,
       "energy_ev": 3.7313701636338874
@@ -1939,6 +2078,7 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 47295.0,
       "energy_ev": 5.863832665152091
@@ -1952,6 +2092,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 58556.56,
       "energy_ev": 7.260088154919934
@@ -1965,6 +2106,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": "L8844",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 73099.65,
       "energy_ev": 9.063201511389893
@@ -1991,6 +2133,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L11757",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 7565.61,
       "energy_ev": 0.9380160915488172
@@ -2004,6 +2147,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18472.71,
       "energy_ev": 2.290324142338126
@@ -2017,6 +2161,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 20789.85,
       "energy_ev": 2.5776128879080704
@@ -2030,6 +2175,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 23031.46,
       "energy_ev": 2.85553710696995
@@ -2043,6 +2189,7 @@
       "J": "9",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 40594.03,
       "energy_ev": 5.033018270941197
@@ -2056,6 +2203,7 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": "L11757",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 58495.957,
       "energy_ev": 7.252574340541963
@@ -2069,6 +2217,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L11757",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 60238.074,
       "energy_ev": 7.468569320373166
@@ -2082,6 +2231,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 67393.91,
       "energy_ev": 8.355779910991018
@@ -2095,6 +2245,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 84113.95000000001,
       "energy_ev": 10.428800668251819
@@ -2108,6 +2259,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 85719.07,
       "energy_ev": 10.627810184849533
@@ -2123,6 +2275,7 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -2136,6 +2289,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 15567.38,
       "energy_ev": 1.9301091310886003
@@ -2149,6 +2303,7 @@
       "J": "9",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 17514.5,
       "energy_ev": 2.1715212435523057
@@ -2162,6 +2317,7 @@
       "J": "9",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 30560.56,
       "energy_ev": 3.789026535433775
@@ -2175,6 +2331,7 @@
       "J": "8",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 35518.27,
       "energy_ev": 4.403704235874649
@@ -2188,6 +2345,7 @@
       "J": "17/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 47901.76,
       "energy_ev": 5.939061317396677
@@ -2201,6 +2359,7 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 62747.67,
       "energy_ev": 7.779719568837803
@@ -2214,6 +2373,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L11757",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 73093.799,
       "energy_ev": 9.06247607984483
@@ -2240,6 +2400,7 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 8378.91,
       "energy_ev": 1.0388524401389048
@@ -2253,6 +2414,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18572.28,
       "energy_ev": 2.3026692489766543
@@ -2266,6 +2428,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 20167.17,
       "energy_ev": 2.5004104072243427
@@ -2279,6 +2442,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 24112.04,
       "energy_ev": 2.989511952118698
@@ -2294,6 +2458,7 @@
       "J": "15/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -2307,6 +2472,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 15855.28,
       "energy_ev": 1.9658041818190644
@@ -2320,6 +2486,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 18867.4,
       "energy_ev": 2.339259465619845
@@ -2333,22 +2500,10 @@
       "J": "17/2",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31116.22,
       "energy_ev": 3.8579195951381497
-     },
-     {
-      "f_count": 11,
-      "valence": "6s *.7p",
-      "level_cm1": 36344.52,
-      "configuration": "4f11.(4I*<15/2>).6s (15/2,1/2)*<8>.7p<1/2>",
-      "term": "(8,1/2)",
-      "J": "15/2",
-      "uncertainty_cm1": null,
-      "reference": "L3974",
-      "charge": 0,
-      "energy_cm1": 36344.52,
-      "energy_ev": 4.506146179834516
      },
      {
       "f_count": 11,
@@ -2359,6 +2514,7 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48567.0,
       "energy_ev": 6.0215405655659495
@@ -2372,6 +2528,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 64848.6,
       "energy_ev": 8.040201690863345
@@ -2385,6 +2542,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 74801.19,
       "energy_ev": 9.274165584401056
@@ -2411,6 +2569,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 7176.503,
       "energy_ev": 0.8897729720469811
@@ -2424,6 +2583,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 16464.934,
       "energy_ev": 2.0413916443339315
@@ -2437,6 +2597,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 20166.13,
       "energy_ev": 2.500281463657967
@@ -2450,6 +2611,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 22979.591,
       "energy_ev": 2.84910617058114
@@ -2463,6 +2625,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 41724.387,
       "energy_ev": 5.173164677535622
@@ -2476,6 +2639,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 56086.774,
       "energy_ev": 6.953873717395137
@@ -2489,6 +2653,7 @@
       "J": "13/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 59929.186,
       "energy_ev": 7.430272089285873
@@ -2502,6 +2667,7 @@
       "J": "15/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 81310.749,
       "energy_ev": 10.081248039204624
@@ -2517,6 +2683,7 @@
       "J": "6",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -2530,6 +2697,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 16321.11,
       "energy_ev": 2.0235597409777024
@@ -2543,6 +2711,7 @@
       "J": "5",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 19362.105,
       "energy_ev": 2.4005950685083968
@@ -2556,6 +2725,7 @@
       "J": "7",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31719.664,
       "energy_ev": 3.9327371157807134
@@ -2569,6 +2739,7 @@
       "J": "13/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 49262.0,
       "energy_ev": 6.107709583480755
@@ -2582,6 +2753,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 65814.871,
       "energy_ev": 8.160004026272778
@@ -2608,6 +2780,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 13119.61,
       "energy_ev": 1.626624329676626
@@ -2621,6 +2794,7 @@
       "J": "11/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 22468.046,
       "energy_ev": 2.785682673790882
@@ -2634,6 +2808,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 29308.69,
       "energy_ev": 3.6338144369344842
@@ -2647,6 +2822,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 74794.39,
       "energy_ev": 9.273322491851673
@@ -2660,6 +2836,7 @@
       "J": "5",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 78904.57,
       "energy_ev": 9.782919864589909
@@ -2673,6 +2850,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 93177.87,
       "energy_ev": 11.552583524163126
@@ -2686,6 +2864,7 @@
       "J": "6",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 100562.56,
       "energy_ev": 12.468168394530437
@@ -2699,6 +2878,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 107175.35,
       "energy_ev": 13.28804986212302
@@ -2714,6 +2894,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -2727,6 +2908,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 16742.237,
       "energy_ev": 2.0757728345135416
@@ -2740,6 +2922,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 20406.84,
       "energy_ev": 2.5301257000641146
@@ -2753,6 +2936,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 32217.195,
       "energy_ev": 3.9944230980140523
@@ -2766,6 +2950,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 37557.25,
       "energy_ev": 4.656505536806922
@@ -2779,6 +2964,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 38318.62,
       "energy_ev": 4.750903385972094
@@ -2792,6 +2978,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 38861.937,
       "energy_ev": 4.818266108715142
@@ -2805,6 +2992,7 @@
       "J": "9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 41078.537,
       "energy_ev": 5.093089482974072
@@ -2818,6 +3006,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 41841.602,
       "energy_ev": 5.187697485355598
@@ -2831,373 +3020,10 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 43318.02,
       "energy_ev": 5.370749987645873
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.30p",
-      "level_cm1": 49721.34,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.30p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49721.34,
-      "energy_ev": 6.1646604851915265
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.31p",
-      "level_cm1": 49731.2,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.31p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49731.2,
-      "energy_ev": 6.1658829693881305
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.21p",
-      "level_cm1": 49735.52,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.21p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49735.52,
-      "energy_ev": 6.166418581125385
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.32p",
-      "level_cm1": 49741.82,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.32p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49741.82,
-      "energy_ev": 6.167199681575549
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.33p",
-      "level_cm1": 49751.42,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.33p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49751.42,
-      "energy_ev": 6.168389929880559
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.34p",
-      "level_cm1": 49758.97,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.34p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49758.97,
-      "energy_ev": 6.169326010578771
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.35p",
-      "level_cm1": 49767.21,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.35p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49767.21,
-      "energy_ev": 6.170347640373904
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.36p",
-      "level_cm1": 49773.39,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.36p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49773.39,
-      "energy_ev": 6.171113862720254
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.37p",
-      "level_cm1": 49778.61,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.37p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49778.61,
-      "energy_ev": 6.171761060236103
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.22p",
-      "level_cm1": 49778.61,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.22p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49778.61,
-      "energy_ev": 6.171761060236103
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.38p",
-      "level_cm1": 49785.26,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.38p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49785.26,
-      "energy_ev": 6.17258555515572
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.39p",
-      "level_cm1": 49791.45,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.39p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49791.45,
-      "energy_ev": 6.173353017344055
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.40p",
-      "level_cm1": 49796.05,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.40p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49796.05,
-      "energy_ev": 6.173923344656872
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.41p",
-      "level_cm1": 49800.21,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.41p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49800.21,
-      "energy_ev": 6.174439118922376
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.42p",
-      "level_cm1": 49804.5,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.42p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49804.5,
-      "energy_ev": 6.174971011133678
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.43p",
-      "level_cm1": 49808.05,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.43p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49808.05,
-      "energy_ev": 6.175411155038136
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.44p",
-      "level_cm1": 49811.66,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<4>.44p<3/2>",
-      "term": "(4,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49811.66,
-      "energy_ev": 6.175858737994498
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.23p",
-      "level_cm1": 49813.72,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.23p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49813.72,
-      "energy_ev": 6.1761141454432815
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.24p",
-      "level_cm1": 49834.98,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.24p<1/2>",
-      "term": "(3,1/2)",
-      "J": "5/2 or 7/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49834.98,
-      "energy_ev": 6.178750049502086
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.25p",
-      "level_cm1": 49862.08,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.25p<1/2>",
-      "term": "(3,1/2)",
-      "J": "5/2 or 7/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49862.08,
-      "energy_ev": 6.182110021279771
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.26p",
-      "level_cm1": 49884.66,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.26p<1/2>",
-      "term": "(3,1/2)",
-      "J": "5/2 or 7/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49884.66,
-      "energy_ev": 6.184909584480514
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.27p",
-      "level_cm1": 49908.9,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.27p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49908.9,
-      "energy_ev": 6.187914961450665
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.28p",
-      "level_cm1": 49926.21,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.28p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49926.21,
-      "energy_ev": 6.190061127925636
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.29p",
-      "level_cm1": 49941.28,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.29p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 49941.28,
-      "energy_ev": 6.191929569796105
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.45p",
-      "level_cm1": 50052.09,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.45p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 50052.09,
-      "energy_ev": 6.205668258825082
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.46p",
-      "level_cm1": 50054.66,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.46p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 50054.66,
-      "energy_ev": 6.2059868982150705
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.47p",
-      "level_cm1": 50057.64,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.47p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 50057.64,
-      "energy_ev": 6.206356371126417
-     },
-     {
-      "f_count": 13,
-      "valence": "6s *.48p",
-      "level_cm1": 50060.45,
-      "configuration": "4f13.(2F*<7/2>).6s (7/2,1/2)*<3>.48p<3/2>",
-      "term": "(3,3/2)",
-      "J": "5/2 or 7/2 or 9/2",
-      "uncertainty_cm1": null,
-      "reference": null,
-      "charge": 0,
-      "energy_cm1": 50060.45,
-      "energy_ev": 6.206704766724029
      },
      {
       "f_count": 13,
@@ -3208,6 +3034,7 @@
       "J": "4",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 62337.1,
       "energy_ev": 7.72881537648488
@@ -3221,6 +3048,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 79961.75,
       "energy_ev": 9.913993479495193
@@ -3234,6 +3062,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 88317.12,
       "energy_ev": 10.949927331602854
@@ -3247,6 +3076,7 @@
       "J": "4",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 116010.13,
       "energy_ev": 14.383422978804113
@@ -3273,6 +3103,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 23188.518,
       "energy_ev": 2.8750098172083143
@@ -3286,6 +3117,7 @@
       "J": "3",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 32065.282,
       "energy_ev": 3.975588286476654
@@ -3299,6 +3131,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 39880.26,
       "energy_ev": 4.9445220696217005
@@ -3312,6 +3145,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 93278.45,
       "energy_ev": 11.565053854842077
@@ -3325,6 +3159,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 98618.72,
       "energy_ev": 12.227162950237611
@@ -3338,6 +3173,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 116872.48999999999,
       "energy_ev": 14.490341992169595
@@ -3351,6 +3187,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 119772.01,
       "energy_ev": 14.849836655226193
@@ -3364,6 +3201,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 127561.76999999999,
       "energy_ev": 15.815643804855016
@@ -3379,6 +3217,7 @@
       "J": "0",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -3392,6 +3231,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 17288.439,
       "energy_ev": 2.143493251669084
@@ -3405,6 +3245,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 24489.102,
       "energy_ev": 3.036261681950341
@@ -3418,6 +3259,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 32694.692,
       "energy_ev": 4.053625180815874
@@ -3431,6 +3273,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 38090.71,
       "energy_ev": 4.72264614730596
@@ -3444,6 +3287,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 39808.72,
       "energy_ev": 4.935652240065405
@@ -3457,6 +3301,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 41615.04,
       "energy_ev": 5.15960737738896
@@ -3470,6 +3315,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 42436.91,
       "energy_ev": 5.261506270559667
@@ -3483,6 +3329,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 43433.85,
       "energy_ev": 5.385111077351012
@@ -3496,6 +3343,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 43614.27,
       "energy_ev": 5.407480306433299
@@ -3509,6 +3357,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 44311.38,
       "energy_ev": 5.493910931006809
@@ -3522,6 +3371,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45121.37,
       "energy_ev": 5.594336891900066
@@ -3535,6 +3385,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 45956.27,
       "energy_ev": 5.697851299176426
@@ -3548,6 +3399,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 46078.91,
       "energy_ev": 5.713056721272933
@@ -3561,6 +3413,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 46444.96,
       "energy_ev": 5.75844113711137
@@ -3574,6 +3427,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 46877.1,
       "energy_ev": 5.812019668624613
@@ -3587,6 +3441,7 @@
       "J": "2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47326.65,
       "energy_ev": 5.867756765032672
@@ -3600,6 +3455,7 @@
       "J": "0",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47409.82,
       "energy_ev": 5.878068530816807
@@ -3613,6 +3469,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 47885.81,
       "energy_ev": 5.937083769431581
@@ -3626,6 +3483,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 48212.1,
       "energy_ev": 5.977538573540102
@@ -3639,6 +3497,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 48519.71,
       "energy_ev": 6.01567735282179
@@ -3652,6 +3511,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 48719.03,
       "energy_ev": 6.040389883254565
@@ -3665,6 +3525,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 48943.42,
       "energy_ev": 6.068210697542195
@@ -3678,6 +3539,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49110.07,
       "energy_ev": 6.088872664211983
@@ -3691,6 +3553,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49352.47,
       "energy_ev": 6.118926433913492
@@ -3704,6 +3567,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49536.43,
       "energy_ev": 6.1417345670582515
@@ -3717,6 +3581,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49677.59,
       "energy_ev": 6.159236176509839
@@ -3730,6 +3595,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49786.39,
       "energy_ev": 6.172725657299956
@@ -3743,6 +3609,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 49969.1,
       "energy_ev": 6.195378810196666
@@ -3756,6 +3623,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50016.08,
       "energy_ev": 6.20120358783931
@@ -3769,6 +3637,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50064.05,
       "energy_ev": 6.207151109838409
@@ -3782,6 +3651,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50104.49,
       "energy_ev": 6.212165030823264
@@ -3795,6 +3665,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50138.83,
       "energy_ev": 6.216422648197645
@@ -3808,6 +3679,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50168.24,
       "energy_ev": 6.220069023473723
@@ -3821,6 +3693,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50193.5,
       "energy_ev": 6.223200864326281
@@ -3834,6 +3707,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50217.49,
       "energy_ev": 6.226175245246822
@@ -3847,6 +3721,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50236.51,
       "energy_ev": 6.228533424701125
@@ -3860,6 +3735,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50253.22,
       "energy_ev": 6.230605200657033
@@ -3873,6 +3749,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50268.05,
       "energy_ev": 6.232443886319877
@@ -3886,6 +3763,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50280.84,
       "energy_ev": 6.234029644217905
@@ -3899,6 +3777,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50292.45,
       "energy_ev": 6.235469100761777
@@ -3912,6 +3791,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50303.0,
       "energy_ev": 6.236777134055305
@@ -3925,6 +3805,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50312.19,
       "energy_ev": 6.237916548838955
@@ -3938,6 +3819,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50320.44,
       "energy_ev": 6.238939418476074
@@ -3951,6 +3833,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50328.27,
       "energy_ev": 6.239910214749846
@@ -3964,6 +3847,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50335.15,
       "energy_ev": 6.240763226035105
@@ -3977,6 +3861,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50341.36,
       "energy_ev": 6.2415331679074075
@@ -3990,6 +3875,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50347.15,
       "energy_ev": 6.242251036416367
@@ -4003,6 +3889,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50352.42,
       "energy_ev": 6.242904433142138
@@ -4016,6 +3903,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50357.21,
       "energy_ev": 6.2434983174526595
@@ -4029,6 +3917,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50361.74,
       "energy_ev": 6.244059965871585
@@ -4042,6 +3931,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50365.83,
       "energy_ev": 6.2445670612432
@@ -4055,6 +3945,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50369.62,
       "energy_ev": 6.245036961355282
@@ -4068,6 +3959,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50373.2,
       "energy_ev": 6.245480824785692
@@ -4081,6 +3973,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50376.41,
       "energy_ev": 6.24587881406268
@@ -4094,6 +3987,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50379.4,
       "energy_ev": 6.246249526816011
@@ -4107,6 +4001,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50382.2,
       "energy_ev": 6.246596682571639
@@ -4120,6 +4015,7 @@
       "J": "1",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 50384.86,
       "energy_ev": 6.246926480539486
@@ -4133,6 +4029,7 @@
       "J": "1/2",
       "uncertainty_cm1": "0",
       "reference": "L3974",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 71859.7,
       "energy_ev": 8.90946730453599
@@ -4146,6 +4043,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 94820.5,
       "energy_ev": 11.756243688044272
@@ -4159,6 +4057,7 @@
       "J": "1/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 98921.51999999999,
       "energy_ev": 12.264705365524808
@@ -4172,6 +4071,7 @@
       "J": "1/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 126164.0,
       "energy_ev": 15.642342411803538
@@ -4185,6 +4085,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 134033.8,
       "energy_ev": 16.618073256675384
@@ -4198,6 +4099,7 @@
       "J": "1/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 135565.95,
       "energy_ev": 16.808035646313037
@@ -4211,6 +4113,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 142362.59999999998,
       "energy_ev": 17.65071284863053
@@ -4224,6 +4127,7 @@
       "J": "1/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 144899.31,
       "energy_ev": 17.965224804651633
@@ -4237,6 +4141,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 152318.65,
       "energy_ev": 18.88510572749484
@@ -4250,6 +4155,7 @@
       "J": "7/2,9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 152467.15,
       "energy_ev": 18.903517380962967
@@ -4263,6 +4169,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 155699.56,
       "energy_ev": 19.30428514383778
@@ -4276,6 +4183,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 157757.83000000002,
       "energy_ev": 19.559478099957936
@@ -4289,6 +4197,7 @@
       "J": "7/2,9/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 157854.62,
       "energy_ev": 19.5714785305248
@@ -4302,6 +4211,7 @@
       "J": "1/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 158627.96,
       "energy_ev": 19.667360470545283
@@ -4315,6 +4225,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 159664.58000000002,
       "energy_ev": 19.795884970330675
@@ -4328,6 +4239,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 161035.55,
       "energy_ev": 19.965863586863996
@@ -4341,6 +4253,7 @@
       "J": "3/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 162274.05,
       "energy_ev": 20.119418016630163
@@ -4354,6 +4267,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 163171.09999999998,
       "energy_ev": 20.23063804183948
@@ -4367,6 +4281,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 164079.22999999998,
       "energy_ev": 20.343231811967495
@@ -4380,6 +4295,7 @@
       "J": "5/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 164624.32,
       "energy_ev": 20.41081435869438
@@ -4393,6 +4309,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 165667.82,
       "energy_ev": 20.540191869765025
@@ -4406,6 +4323,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 166438.74,
       "energy_ev": 20.635773768025285
@@ -4419,6 +4337,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 167023.05,
       "energy_ev": 20.708218975014923
@@ -4432,6 +4351,7 @@
       "J": "7/2",
       "uncertainty_cm1": null,
       "reference": null,
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 167479.4,
       "energy_ev": 20.764799163972366
@@ -4458,6 +4378,7 @@
       "J": "3/2",
       "uncertainty_cm1": "0.000",
       "reference": "L7344",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -4471,6 +4392,7 @@
       "J": "1/2",
       "uncertainty_cm1": "0.04",
       "reference": "L21471",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 7477.36,
       "energy_ev": 0.9270744860366135
@@ -4478,28 +4400,30 @@
      {
       "f_count": 0,
       "valence": "6d2.7s",
-      "level_cm1": 9217.288,
-      "configuration": "6d2.(3F).7s",
+      "level_cm1": 9217.28,
+      "configuration": "6d2(3F).7s",
       "term": "4F",
       "J": "3/2",
-      "uncertainty_cm1": "0.013",
-      "reference": "L22136,L7344",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (57.3)",
+      "source": "Blaise-Wyart Ac I (Ac1e.html)",
       "charge": 0,
-      "energy_cm1": 9217.288,
-      "energy_ev": 1.142798064457435
+      "energy_cm1": 9217.28,
+      "energy_ev": 1.1427970725838474
      },
      {
       "f_count": 0,
       "valence": "6d.7s.7p",
-      "level_cm1": 13712.902,
-      "configuration": "6d.7s.(3D).7p",
-      "term": "4F*",
+      "level_cm1": 13712.9,
+      "configuration": "6d.7s(3D).7p",
+      "term": "4F",
       "J": "3/2",
-      "uncertainty_cm1": "0.012",
-      "reference": "L22136,L7344,L21471",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (57.3)",
+      "source": "Blaise-Wyart Ac I (Ac1o.html)",
       "charge": 0,
-      "energy_cm1": 13712.902,
-      "energy_ev": 1.700183162736641
+      "energy_cm1": 13712.9,
+      "energy_ev": 1.7001829147682441
      },
      {
       "f_count": 0,
@@ -4510,6 +4434,7 @@
       "J": "5/2",
       "uncertainty_cm1": "0.015",
       "reference": "L22136,L7344",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 27009.857,
       "energy_ev": 3.3487954700853546
@@ -4523,6 +4448,7 @@
       "J": "3/2",
       "uncertainty_cm1": "0.04",
       "reference": "L22136",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31530.46,
       "energy_ev": 3.9092788094993423
@@ -4536,6 +4462,7 @@
       "J": "5/2",
       "uncertainty_cm1": "0.03",
       "reference": "L22136",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 33452.12,
       "energy_ev": 4.147534284270802
@@ -4549,6 +4476,7 @@
       "J": "0",
       "uncertainty_cm1": "0.03",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 43394.52,
       "energy_ev": 5.3802347788264235
@@ -4556,15 +4484,16 @@
      {
       "f_count": 0,
       "valence": "6d.7s",
-      "level_cm1": 4739.631,
+      "level_cm1": 4739.63,
       "configuration": "6d.7s",
       "term": "3D",
       "J": "1",
-      "uncertainty_cm1": "0.018",
-      "reference": "L22136,L7344c157",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (57.3)",
+      "source": "Blaise-Wyart Ac II (Ac2e.html)",
       "charge": 1,
-      "energy_cm1": 48134.151,
-      "energy_ev": 5.967874129256014
+      "energy_cm1": 48134.149999999994,
+      "energy_ev": 5.967874005271815
      },
      {
       "f_count": 0,
@@ -4575,6 +4504,7 @@
       "J": "2",
       "uncertainty_cm1": "0.000",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 56630.937999999995,
       "energy_ev": 7.021341454754261
@@ -4582,15 +4512,16 @@
      {
       "f_count": 0,
       "valence": "7s.7p",
-      "level_cm1": 20956.42,
+      "level_cm1": 20956.4,
       "configuration": "7s.7p",
-      "term": "3P*",
+      "term": "3P",
       "J": "0",
-      "uncertainty_cm1": "0.03",
-      "reference": "L22136,L7344c157",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (57.3)",
+      "source": "Blaise-Wyart Ac II (Ac2o.html)",
       "charge": 1,
-      "energy_cm1": 64350.939999999995,
-      "energy_ev": 7.978499714668406
+      "energy_cm1": 64350.92,
+      "energy_ev": 7.978497234984437
      },
      {
       "f_count": 0,
@@ -4601,6 +4532,7 @@
       "J": "2",
       "uncertainty_cm1": "0.012",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 69841.448,
       "energy_ev": 8.659235948068954
@@ -4608,15 +4540,16 @@
      {
       "f_count": 0,
       "valence": "7s.8s",
-      "level_cm1": 51680.6,
+      "level_cm1": 51680.55,
       "configuration": "7s.8s",
       "term": "3S",
       "J": "1",
-      "uncertainty_cm1": "0.05",
-      "reference": "L22136,L7344c157",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (57.3)",
+      "source": "Blaise-Wyart Ac II (Ac2e.html)",
       "charge": 1,
-      "energy_cm1": 95075.12,
-      "energy_ev": 11.787812544650698
+      "energy_cm1": 95075.07,
+      "energy_ev": 11.787806345440778
      },
      {
       "f_count": 0,
@@ -4627,6 +4560,7 @@
       "J": "2",
       "uncertainty_cm1": "0.021",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 98027.51999999999,
       "energy_ev": 12.153863492120728
@@ -4640,6 +4574,7 @@
       "J": "2",
       "uncertainty_cm1": "0.05",
       "reference": "L22136,c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 99885.98,
       "energy_ev": 12.38428316555087
@@ -4653,6 +4588,7 @@
       "J": "1",
       "uncertainty_cm1": "0.04",
       "reference": "L22136c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 100570.01,
       "energy_ev": 12.469092076808804
@@ -4666,6 +4602,7 @@
       "J": "3",
       "uncertainty_cm1": "0.03",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 103202.04,
       "energy_ev": 12.79542220662507
@@ -4681,6 +4618,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0.11",
       "reference": "L22136",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31240.17,
       "energy_ev": 3.87328743653461
@@ -4688,15 +4626,16 @@
      {
       "f_count": 1,
       "valence": "7s",
-      "level_cm1": 31174.565,
+      "level_cm1": 29881.09,
       "configuration": "5f.7s",
-      "term": "1F*",
+      "term": "1F",
       "J": "3",
-      "uncertainty_cm1": "0.013",
-      "reference": "L22136,L7344c157",
+      "uncertainty_cm1": null,
+      "reference": "(57.3) / (unp.32)",
+      "source": "Blaise-Wyart Ac II (Ac2o.html)",
       "charge": 1,
-      "energy_cm1": 74569.08499999999,
-      "energy_ev": 9.24538823202247
+      "energy_cm1": 73275.61,
+      "energy_ev": 9.085017770947145
      },
      {
       "f_count": 1,
@@ -4707,6 +4646,7 @@
       "J": "4",
       "uncertainty_cm1": "0.03",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 83201.54,
       "energy_ev": 10.315676245754483
@@ -4720,6 +4660,7 @@
       "J": "3",
       "uncertainty_cm1": "0.023",
       "reference": "L22136,L7344c157",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 98038.594,
       "energy_ev": 12.155236493134238
@@ -4746,6 +4687,7 @@
       "J": "2",
       "uncertainty_cm1": "0.000010",
       "reference": "L18702,L17451",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -4759,6 +4701,7 @@
       "J": "1",
       "uncertainty_cm1": "0.000016",
       "reference": "L18702,L17451",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 5563.141519,
       "energy_ev": 0.6897416420335346
@@ -4766,15 +4709,16 @@
      {
       "f_count": 0,
       "valence": "6d.7s2.7p",
-      "level_cm1": 10783.15535,
+      "level_cm1": 10783.154,
       "configuration": "6d.7s2.7p",
-      "term": "3F*",
+      "term": "3F",
       "J": "2",
-      "uncertainty_cm1": "0.00007",
-      "reference": "L18702,L16199",
+      "uncertainty_cm1": null,
+      "reference": "(67.5) / (68.1)",
+      "source": "Blaise-Wyart Th I (Th1o.html)",
       "charge": 0,
-      "energy_cm1": 10783.15535,
-      "energy_ev": 1.3369408727083103
+      "energy_cm1": 10783.154,
+      "energy_ev": 1.3369407053296423
      },
      {
       "f_count": 0,
@@ -4785,6 +4729,7 @@
       "J": "2",
       "uncertainty_cm1": "0.00003",
       "reference": "L18702,L2105",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 14465.221873,
       "energy_ev": 1.7934589391599516
@@ -4798,6 +4743,7 @@
       "J": "0",
       "uncertainty_cm1": "0.0004",
       "reference": "L18702,L19205",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 21176.0061,
       "energy_ev": 2.625490142438734
@@ -4811,6 +4757,7 @@
       "J": "2",
       "uncertainty_cm1": "0.0006",
       "reference": "L18702,L16199",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 32575.42,
       "energy_ev": 4.038837337499708
@@ -4824,6 +4771,7 @@
       "J": "3/2",
       "uncertainty_cm1": "0.00006",
       "reference": "L18702,L15851",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 50867.0,
       "energy_ev": 6.306704221974657
@@ -4831,121 +4779,130 @@
      {
       "f_count": 0,
       "valence": "6d2.7s",
-      "level_cm1": 1521.89632,
-      "configuration": "6d2.(3F).7s",
-      "term": "4F",
-      "J": "5/2",
-      "uncertainty_cm1": "0.00010",
-      "reference": "L18702,L15851",
+      "level_cm1": 0.0,
+      "configuration": "6d2(3F).7s",
+      "term": "",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (42.1)",
+      "source": "Blaise-Wyart Th II (Th2e.html)",
       "charge": 1,
-      "energy_cm1": 52388.89632,
-      "energy_ev": 6.495395317316464
+      "energy_cm1": 50867.0,
+      "energy_ev": 6.306704221974657
      },
      {
       "f_count": 0,
       "valence": "6d3",
-      "level_cm1": 7001.42117,
+      "level_cm1": 7001.42,
       "configuration": "6d3",
       "term": "",
       "J": "3/2",
-      "uncertainty_cm1": "0.00015",
-      "reference": "L18702,L7529",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (44.1)",
+      "source": "Blaise-Wyart Th II (Th2e.html)",
       "charge": 1,
-      "energy_cm1": 57868.42117,
-      "energy_ev": 7.174769813667931
+      "energy_cm1": 57868.42,
+      "energy_ev": 7.174769668606418
      },
      {
       "f_count": 0,
       "valence": "6d.7s.7p",
-      "level_cm1": 23372.58173,
-      "configuration": "6d.7s.(3D).7p",
-      "term": "*",
+      "level_cm1": 23372.581,
+      "configuration": "6d.7s(3D).7p",
+      "term": "",
       "J": "3/2",
-      "uncertainty_cm1": "0.00016",
-      "reference": "L18702,L19204",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (69.3)",
+      "source": "Blaise-Wyart Th II (Th2o.html)",
       "charge": 1,
-      "energy_cm1": 74239.58173,
-      "energy_ev": 9.204535033208636
+      "energy_cm1": 74239.581,
+      "energy_ev": 9.204534942700171
      },
      {
       "f_count": 0,
       "valence": "6d2.7p",
-      "level_cm1": 30972.1636,
-      "configuration": "6d2.(3F).7p",
-      "term": "*",
+      "level_cm1": 30972.162,
+      "configuration": "6d2(3F).7p",
+      "term": "",
       "J": "5/2",
-      "uncertainty_cm1": "0.0004",
-      "reference": "L18702,L19204",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (69.3)",
+      "source": "Blaise-Wyart Th II (Th2o.html)",
       "charge": 1,
-      "energy_cm1": 81839.1636,
-      "energy_ev": 10.146763099828862
+      "energy_cm1": 81839.162,
+      "energy_ev": 10.146762901454142
      },
      {
       "f_count": 0,
       "valence": "7s2.7p",
-      "level_cm1": 31625.6797,
-      "configuration": "7s2.7p",
-      "term": "*",
+      "level_cm1": 31625.676,
+      "configuration": "7s2.(1S).7p",
+      "term": "",
       "J": "1/2",
-      "uncertainty_cm1": "0.0007",
-      "reference": "L18702,L19204",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (69.3)",
+      "source": "Blaise-Wyart Th II (Th2o.html)",
       "charge": 1,
-      "energy_cm1": 82492.67970000001,
-      "energy_ev": 10.227788769654062
+      "energy_cm1": 82492.676,
+      "energy_ev": 10.227788310912526
      }
     ],
     "1": [
      {
       "f_count": 1,
       "valence": "6d.7s2",
-      "level_cm1": 7795.275291,
+      "level_cm1": 7795.275,
       "configuration": "5f.6d.7s2",
-      "term": "3H*",
+      "term": "3H",
       "J": "4",
-      "uncertainty_cm1": "0.00003",
-      "reference": "L18702,L16199",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (68.1)",
+      "source": "Blaise-Wyart Th I (Th1o.html)",
       "charge": 0,
-      "energy_cm1": 7795.275291,
-      "energy_ev": 0.9664909585626127
+      "energy_cm1": 7795.275,
+      "energy_ev": 0.966490922483211
      },
      {
       "f_count": 1,
       "valence": "6d2.7s",
-      "level_cm1": 15618.98461,
+      "level_cm1": 15618.984,
       "configuration": "5f.6d2.7s",
-      "term": "5H*",
+      "term": "5H",
       "J": "3",
-      "uncertainty_cm1": "0.00005",
-      "reference": "L18702,L16199",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (68.1)",
+      "source": "Blaise-Wyart Th I (Th1o.html)",
       "charge": 0,
-      "energy_cm1": 15618.98461,
-      "energy_ev": 1.9365072872951852
+      "energy_cm1": 15618.984,
+      "energy_ev": 1.9365072116648243
      },
      {
       "f_count": 1,
       "valence": "7s2.7p",
-      "level_cm1": 18431.686609,
+      "level_cm1": 18431.686,
       "configuration": "5f.7s2.7p",
       "term": "3G",
       "J": "3",
-      "uncertainty_cm1": "0.00004",
-      "reference": "L18702,L2105",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (71.1)",
+      "source": "Blaise-Wyart Th I (Th1e.html)",
       "charge": 0,
-      "energy_cm1": 18431.686609,
-      "energy_ev": 2.2852378900877595
+      "energy_cm1": 18431.686,
+      "energy_ev": 2.2852378145813828
      },
      {
       "f_count": 1,
       "valence": "6d.7s.7p",
-      "level_cm1": 22098.18793,
+      "level_cm1": 22098.187,
       "configuration": "5f.6d.7s.7p",
       "term": "5I",
       "J": "4",
-      "uncertainty_cm1": "0.00005",
-      "reference": "L18702,L1056",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (70.10)",
+      "source": "Blaise-Wyart Th I (Th1e.html)",
       "charge": 0,
-      "energy_cm1": 22098.18793,
-      "energy_ev": 2.7398261174458964
+      "energy_cm1": 22098.187,
+      "energy_ev": 2.739826002140592
      },
      {
       "f_count": 1,
@@ -4956,6 +4913,7 @@
       "J": "4",
       "uncertainty_cm1": "0.0003",
       "reference": "L18702,u39",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 31194.70265,
       "energy_ev": 3.867650203589734
@@ -4963,15 +4921,16 @@
      {
       "f_count": 1,
       "valence": "6d2.7p",
-      "level_cm1": 35300.9146,
+      "level_cm1": 35300.914,
       "configuration": "5f.6d2.7p",
       "term": "5K",
       "J": "5",
-      "uncertainty_cm1": "0.0003",
-      "reference": "L18702,u39",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (unp.9)",
+      "source": "Blaise-Wyart Th I (Th1e.html)",
       "charge": 0,
-      "energy_cm1": 35300.9146,
-      "energy_ev": 4.376755600829354
+      "energy_cm1": 35300.914,
+      "energy_ev": 4.376755526438836
      },
      {
       "f_count": 1,
@@ -4982,6 +4941,7 @@
       "J": "5/2",
       "uncertainty_cm1": "0.00011",
       "reference": "L18702,L15851",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 55357.26167,
       "energy_ev": 6.863425715909035
@@ -4995,6 +4955,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0.00013",
       "reference": "L18702,L15851",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 57035.35582,
       "energy_ev": 7.0714828740012345
@@ -5002,56 +4963,60 @@
      {
       "f_count": 1,
       "valence": "6d2",
-      "level_cm1": 12485.68373,
-      "configuration": "5f.(2F*).6d2.(3F)",
-      "term": "*",
+      "level_cm1": 12485.683,
+      "configuration": "5f(2F).6d2(3F)",
+      "term": "",
       "J": "7/2",
-      "uncertainty_cm1": "0.00017",
-      "reference": "L18702,L15928",
+      "uncertainty_cm1": null,
+      "reference": "(43.1) / (43.1)",
+      "source": "Blaise-Wyart Th II (Th2o.html)",
       "charge": 1,
-      "energy_cm1": 63352.683730000004,
-      "energy_ev": 7.854731711196182
+      "energy_cm1": 63352.683000000005,
+      "energy_ev": 7.854731620687717
      },
      {
       "f_count": 1,
       "valence": "7s.7p",
-      "level_cm1": 26488.64704,
-      "configuration": "5f.7s.(3F*).7p",
+      "level_cm1": 26488.647,
+      "configuration": "5f.7s(3F).7p",
       "term": "",
       "J": "5/2",
-      "uncertainty_cm1": "0.00018",
-      "reference": "L18702,L7527",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (43.1)",
+      "source": "Blaise-Wyart Th II (Th2e.html)",
       "charge": 1,
-      "energy_cm1": 77355.64704,
-      "energy_ev": 9.590877892951212
+      "energy_cm1": 77355.647,
+      "energy_ev": 9.590877887991844
      },
      {
       "f_count": 1,
       "valence": "6d.7p",
-      "level_cm1": 30452.72533,
-      "configuration": "5f.6d.(3H*).7p",
+      "level_cm1": 30452.725,
+      "configuration": "5f.6d(3H).7p",
       "term": "",
       "J": "9/2",
-      "uncertainty_cm1": "0.0003",
-      "reference": "L18702,L19204",
+      "uncertainty_cm1": null,
+      "reference": "(42.1) / (69.3)",
+      "source": "Blaise-Wyart Th II (Th2e.html)",
       "charge": 1,
-      "energy_cm1": 81319.72533,
-      "energy_ev": 10.082360962284595
+      "energy_cm1": 81319.725,
+      "energy_ev": 10.08236092136981
      }
     ],
     "2": [
      {
       "f_count": 2,
       "valence": "7s2",
-      "level_cm1": 27495.58911,
+      "level_cm1": 27495.589,
       "configuration": "5f2.7s2",
       "term": "3H",
       "J": "4",
-      "uncertainty_cm1": "0.00008",
-      "reference": "L18702,u39",
+      "uncertainty_cm1": null,
+      "reference": "(68.1) / (unp.9)",
+      "source": "Blaise-Wyart Th I (Th1e.html)",
       "charge": 0,
-      "energy_cm1": 27495.58911,
-      "energy_ev": 3.4090185763995793
+      "energy_cm1": 27495.589,
+      "energy_ev": 3.4090185627613177
      },
      {
       "f_count": 2,
@@ -5062,6 +5027,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0.0003",
       "reference": "L18702,L2372",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 75248.7985,
       "energy_ev": 9.329661965487846
@@ -5075,35 +5041,24 @@
       "J": "11/2",
       "uncertainty_cm1": "0.0005",
       "reference": "L18702,L19204",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 83487.85680000001,
       "energy_ev": 10.35117500470198
      },
      {
       "f_count": 2,
-      "valence": "6d+5f.6d.7p",
-      "level_cm1": 41488.1395,
-      "configuration": "5f2.6d+5f.6d.7p",
-      "term": "",
-      "J": "7/2",
-      "uncertainty_cm1": "0.0008",
-      "reference": "L18702,L2372",
-      "charge": 1,
-      "energy_cm1": 92355.13949999999,
-      "energy_ev": 11.450577942589662
-     },
-     {
-      "f_count": 2,
       "valence": "7p",
-      "level_cm1": 49495.5594,
+      "level_cm1": 49495.558,
       "configuration": "5f2.7p",
-      "term": "*",
+      "term": "",
       "J": "9/2",
-      "uncertainty_cm1": "0.0012",
-      "reference": "L18702,u38",
+      "uncertainty_cm1": null,
+      "reference": "(74.9) / (74.9)",
+      "source": "Blaise-Wyart Th II (Th2o.html)",
       "charge": 1,
-      "energy_cm1": 100362.5594,
-      "energy_ev": 12.443371480452205
+      "energy_cm1": 100362.55799999999,
+      "energy_ev": 12.443371306874326
      }
     ]
    }
@@ -5117,6 +5072,50 @@
     "reference": "L16359"
    },
    "levels_by_f_count": {
+    "1": [
+     {
+      "f_count": 1,
+      "valence": "6d2.7s2",
+      "level_cm1": 1978.22,
+      "configuration": "5f(2F).6d2(3F).7s2",
+      "term": "4H",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.5) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 1978.22,
+      "energy_ev": 0.24526802103514472
+     },
+     {
+      "f_count": 1,
+      "valence": "6d3.7s",
+      "level_cm1": 7585.025,
+      "configuration": "5f.6d3.7s",
+      "term": "6I",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.5) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 7585.025,
+      "energy_ev": 0.940423244761502
+     },
+     {
+      "f_count": 1,
+      "valence": "6d2.7s.7p",
+      "level_cm1": 15061.15,
+      "configuration": "5f.6d2.7s.7p",
+      "term": "6I",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(85.4) / (85.4)",
+      "source": "Blaise-Wyart Pa I (Pa1e.html)",
+      "charge": 0,
+      "energy_cm1": 15061.15,
+      "energy_ev": 1.8673446103130438
+     }
+    ],
     "2": [
      {
       "f_count": 2,
@@ -5127,9 +5126,82 @@
       "J": "11/2",
       "uncertainty_cm1": "0",
       "reference": "L16359",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 2,
+      "valence": "6d2.7s",
+      "level_cm1": 7000.29,
+      "configuration": "5f2(3H).6d2(3F)(5L).7s",
+      "term": "6L",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(66.1) / (70.9)",
+      "source": "Blaise-Wyart Pa I (Pa1e.html)",
+      "charge": 0,
+      "energy_cm1": 7000.29,
+      "energy_ev": 0.8679253444875257
+     },
+     {
+      "f_count": 2,
+      "valence": "7s2.7p",
+      "level_cm1": 11444.705,
+      "configuration": "5f2.7s2.7p",
+      "term": "(4,1/2)",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(68.2) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 11444.705,
+      "energy_ev": 1.4189625757908755
+     },
+     {
+      "f_count": 2,
+      "valence": "6d.7s.7p",
+      "level_cm1": 15671.52,
+      "configuration": "5f2.6d.7s.7p",
+      "term": "6L",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(66.1) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 15671.52,
+      "energy_ev": 1.943020845513993
+     }
+    ],
+    "3": [
+     {
+      "f_count": 3,
+      "valence": "7s2",
+      "level_cm1": 13018.61,
+      "configuration": "5f3.7s2",
+      "term": "4I",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.5) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 13018.61,
+      "energy_ev": 1.6141019256343305
+     },
+     {
+      "f_count": 3,
+      "valence": "6d.7s",
+      "level_cm1": 14692.62,
+      "configuration": "5f3.6d.7s",
+      "term": "6L",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.5) / (unp.5)",
+      "source": "Blaise-Wyart Pa I (Pa1o.html)",
+      "charge": 0,
+      "energy_cm1": 14692.62,
+      "energy_ev": 1.8216527136624785
      }
     ]
    }
@@ -5143,6 +5215,64 @@
     "reference": "L5494,L7765"
    },
    "levels_by_f_count": {
+    "2": [
+     {
+      "f_count": 2,
+      "valence": "6d2.7s2",
+      "level_cm1": 11502.623,
+      "configuration": "5f2(3H).6d2(3F).7s2",
+      "term": "5L (66.7)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(65.1) / (66.7)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 11502.623,
+      "energy_ev": 1.4261434925960406
+     },
+     {
+      "f_count": 2,
+      "valence": "6d2.7s.7p",
+      "level_cm1": 27576.161,
+      "configuration": "5f2.6d2.7s.7p",
+      "term": "7M(unp.2)",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(76.2) / (76.2)",
+      "source": "Blaise-Wyart U I (U1o-4.html)",
+      "charge": 0,
+      "energy_cm1": 27576.161,
+      "energy_ev": 3.4190082175979097
+     },
+     {
+      "f_count": 2,
+      "valence": "6d2.7s",
+      "level_cm1": 13783.032,
+      "configuration": "5f2(3H).6d2(3F).7s",
+      "term": "6L",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(71.9) / (71.9)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 63741.432,
+      "energy_ev": 7.902930353846512
+     },
+     {
+      "f_count": 2,
+      "valence": "6d.7s2",
+      "level_cm1": 17434.364,
+      "configuration": "5f2(3H).6d(2D).7s2",
+      "term": "4K",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(49.2) / (unp.2)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 67392.764,
+      "energy_ev": 8.355637825099606
+     }
+    ],
     "3": [
      {
       "f_count": 3,
@@ -5153,9 +5283,94 @@
       "J": "6",
       "uncertainty_cm1": "0",
       "reference": "L14620",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 3,
+      "valence": "6d2.7s",
+      "level_cm1": 6249.029,
+      "configuration": "5f3(4I).6d2(3F).7s",
+      "term": "7M",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(46.1) / (46.1)",
+      "source": "Blaise-Wyart U I (U1o-1.html)",
+      "charge": 0,
+      "energy_cm1": 6249.029,
+      "energy_ev": 0.7747808515843685
+     },
+     {
+      "f_count": 3,
+      "valence": "7s2.7p",
+      "level_cm1": 11613.975,
+      "configuration": "5f3(4I).7s2.7p",
+      "term": "5K (66.7)",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(46.1) / (82.3)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 11613.975,
+      "energy_ev": 1.4399493810605721
+     },
+     {
+      "f_count": 3,
+      "valence": "6d.7s.7p",
+      "level_cm1": 15720.68,
+      "configuration": "5f3.6d.7s.7p",
+      "term": "7L (71.9)",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(46.1) / (76.2)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 15720.68,
+      "energy_ev": 1.949115908709233
+     },
+     {
+      "f_count": 3,
+      "valence": "6d3",
+      "level_cm1": 23084.307,
+      "configuration": "5f3.6d3",
+      "term": "7M?(unp.2)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(76.2) / (84.2)",
+      "source": "Blaise-Wyart U I (U1o-3.html)",
+      "charge": 0,
+      "energy_cm1": 23084.307,
+      "energy_ev": 2.8620892999048326
+     },
+     {
+      "f_count": 3,
+      "valence": "7d.7s2",
+      "level_cm1": 27920.942,
+      "configuration": "5f3.7d.7s2",
+      "term": "5L",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(76.2) / (77.3)",
+      "source": "Blaise-Wyart U I (U1o-4.html)",
+      "charge": 0,
+      "energy_cm1": 27920.942,
+      "energy_ev": 3.461755613519758
+     },
+     {
+      "f_count": 3,
+      "valence": "6d.7s.8s",
+      "level_cm1": 32857.451,
+      "configuration": "5f3.6d.7s.8s",
+      "term": "7L",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(71.8) / (71.8)",
+      "source": "Blaise-Wyart U I (U1o-5.html)",
+      "charge": 0,
+      "energy_cm1": 32857.451,
+      "energy_ev": 4.073804724969537
      },
      {
       "f_count": 3,
@@ -5166,9 +5381,208 @@
       "J": "9/2",
       "uncertainty_cm1": "0",
       "reference": "L14620",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 49958.4,
       "energy_ev": 6.194052179273374
+     },
+     {
+      "f_count": 3,
+      "valence": "6d.7s",
+      "level_cm1": 289.041,
+      "configuration": "5f3(4I).6d(2D).7s",
+      "term": "6L",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.3) / (46.3)",
+      "source": "Blaise-Wyart U II (U2o.html)",
+      "charge": 1,
+      "energy_cm1": 50247.441,
+      "energy_ev": 6.229888695974256
+     },
+     {
+      "f_count": 3,
+      "valence": "6d2",
+      "level_cm1": 4585.434,
+      "configuration": "5f3(4I).6d2(3F)",
+      "term": "(6M)",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.3) / (46.3)",
+      "source": "Blaise-Wyart U II (U2o.html)",
+      "charge": 1,
+      "energy_cm1": 54543.834,
+      "energy_ev": 6.762573538256333
+     },
+     {
+      "f_count": 3,
+      "valence": "7s.7p",
+      "level_cm1": 23315.09,
+      "configuration": "5f3.7s.7p",
+      "term": "6K",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.3) / (46.3)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 73273.49,
+      "energy_ev": 9.084754924446456
+     },
+     {
+      "f_count": 3,
+      "valence": "6d.7p",
+      "level_cm1": 26191.309,
+      "configuration": "5f3.6d.7p",
+      "term": "6M",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.3) / (46.3)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 76149.709,
+      "energy_ev": 9.441360631695236
+     },
+     {
+      "f_count": 3,
+      "valence": "6s.7p",
+      "level_cm1": 28770.6,
+      "configuration": "5f3.6s.7p",
+      "term": "6G",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.8) / (unp.2)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 78729.0,
+      "energy_ev": 9.761151958870048
+     }
+    ],
+    "4": [
+     {
+      "f_count": 4,
+      "valence": "7s2",
+      "level_cm1": 7020.709,
+      "configuration": "5f4.7s2",
+      "term": "5I",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(71.8) / (71.8)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 7020.709,
+      "energy_ev": 0.8704569778354428
+     },
+     {
+      "f_count": 4,
+      "valence": "6d.7s.7p",
+      "level_cm1": 14643.867,
+      "configuration": "5f4(5I).6d.7s.7p",
+      "term": "7M (66.7)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(46.1) / (65.1)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 14643.867,
+      "energy_ev": 1.8156081120360028
+     },
+     {
+      "f_count": 4,
+      "valence": "6d.7s",
+      "level_cm1": 14839.736,
+      "configuration": "5f4(5I).6d(2D).7s",
+      "term": "7L (66.7)",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(65.1) / (76.2)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 14839.736,
+      "energy_ev": 1.8398927729999668
+     },
+     {
+      "f_count": 4,
+      "valence": "7s2.7p",
+      "level_cm1": 15638.367,
+      "configuration": "5f4(4I).7s2.7p",
+      "term": "(5K)(66.7)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(46.1) / (unp.28)",
+      "source": "Blaise-Wyart U I (U1e-1.html)",
+      "charge": 0,
+      "energy_cm1": 15638.367,
+      "energy_ev": 1.938910397383159
+     },
+     {
+      "f_count": 4,
+      "valence": "7s.7p",
+      "level_cm1": 22792.369,
+      "configuration": "5f4.7s.7p",
+      "term": "7K(76.2)",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(72.4) / (76.2)",
+      "source": "Blaise-Wyart U I (U1o-3.html)",
+      "charge": 0,
+      "energy_cm1": 22792.369,
+      "energy_ev": 2.825893600981074
+     },
+     {
+      "f_count": 4,
+      "valence": "6d.7p",
+      "level_cm1": 34160.569,
+      "configuration": "5f4.6d.7p",
+      "term": "7M(76.2)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(71.8) / (76.2)",
+      "source": "Blaise-Wyart U I (U1o-5.html)",
+      "charge": 0,
+      "energy_cm1": 34160.569,
+      "energy_ev": 4.235370765670408
+     },
+     {
+      "f_count": 4,
+      "valence": "7s",
+      "level_cm1": 4663.803,
+      "configuration": "5f4(5I).7s",
+      "term": "6I",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.2) / (46.2)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 54622.203,
+      "energy_ev": 6.772290055903764
+     },
+     {
+      "f_count": 4,
+      "valence": "6d",
+      "level_cm1": 12513.881,
+      "configuration": "5f4(5I).6d",
+      "term": "6L",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(46.2) / (46.2)",
+      "source": "Blaise-Wyart U II (U2e.html)",
+      "charge": 1,
+      "energy_cm1": 62472.281,
+      "energy_ev": 7.745575684414004
+     },
+     {
+      "f_count": 4,
+      "valence": "7p",
+      "level_cm1": 30599.179,
+      "configuration": "5f4(5I).7p",
+      "term": "6K",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(47.2) / (47.2)",
+      "source": "Blaise-Wyart U II (U2o.html)",
+      "charge": 1,
+      "energy_cm1": 80557.579,
+      "energy_ev": 9.987866860466648
      }
     ]
    }
@@ -5182,6 +5596,22 @@
     "reference": "L23048"
    },
    "levels_by_f_count": {
+    "3": [
+     {
+      "f_count": 3,
+      "valence": "6d2.7s2",
+      "level_cm1": 20050.905,
+      "configuration": "5f3(4I).6d2(3F).7s2",
+      "term": "6M",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.29) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 20050.905,
+      "energy_ev": 2.4859953843928824
+     }
+    ],
     "4": [
      {
       "f_count": 4,
@@ -5192,9 +5622,80 @@
       "J": "11/2",
       "uncertainty_cm1": "0",
       "reference": "L15992",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 4,
+      "valence": "6d2.7s",
+      "level_cm1": 7112.43,
+      "configuration": "5f4(5I).6d2(3F).7s",
+      "term": "8M",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.29) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1e.html)",
+      "charge": 0,
+      "energy_cm1": 7112.43,
+      "energy_ev": 0.8818289325004268
+     },
+     {
+      "f_count": 4,
+      "valence": "7s2.7p",
+      "level_cm1": 11940.075,
+      "configuration": "5f4(5I<4>).7s2.7p<1/2>",
+      "term": "",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.29) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 11940.075,
+      "energy_ev": 1.4803806281713892
+     },
+     {
+      "f_count": 4,
+      "valence": "6d.7s.7p",
+      "level_cm1": 14338.88,
+      "configuration": "5f4(5I).6d.7s.7p",
+      "term": "8M",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.29) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 14338.88,
+      "energy_ev": 1.777794543306819
+     },
+     {
+      "f_count": 4,
+      "valence": "6d2.6p",
+      "level_cm1": 30954.635,
+      "configuration": "5f4.6d2.6p",
+      "term": "8M",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 30954.635,
+      "energy_ev": 3.8378856084334534
+     },
+     {
+      "f_count": 4,
+      "valence": "7s.7p2",
+      "level_cm1": 32896.36,
+      "configuration": "5f4.7s.7p2",
+      "term": "8K",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np I (Np1e.html)",
+      "charge": 0,
+      "energy_cm1": 32896.36,
+      "energy_ev": 4.078628826146582
      },
      {
       "f_count": 4,
@@ -5205,9 +5706,124 @@
       "J": "5",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 50535.54,
       "energy_ev": 6.265608419560209
+     },
+     {
+      "f_count": 4,
+      "valence": "7s2",
+      "level_cm1": 24.27,
+      "configuration": "5f4.7s2",
+      "term": "5I",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np II (Np2e.html)",
+      "charge": 1,
+      "energy_cm1": 50559.81,
+      "energy_ev": 6.268617516056313
+     },
+     {
+      "f_count": 4,
+      "valence": "7s.7p",
+      "level_cm1": 24030.585,
+      "configuration": "5f4.7s.7p",
+      "term": "",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np II (Np2o.html)",
+      "charge": 1,
+      "energy_cm1": 74566.125,
+      "energy_ev": 9.245021238795093
+     }
+    ],
+    "5": [
+     {
+      "f_count": 5,
+      "valence": "7s2",
+      "level_cm1": 2831.14,
+      "configuration": "5f5.7s2",
+      "term": "6H",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.2) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 2831.14,
+      "energy_ev": 0.3510166235673684
+     },
+     {
+      "f_count": 5,
+      "valence": "6d.7s",
+      "level_cm1": 13384.205,
+      "configuration": "5f5.6d.7s",
+      "term": "8K",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.2) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1o.html)",
+      "charge": 0,
+      "energy_cm1": 13384.205,
+      "energy_ev": 1.659429928662479
+     },
+     {
+      "f_count": 5,
+      "valence": "7s.7p",
+      "level_cm1": 18654.895,
+      "configuration": "5f5.7s.7p",
+      "term": "8I?",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.2) / (77.2)",
+      "source": "Blaise-Wyart Np I (Np1e.html)",
+      "charge": 0,
+      "energy_cm1": 18654.895,
+      "energy_ev": 2.3129122035306566
+     },
+     {
+      "f_count": 5,
+      "valence": "7s",
+      "level_cm1": 83.49,
+      "configuration": "5f5.7s",
+      "term": "7H",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(80.4) / (80.4)",
+      "source": "Blaise-Wyart Np II (Np2o.html)",
+      "charge": 1,
+      "energy_cm1": 50619.03,
+      "energy_ev": 6.275959860287845
+     },
+     {
+      "f_count": 5,
+      "valence": "6d",
+      "level_cm1": 9446.88,
+      "configuration": "5f5.6d",
+      "term": "7K",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np II (Np2o.html)",
+      "charge": 1,
+      "energy_cm1": 59982.42,
+      "energy_ev": 7.436872264105552
+     },
+     {
+      "f_count": 5,
+      "valence": "7p",
+      "level_cm1": 22720.5,
+      "configuration": "5f5.7p",
+      "term": "",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(unp.2) / (unp.2)",
+      "source": "Blaise-Wyart Np II (Np2e.html)",
+      "charge": 1,
+      "energy_cm1": 73256.04000000001,
+      "energy_ev": 9.082591400183702
      }
     ]
    }
@@ -5221,6 +5837,192 @@
     "reference": "L15992,L11260"
    },
    "levels_by_f_count": {
+    "4": [
+     {
+      "f_count": 4,
+      "valence": "6d2.7s2",
+      "level_cm1": 36050.562,
+      "configuration": "5f4.6d2.7s2",
+      "term": "7M",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(71.1) / (71.1)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 36050.562,
+      "energy_ev": 4.469700032829912
+     },
+     {
+      "f_count": 4,
+      "valence": "6d2.7s",
+      "level_cm1": 37640.78,
+      "configuration": "5f4.6d2.7s",
+      "term": "8M",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(71.2) / (83.1)",
+      "source": "Blaise-Wyart Pu II (Pu2e.html)",
+      "charge": 1,
+      "energy_cm1": 86241.78,
+      "energy_ev": 10.692617965215357
+     }
+    ],
+    "5": [
+     {
+      "f_count": 5,
+      "valence": "6d.7s2",
+      "level_cm1": 6313.866,
+      "configuration": "5f5(6H).6d.7s2",
+      "term": "7K",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 6313.866,
+      "energy_ev": 0.7828196150585299
+     },
+     {
+      "f_count": 5,
+      "valence": "6d2.7s",
+      "level_cm1": 14912.011,
+      "configuration": "5f5(6H).6d2(3F) (8L).7s",
+      "term": "9L",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 14912.011,
+      "energy_ev": 1.8488537309421142
+     },
+     {
+      "f_count": 5,
+      "valence": "7s2.7p",
+      "level_cm1": 17897.119,
+      "configuration": "5f5(6H<5/2>).7s2.7p<1/2>",
+      "term": "(5/2,1/2)",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (83.1)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 17897.119,
+      "energy_ev": 2.218959953574672
+     },
+     {
+      "f_count": 5,
+      "valence": "6d.7s.7p",
+      "level_cm1": 23022.277,
+      "configuration": "5f5.6d.7s(8K).7p",
+      "term": "9L",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (65.4)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 23022.277,
+      "energy_ev": 2.8543985600756883
+     },
+     {
+      "f_count": 5,
+      "valence": "6d2.7p",
+      "level_cm1": 37415.524,
+      "configuration": "5f5.6d2.7p",
+      "term": "9M",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(unp.4) / (83.1)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 37415.524,
+      "energy_ev": 4.638933752299017
+     },
+     {
+      "f_count": 5,
+      "valence": "6d.7s.8s",
+      "level_cm1": 39618.16,
+      "configuration": "5f5.6d.7s.8s",
+      "term": "9K",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(86.1) / (86.1)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 39618.16,
+      "energy_ev": 4.912025811210952
+     },
+     {
+      "f_count": 5,
+      "valence": "7s2",
+      "level_cm1": 8198.665,
+      "configuration": "5f5.7s2",
+      "term": "6H",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(66.2) / (66.2)",
+      "source": "Blaise-Wyart Pu II (Pu2o.html)",
+      "charge": 1,
+      "energy_cm1": 56799.665,
+      "energy_ev": 7.042260936604206
+     },
+     {
+      "f_count": 5,
+      "valence": "6d.7s",
+      "level_cm1": 8709.64,
+      "configuration": "5f5.6d.7s",
+      "term": "8K",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(71.2) / (83.1)",
+      "source": "Blaise-Wyart Pu II (Pu2o.html)",
+      "charge": 1,
+      "energy_cm1": 57310.64,
+      "energy_ev": 7.105613762401354
+     },
+     {
+      "f_count": 5,
+      "valence": "6d2",
+      "level_cm1": 17296.89,
+      "configuration": "5f5.6d2",
+      "term": "8L",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(71.2) / (83.1)",
+      "source": "Blaise-Wyart Pu II (Pu2o.html)",
+      "charge": 1,
+      "energy_cm1": 65897.89,
+      "energy_ev": 8.170297070442949
+     },
+     {
+      "f_count": 5,
+      "valence": "7s.7p",
+      "level_cm1": 30956.36,
+      "configuration": "5f5.7s.7p",
+      "term": "8I",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(71.2) / (83.1)",
+      "source": "Blaise-Wyart Pu II (Pu2e.html)",
+      "charge": 1,
+      "energy_cm1": 79557.36,
+      "energy_ev": 9.863855509488621
+     },
+     {
+      "f_count": 5,
+      "valence": "6d.7p",
+      "level_cm1": 48504.35,
+      "configuration": "5f5.6d.7p",
+      "term": "8H?",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.4) / (unp.4)",
+      "source": "Blaise-Wyart Pu II (Pu2e.html)",
+      "charge": 1,
+      "energy_cm1": 97105.35,
+      "energy_ev": 12.039528983846635
+     }
+    ],
     "6": [
      {
       "f_count": 6,
@@ -5231,9 +6033,94 @@
       "J": "0",
       "uncertainty_cm1": "0",
       "reference": "L15992,L11260",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 6,
+      "valence": "6d.7s",
+      "level_cm1": 13528.246,
+      "configuration": "5f6.6d(8H).7s",
+      "term": "9H",
+      "J": "1",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 13528.246,
+      "energy_ev": 1.6772887365897686
+     },
+     {
+      "f_count": 6,
+      "valence": "7s.7p",
+      "level_cm1": 15449.472,
+      "configuration": "5f6.7s.7p",
+      "term": "9G",
+      "J": "0",
+      "uncertainty_cm1": null,
+      "reference": "(71.1) / (71.1)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 15449.472,
+      "energy_ev": 1.9154904022191057
+     },
+     {
+      "f_count": 6,
+      "valence": "6d.7s.7p",
+      "level_cm1": 20828.477,
+      "configuration": "5f6.6d.7s(8K).7p",
+      "term": "9L",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 20828.477,
+      "energy_ev": 2.582402025541157
+     },
+     {
+      "f_count": 6,
+      "valence": "7s.8s",
+      "level_cm1": 31572.61,
+      "configuration": "5f6.7s.8s",
+      "term": "9F",
+      "J": "1",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 31572.61,
+      "energy_ev": 3.914504743463528
+     },
+     {
+      "f_count": 6,
+      "valence": "6d2",
+      "level_cm1": 31710.912,
+      "configuration": "5f6.6d2",
+      "term": "9I",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(83.1) / (83.1)",
+      "source": "Blaise-Wyart Pu I (Pu1e.html)",
+      "charge": 0,
+      "energy_cm1": 31710.912,
+      "energy_ev": 3.931652006075979
+     },
+     {
+      "f_count": 6,
+      "valence": "6d.7p",
+      "level_cm1": 34772.6,
+      "configuration": "5f6.6d.7p",
+      "term": "9I",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(86.1) / (86.1)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 34772.6,
+      "energy_ev": 4.311252938624962
      },
      {
       "f_count": 6,
@@ -5244,9 +6131,54 @@
       "J": "1/2",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48601.0,
       "energy_ev": 6.025756028312861
+     },
+     {
+      "f_count": 6,
+      "valence": "6d",
+      "level_cm1": 12007.52,
+      "configuration": "5f6.6d",
+      "term": "8H",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(63.2) / (63.2)",
+      "source": "Blaise-Wyart Pu II (Pu2e.html)",
+      "charge": 1,
+      "energy_cm1": 60608.520000000004,
+      "energy_ev": 7.51449877074794
+     },
+     {
+      "f_count": 6,
+      "valence": "7p",
+      "level_cm1": 22038.97,
+      "configuration": "5f6.7p",
+      "term": "8G",
+      "J": "1/2",
+      "uncertainty_cm1": null,
+      "reference": "(59.1) / (71.2)",
+      "source": "Blaise-Wyart Pu II (Pu2o.html)",
+      "charge": 1,
+      "energy_cm1": 70639.97,
+      "energy_ev": 8.758240058174517
+     }
+    ],
+    "7": [
+     {
+      "f_count": 7,
+      "valence": "7s",
+      "level_cm1": 25192.231,
+      "configuration": "5f7.7s",
+      "term": "9S",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(83.1) / (86.1)",
+      "source": "Blaise-Wyart Pu I (Pu1o.html)",
+      "charge": 0,
+      "energy_cm1": 25192.231,
+      "energy_ev": 3.1234385674142535
      }
     ]
    }
@@ -5260,6 +6192,64 @@
     "reference": "L15992"
    },
    "levels_by_f_count": {
+    "6": [
+     {
+      "f_count": 6,
+      "valence": "6d.7s2",
+      "level_cm1": 10683.57,
+      "configuration": "5f6(7F).6d.7s2",
+      "term": "8H",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1e.html)",
+      "charge": 0,
+      "energy_cm1": 10683.57,
+      "energy_ev": 1.3245938629123357
+     },
+     {
+      "f_count": 6,
+      "valence": "6d2.7s",
+      "level_cm1": 20522.51,
+      "configuration": "5f6.6d2.7s",
+      "term": "10I",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1e.html)",
+      "charge": 0,
+      "energy_cm1": 20522.51,
+      "energy_ev": 2.5444669522975034
+     },
+     {
+      "f_count": 6,
+      "valence": "7s2.7p",
+      "level_cm1": 22860.445,
+      "configuration": "5f6(7F).7s2.7p",
+      "term": "(7F0,1/2)",
+      "J": "1/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 22860.445,
+      "energy_ev": 2.834333949273978
+     },
+     {
+      "f_count": 6,
+      "valence": "6d.7s.7p",
+      "level_cm1": 25876.47,
+      "configuration": "5f6.6d.7s.7p",
+      "term": "10I",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 25876.47,
+      "energy_ev": 3.2082733913696613
+     }
+    ],
     "7": [
      {
       "f_count": 7,
@@ -5270,9 +6260,80 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L15992",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 7,
+      "valence": "6d.7s",
+      "level_cm1": 14506.92,
+      "configuration": "5f7(8S).6d.7s",
+      "term": "10D",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 14506.92,
+      "energy_ev": 1.7986288480124362
+     },
+     {
+      "f_count": 7,
+      "valence": "7s.7p",
+      "level_cm1": 15608.26,
+      "configuration": "5f7(8S).7s.7p(3P)",
+      "term": "(7/2,0)",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(56.2) / (56.2)",
+      "source": "Blaise-Wyart Am I (Am1e.html)",
+      "charge": 0,
+      "energy_cm1": 15608.26,
+      "energy_ev": 1.935177605120769
+     },
+     {
+      "f_count": 7,
+      "valence": "7s.8s",
+      "level_cm1": 30884.9,
+      "configuration": "5f7(8S).7s(9S).8s",
+      "term": "10S",
+      "J": "9/2",
+      "uncertainty_cm1": null,
+      "reference": "(57.1) / (57.1)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 30884.9,
+      "energy_ev": 3.82923957035534
+     },
+     {
+      "f_count": 7,
+      "valence": "6d2",
+      "level_cm1": 33972.03,
+      "configuration": "5f7.6d2",
+      "term": "",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.25) / (unp.9)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 33972.03,
+      "energy_ev": 4.211994908880998
+     },
+     {
+      "f_count": 7,
+      "valence": "7s.7d",
+      "level_cm1": 35092.33,
+      "configuration": "5f7.7s.7d",
+      "term": "",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(57.1) / (57.1)",
+      "source": "Blaise-Wyart Am I (Am1o.html)",
+      "charge": 0,
+      "energy_cm1": 35092.33,
+      "energy_ev": 4.350894406391726
      },
      {
       "f_count": 7,
@@ -5283,6 +6344,7 @@
       "J": "4",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48182.0,
       "energy_ev": 5.973806649167101
@@ -5309,9 +6371,136 @@
       "J": "2",
       "uncertainty_cm1": "0",
       "reference": "L15992",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 7,
+      "valence": "7s2.7p",
+      "level_cm1": 9263.374,
+      "configuration": "5f7(8S).7s2.7p",
+      "term": "(7/2,1/2)",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 9263.374,
+      "energy_ev": 1.1485120002266747
+     },
+     {
+      "f_count": 7,
+      "valence": "6d2.7s",
+      "level_cm1": 10144.927,
+      "configuration": "5f7.6d2.7s",
+      "term": "11F",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 10144.927,
+      "energy_ev": 1.25781064231279
+     },
+     {
+      "f_count": 7,
+      "valence": "6d.7s.7p",
+      "level_cm1": 15252.71,
+      "configuration": "5f7.6d.7s.7p",
+      "term": "11F",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 15252.71,
+      "energy_ev": 1.891095023365936
+     },
+     {
+      "f_count": 7,
+      "valence": "6d3",
+      "level_cm1": 30443.915,
+      "configuration": "5f7.6d3",
+      "term": "11 F",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 30443.915,
+      "energy_ev": 3.774564398606908
+     },
+     {
+      "f_count": 7,
+      "valence": "7s.7p2",
+      "level_cm1": 31167.969,
+      "configuration": "5f7.7s.7p2",
+      "term": "11 P ?",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 31167.969,
+      "energy_ev": 3.864335653423147
+     },
+     {
+      "f_count": 7,
+      "valence": "6d.7s.8s",
+      "level_cm1": 34255.175,
+      "configuration": "5f7.6d.7s.8s",
+      "term": "11D",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(76.12) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 34255.175,
+      "energy_ev": 4.247100414747886
+     },
+     {
+      "f_count": 7,
+      "valence": "7s2.8p",
+      "level_cm1": 35540.697,
+      "configuration": "5f7(8S).7s2.8p",
+      "term": "(7/2,1/2)",
+      "J": "3",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 35540.697,
+      "energy_ev": 4.406484829493031
+     },
+     {
+      "f_count": 7,
+      "valence": "6d2.7p",
+      "level_cm1": 36128.775,
+      "configuration": "5f7.6d2.7p",
+      "term": "11F",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 36128.775,
+      "energy_ev": 4.4793972089423875
+     },
+     {
+      "f_count": 7,
+      "valence": "7d.7s2",
+      "level_cm1": 36481.44,
+      "configuration": "5f7.7d.7s2",
+      "term": "9D",
+      "J": "2",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 36481.44,
+      "energy_ev": 4.523122096284726
      },
      {
       "f_count": 7,
@@ -5322,9 +6511,222 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 48330.68,
       "energy_ev": 5.992240619790947
+     },
+     {
+      "f_count": 7,
+      "valence": "6d.7s",
+      "level_cm1": 4010.645,
+      "configuration": "5f7.6d.7s",
+      "term": "10D",
+      "J": "5/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (unp.15)",
+      "source": "Blaise-Wyart Cm II (Cm2o.html)",
+      "charge": 1,
+      "energy_cm1": 52341.325,
+      "energy_ev": 6.489497225337599
+     },
+     {
+      "f_count": 7,
+      "valence": "6d2",
+      "level_cm1": 14830.15,
+      "configuration": "5f7.6d2",
+      "term": "10F",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (unp.15)",
+      "source": "Blaise-Wyart Cm II (Cm2o.html)",
+      "charge": 1,
+      "energy_cm1": 63160.83,
+      "energy_ev": 7.830944880264682
+     },
+     {
+      "f_count": 7,
+      "valence": "7s.7p",
+      "level_cm1": 24046.385,
+      "configuration": "5f7(8S<7/2>).7s.7p(3P<0>)",
+      "term": "10P",
+      "J": "7/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (86.2)",
+      "source": "Blaise-Wyart Cm II (Cm2e.html)",
+      "charge": 1,
+      "energy_cm1": 72377.065,
+      "energy_ev": 8.973612389361161
+     },
+     {
+      "f_count": 7,
+      "valence": "6d.7p",
+      "level_cm1": 32034.43,
+      "configuration": "5f7.6d.7p",
+      "term": "10F",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (86.2)",
+      "source": "Blaise-Wyart Cm II (Cm2e.html)",
+      "charge": 1,
+      "energy_cm1": 80365.11,
+      "energy_ev": 9.964003745777374
+     }
+    ],
+    "8": [
+     {
+      "f_count": 8,
+      "valence": "7s2",
+      "level_cm1": 1214.203,
+      "configuration": "5f8.7s2",
+      "term": "7F",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(67.6) / (67.6)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 1214.203,
+      "energy_ev": 0.15054198569670502
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7s",
+      "level_cm1": 16932.75,
+      "configuration": "5f8.6d.7s",
+      "term": "9G",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 16932.75,
+      "energy_ev": 2.0993934361106685
+     },
+     {
+      "f_count": 8,
+      "valence": "7s.7p",
+      "level_cm1": 17656.659,
+      "configuration": "5f8(7F).7s.7p",
+      "term": "(6,3P0)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (76.7)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 17656.659,
+      "energy_ev": 2.189146713218134
+     },
+     {
+      "f_count": 8,
+      "valence": "7s2.8s",
+      "level_cm1": 28635.021,
+      "configuration": "5f8.7s2.8s",
+      "term": "9S",
+      "J": "4",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 28635.021,
+      "energy_ev": 3.5502901259565722
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7p",
+      "level_cm1": 32876.853,
+      "configuration": "5f8.6d.7p",
+      "term": "9H",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(88.4) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 32876.853,
+      "energy_ev": 4.076210266387642
+     },
+     {
+      "f_count": 8,
+      "valence": "7s.8s",
+      "level_cm1": 33013.038,
+      "configuration": "5f8(7F).7s.8s",
+      "term": "(6, 3S1)",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(76.12) / (76.12)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 33013.038,
+      "energy_ev": 4.093095054451998
+     },
+     {
+      "f_count": 8,
+      "valence": "7p2",
+      "level_cm1": 37631.966,
+      "configuration": "5f8(7F).7p2(3P)",
+      "term": "(6,0)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(76.7) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1e.html)",
+      "charge": 0,
+      "energy_cm1": 37631.966,
+      "energy_ev": 4.665769140177458
+     },
+     {
+      "f_count": 8,
+      "valence": "7s.8p",
+      "level_cm1": 38092.623,
+      "configuration": "5f8(7F).7s.8p",
+      "term": "(6, 3P0)",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(88.4) / (88.4)",
+      "source": "Blaise-Wyart Cm I (Cm1o.html)",
+      "charge": 0,
+      "energy_cm1": 38092.623,
+      "energy_ev": 4.722883329077574
+     },
+     {
+      "f_count": 8,
+      "valence": "7s",
+      "level_cm1": 2093.87,
+      "configuration": "5f8.7s",
+      "term": "8F",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (unp.15)",
+      "source": "Blaise-Wyart Cm II (Cm2e.html)",
+      "charge": 1,
+      "energy_cm1": 50424.55,
+      "energy_ev": 6.251847413375513
+     },
+     {
+      "f_count": 8,
+      "valence": "6d",
+      "level_cm1": 17150.79,
+      "configuration": "5f8. 6d",
+      "term": "8G",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(86.2) / (86.2)",
+      "source": "Blaise-Wyart Cm II (Cm2e.html)",
+      "charge": 1,
+      "energy_cm1": 65481.47,
+      "energy_ev": 8.118667570529162
+     },
+     {
+      "f_count": 8,
+      "valence": "7p",
+      "level_cm1": 39336.155,
+      "configuration": "5f8.7p",
+      "term": "",
+      "J": "3/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (86.2)",
+      "source": "Blaise-Wyart Cm II (Cm2o.html)",
+      "charge": 1,
+      "energy_cm1": 87666.83499999999,
+      "energy_ev": 10.86930226712123
      }
     ]
    }
@@ -5338,6 +6740,134 @@
     "reference": "L15992"
    },
    "levels_by_f_count": {
+    "8": [
+     {
+      "f_count": 8,
+      "valence": "6d.7s2",
+      "level_cm1": 9141.115,
+      "configuration": "5f8.6d.7s2",
+      "term": "8G",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1e.html)",
+      "charge": 0,
+      "energy_cm1": 9141.115,
+      "energy_ev": 1.1333538161097738
+     },
+     {
+      "f_count": 8,
+      "valence": "7s2.7p",
+      "level_cm1": 17777.808,
+      "configuration": "5f8<7F6>.7s2 .7p<1/2>",
+      "term": "(6,1/2)",
+      "J": "11/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1o.html)",
+      "charge": 0,
+      "energy_cm1": 17777.808,
+      "energy_ev": 2.2041672748747683
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7s",
+      "level_cm1": 21506.436,
+      "configuration": "5f8.6d.7s",
+      "term": "10G",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1e.html)",
+      "charge": 0,
+      "energy_cm1": 21506.436,
+      "energy_ev": 2.6664582287303706
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7s.7p",
+      "level_cm1": 24652.405,
+      "configuration": "5f8.6d.7s.7p",
+      "term": "",
+      "J": "13/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1o.html)",
+      "charge": 0,
+      "energy_cm1": 24652.405,
+      "energy_ev": 3.0565086735079547
+     },
+     {
+      "f_count": 8,
+      "valence": "6d2.7s",
+      "level_cm1": 26000.831,
+      "configuration": "5f8.6d2.7s",
+      "term": "1OH",
+      "J": "19/2",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk I (Bk1e.html)",
+      "charge": 0,
+      "energy_cm1": 26000.831,
+      "energy_ev": 3.2236921902716795
+     },
+     {
+      "f_count": 8,
+      "valence": "7s2",
+      "level_cm1": 7040.98,
+      "configuration": "5f8.7s2",
+      "term": "7F",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk II (Bk2e.html)",
+      "charge": 1,
+      "energy_cm1": 57029.979999999996,
+      "energy_ev": 7.070816357267584
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7s",
+      "level_cm1": 12340.96,
+      "configuration": "5f8.6d.7s",
+      "term": "9G",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk II (Bk2e.html)",
+      "charge": 1,
+      "energy_cm1": 62329.96,
+      "energy_ev": 7.727930129308028
+     },
+     {
+      "f_count": 8,
+      "valence": "7s.7p",
+      "level_cm1": 32025.72,
+      "configuration": "5f8.7s.7p",
+      "term": "",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk II (Bk2o.html)",
+      "charge": 1,
+      "energy_cm1": 82014.72,
+      "energy_ev": 10.168529319363621
+     },
+     {
+      "f_count": 8,
+      "valence": "6d.7p",
+      "level_cm1": 41442.03,
+      "configuration": "5f8.6d.7p",
+      "term": "",
+      "J": "6",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (unp.2)",
+      "source": "Blaise-Wyart Bk II (Bk2o.html)",
+      "charge": 1,
+      "energy_cm1": 91431.03,
+      "energy_ev": 11.336002966962697
+     }
+    ],
     "9": [
      {
       "f_count": 9,
@@ -5348,9 +6878,52 @@
       "J": "15/2",
       "uncertainty_cm1": "0",
       "reference": "L15992",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 9,
+      "valence": "7s.7p",
+      "level_cm1": 16913.77,
+      "configuration": "5f9 (6H<15/2>).7s.7p<3P0>",
+      "term": "(15/2,0)",
+      "J": "15/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1e.html)",
+      "charge": 0,
+      "energy_cm1": 16913.77,
+      "energy_ev": 2.0970402160243045
+     },
+     {
+      "f_count": 9,
+      "valence": "6d.7s",
+      "level_cm1": 17182.482,
+      "configuration": "5f9.6d.7s",
+      "term": "8H",
+      "J": "17/2",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk I (Bk1o.html)",
+      "charge": 0,
+      "energy_cm1": 17182.482,
+      "energy_ev": 2.130356257955129
+     },
+     {
+      "f_count": 9,
+      "valence": "6d.7p",
+      "level_cm1": 36952.61,
+      "configuration": "5f9.6d.7p",
+      "term": "",
+      "J": "17/2",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk I (Bk1e.html)",
+      "charge": 0,
+      "energy_cm1": 36952.61,
+      "energy_ev": 4.5815397310630255
      },
      {
       "f_count": 9,
@@ -5361,9 +6934,38 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 49989.0,
       "energy_ev": 6.197846095745594
+     },
+     {
+      "f_count": 9,
+      "valence": "6d",
+      "level_cm1": 16360.0,
+      "configuration": "5f9(6H<15/2).6d<3/2>",
+      "term": "(15/2,3/2)",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(77.5) / (77.5)",
+      "source": "Blaise-Wyart Bk II (Bk2o.html)",
+      "charge": 1,
+      "energy_cm1": 66349.0,
+      "energy_ev": 8.226227582200572
+     },
+     {
+      "f_count": 9,
+      "valence": "7p",
+      "level_cm1": 31747.47,
+      "configuration": "5f9(6F<11/2>).7p",
+      "term": "(11/2,1/2)",
+      "J": "5",
+      "uncertainty_cm1": null,
+      "reference": "(87.2) / (87.2)",
+      "source": "Blaise-Wyart Bk II (Bk2e.html)",
+      "charge": 1,
+      "energy_cm1": 81736.47,
+      "energy_ev": 10.13403071614809
      }
     ]
    }
@@ -5377,6 +6979,78 @@
     "reference": "L22260"
    },
    "levels_by_f_count": {
+    "9": [
+     {
+      "f_count": 9,
+      "valence": "6d.7s2",
+      "level_cm1": 16909.535,
+      "configuration": "5f9.(6H<15/2>).6d<3/2>.7s2",
+      "term": "(15/2,3/2)",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(70.3) / (unp15)",
+      "source": "Blaise-Wyart Cf I (Cf1o.html)",
+      "charge": 0,
+      "energy_cm1": 16909.535,
+      "energy_ev": 2.0965151429439173
+     },
+     {
+      "f_count": 9,
+      "valence": "7s2.7p",
+      "level_cm1": 24727.6,
+      "configuration": "5f9(6H<15/2>).7s2.7p<1/2>",
+      "term": "(15/2,1/2)",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (89.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 24727.6,
+      "energy_ev": 3.0658316653095428
+     },
+     {
+      "f_count": 9,
+      "valence": "6d.7s.7p",
+      "level_cm1": 33952.135,
+      "configuration": "5f9(6H).6d(7H<8>).7s.7p(3P<0>)",
+      "term": "",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (95.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 33952.135,
+      "energy_ev": 4.209528243253063
+     },
+     {
+      "f_count": 9,
+      "valence": "7s2.8s",
+      "level_cm1": 45183.155,
+      "configuration": "5f9(6H<15/2>).7s2.8s",
+      "term": "(15/2,1/2)",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (unp2)",
+      "source": "Blaise-Wyart Cf I (Cf1o.html)",
+      "charge": 0,
+      "energy_cm1": 45183.155,
+      "energy_ev": 5.601997255600592
+     },
+     {
+      "f_count": 9,
+      "valence": "6d.7s",
+      "level_cm1": 24213.33,
+      "configuration": "5f9.6d.7s",
+      "term": "",
+      "J": "19/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.9)",
+      "source": "Blaise-Wyart Cf II (Cf2o.html)",
+      "charge": 1,
+      "energy_cm1": 74880.09,
+      "energy_ev": 9.283947937657858
+     }
+    ],
     "10": [
      {
       "f_count": 10,
@@ -5387,9 +7061,108 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L15992",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 10,
+      "valence": "7s.7p",
+      "level_cm1": 17459.21,
+      "configuration": "5f10.(5l<8>).7s.7p(3P<0>)",
+      "term": "(8,0)",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(unp15) / (unp15)",
+      "source": "Blaise-Wyart Cf I (Cf1o.html)",
+      "charge": 0,
+      "energy_cm1": 17459.21,
+      "energy_ev": 2.164666157220637
+     },
+     {
+      "f_count": 10,
+      "valence": "6d.7s",
+      "level_cm1": 20043.93,
+      "configuration": "5f10(5I<8>).6d.7s(3D<1>)",
+      "term": "",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (95.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 20043.93,
+      "energy_ev": 2.4851305946087736
+     },
+     {
+      "f_count": 10,
+      "valence": "7s.8s",
+      "level_cm1": 32983.18,
+      "configuration": "5f10(5I<8>).7s.8s(3S<1>)",
+      "term": "(8,1)",
+      "J": "9",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (89.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 32983.18,
+      "energy_ev": 4.089393134255019
+     },
+     {
+      "f_count": 10,
+      "valence": "6d.7p",
+      "level_cm1": 38146.065,
+      "configuration": "5f10.6d.7p",
+      "term": "",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (89.1)",
+      "source": "Blaise-Wyart Cf I (Cf1o.html)",
+      "charge": 0,
+      "energy_cm1": 38146.065,
+      "energy_ev": 4.729509292610528
+     },
+     {
+      "f_count": 10,
+      "valence": "7s.8p",
+      "level_cm1": 38225.945,
+      "configuration": "5f10(5I<8>).7s.8p(3P<0>)",
+      "term": "(8,0)",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (89.1)",
+      "source": "Blaise-Wyart Cf I (Cf1o.html)",
+      "charge": 0,
+      "energy_cm1": 38225.945,
+      "energy_ev": 4.7394131503818
+     },
+     {
+      "f_count": 10,
+      "valence": "7s.7d",
+      "level_cm1": 39081.175,
+      "configuration": "5f10.(5I<8>).7s.7d(3D)",
+      "term": "",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(unp.15) / (95.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 39081.175,
+      "energy_ev": 4.845448156412417
+     },
+     {
+      "f_count": 10,
+      "valence": "7s.9s",
+      "level_cm1": 41893.61,
+      "configuration": "5f10(5I<8>).7s.9s(3S<1>)",
+      "term": "",
+      "J": "9",
+      "uncertainty_cm1": null,
+      "reference": "(89.1) / (95.1)",
+      "source": "Blaise-Wyart Cf I (Cf1e.html)",
+      "charge": 0,
+      "energy_cm1": 41893.61,
+      "energy_ev": 5.194145655547992
      },
      {
       "f_count": 10,
@@ -5400,9 +7173,38 @@
       "J": "17/2",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 50666.76,
       "energy_ev": 6.281877626079318
+     },
+     {
+      "f_count": 10,
+      "valence": "6d",
+      "level_cm1": 19359.05,
+      "configuration": "5f10(5I<8>).6d(3/2)",
+      "term": "(8,3/2)",
+      "J": "15/2",
+      "uncertainty_cm1": null,
+      "reference": "(78.6) / (78.6)",
+      "source": "Blaise-Wyart Cf II (Cf2e.html)",
+      "charge": 1,
+      "energy_cm1": 70025.81,
+      "energy_ev": 8.682093922861485
+     },
+     {
+      "f_count": 10,
+      "valence": "7p",
+      "level_cm1": 26858.9,
+      "configuration": "5f10(5I<8>).7p(1/2)",
+      "term": "(8,1/2)",
+      "J": "15/2",
+      "uncertainty_cm1": null,
+      "reference": "(70.3) / (78.6)",
+      "source": "Blaise-Wyart Cf II (Cf2o.html)",
+      "charge": 1,
+      "energy_cm1": 77525.66,
+      "energy_ev": 9.611956813520981
      }
     ]
    }
@@ -5416,6 +7218,36 @@
     "reference": "L22449"
    },
    "levels_by_f_count": {
+    "10": [
+     {
+      "f_count": 10,
+      "valence": "6d.7s2",
+      "level_cm1": 19367.85,
+      "configuration": "5f10.6d.7s2",
+      "term": "6I",
+      "J": "17/2",
+      "uncertainty_cm1": null,
+      "reference": "(74.5) / (74.5)",
+      "source": "Blaise-Wyart Es I (Es1e.html)",
+      "charge": 0,
+      "energy_cm1": 19367.85,
+      "energy_ev": 2.401307357728426
+     },
+     {
+      "f_count": 10,
+      "valence": "6d.7s",
+      "level_cm1": 34452.2,
+      "configuration": "5f10.6d.7s",
+      "term": "",
+      "J": "8",
+      "uncertainty_cm1": null,
+      "reference": "(74.5) / (74.5)",
+      "source": "Blaise-Wyart Es II (Es2e.html)",
+      "charge": 1,
+      "energy_cm1": 85816.78,
+      "energy_ev": 10.639924680878964
+     }
+    ],
     "11": [
      {
       "f_count": 11,
@@ -5426,9 +7258,38 @@
       "J": "15/2",
       "uncertainty_cm1": "0",
       "reference": "L7765",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
+     },
+     {
+      "f_count": 11,
+      "valence": "7s.7p",
+      "level_cm1": 17803.09,
+      "configuration": "5f11.7s.7p",
+      "term": "6I",
+      "J": "15/2",
+      "uncertainty_cm1": null,
+      "reference": "(74.5) / (74.5)",
+      "source": "Blaise-Wyart Es I (Es1e.html)",
+      "charge": 0,
+      "energy_cm1": 17803.09,
+      "energy_ev": 2.207301843379692
+     },
+     {
+      "f_count": 11,
+      "valence": "7s.8s",
+      "level_cm1": 33829.35,
+      "configuration": "5f11(4I<15/2>).7s.8s",
+      "term": "(15/2,1)",
+      "J": "17/2",
+      "uncertainty_cm1": null,
+      "reference": "(unp.9) / (unp.9)",
+      "source": "Blaise-Wyart Es I (Es1o.html)",
+      "charge": 0,
+      "energy_cm1": 33829.35,
+      "energy_ev": 4.1943048434477825
      },
      {
       "f_count": 11,
@@ -5439,9 +7300,24 @@
       "J": "8",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 51364.58,
       "energy_ev": 6.36839627943372
+     },
+     {
+      "f_count": 11,
+      "valence": "7p",
+      "level_cm1": 27751.11,
+      "configuration": "5f11.7p",
+      "term": "(15/2,1/2)",
+      "J": "7",
+      "uncertainty_cm1": null,
+      "reference": "(70.5) / (74.5)",
+      "source": "Blaise-Wyart Es II (Es2e.html)",
+      "charge": 1,
+      "energy_cm1": 79115.69,
+      "energy_ev": 9.809095408564259
      }
     ]
    }
@@ -5465,6 +7341,7 @@
       "J": "6",
       "uncertainty_cm1": "0",
       "reference": "L16359",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -5491,6 +7368,7 @@
       "J": "7/2",
       "uncertainty_cm1": "0",
       "reference": "L16359",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -5517,6 +7395,7 @@
       "J": "0",
       "uncertainty_cm1": "0",
       "reference": "L16359",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -5530,6 +7409,7 @@
       "J": "1/2",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 53444.0,
       "energy_ev": 6.626211501350848
@@ -5556,6 +7436,7 @@
       "J": "1/2",
       "uncertainty_cm1": "0",
       "reference": "L11515",
+      "source": "NIST ASD",
       "charge": 0,
       "energy_cm1": 0.0,
       "energy_ev": 0.0
@@ -5569,6 +7450,7 @@
       "J": "0",
       "uncertainty_cm1": "0",
       "reference": "L13741",
+      "source": "NIST ASD",
       "charge": 1,
       "energy_cm1": 40005.0,
       "energy_ev": 4.9599878585349275
