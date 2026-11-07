@@ -826,10 +826,10 @@
   "Eu": {
    "f_shell": "4f",
    "neutral_ionization_limit": {
-    "value_cm1": 47404.1,
+    "value_cm1": 45734.74,
     "measured": true,
     "flag": null,
-    "reference": null
+    "reference": "L13382"
    },
    "levels_by_f_count": {
     "6": [
@@ -872,8 +872,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 77593.41,
-      "energy_ev": 9.620356742965194
+      "energy_cm1": 75924.05,
+      "energy_ev": 9.413382481459786
      },
      {
       "f_count": 6,
@@ -886,8 +886,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 84032.1,
-      "energy_ev": 10.41865256160962
+      "energy_cm1": 82362.73999999999,
+      "energy_ev": 10.21167830010421
      }
     ],
     "7": [
@@ -1481,6 +1481,20 @@
      },
      {
       "f_count": 7,
+      "valence": "6s",
+      "level_cm1": 0.0,
+      "configuration": "4f7.(8S*).6s",
+      "term": "a 9S*",
+      "J": "4",
+      "uncertainty_cm1": "0",
+      "reference": "L3974",
+      "source": "NIST ASD",
+      "charge": 1,
+      "energy_cm1": 45734.74,
+      "energy_ev": 5.67038507969633
+     },
+     {
+      "f_count": 7,
       "valence": "6s.63p",
       "level_cm1": 47373.1,
       "configuration": "4f7.(8S*).6s (7S*<3>).63p",
@@ -1551,20 +1565,6 @@
      },
      {
       "f_count": 7,
-      "valence": "6s",
-      "level_cm1": 0.0,
-      "configuration": "4f7.(8S*).6s",
-      "term": "a 9S*",
-      "J": "4",
-      "uncertainty_cm1": "0",
-      "reference": "L3974",
-      "source": "NIST ASD",
-      "charge": 1,
-      "energy_cm1": 47404.1,
-      "energy_ev": 5.877359341201738
-     },
-     {
-      "f_count": 7,
       "valence": "5d",
       "level_cm1": 9923.0,
       "configuration": "4f7.(8S*).5d",
@@ -1574,8 +1574,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 57327.1,
-      "energy_ev": 7.107654542307652
+      "energy_cm1": 55657.74,
+      "energy_ev": 6.900680280802244
      },
      {
       "f_count": 7,
@@ -1588,8 +1588,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 71178.38,
-      "energy_ev": 8.824994390455826
+      "energy_cm1": 69509.01999999999,
+      "energy_ev": 8.618020128950416
      },
      {
       "f_count": 7,
@@ -1602,8 +1602,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 96532.13,
-      "energy_ev": 11.96845876161768
+      "energy_cm1": 94862.76999999999,
+      "energy_ev": 11.76148450011227
      },
      {
       "f_count": 7,
@@ -1616,8 +1616,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 101678.08,
-      "energy_ev": 12.606475247572629
+      "energy_cm1": 100008.72,
+      "energy_ev": 12.39950098606722
      },
      {
       "f_count": 7,
@@ -1630,8 +1630,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 114002.1,
-      "energy_ev": 14.134458988813515
+      "energy_cm1": 112332.73999999999,
+      "energy_ev": 13.927484727308105
      }
     ]
    }
@@ -2764,10 +2764,10 @@
   "Tm": {
    "f_shell": "4f",
    "neutral_ionization_limit": {
-    "value_cm1": 62337.1,
+    "value_cm1": 49880.57,
     "measured": true,
     "flag": null,
-    "reference": null
+    "reference": "L22274"
    },
    "levels_by_f_count": {
     "12": [
@@ -2824,8 +2824,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 74794.39,
-      "energy_ev": 9.273322491851673
+      "energy_cm1": 62337.86,
+      "energy_ev": 7.728909604475693
      },
      {
       "f_count": 12,
@@ -2838,8 +2838,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 78904.57,
-      "energy_ev": 9.782919864589909
+      "energy_cm1": 66448.04000000001,
+      "energy_ev": 8.238506977213929
      },
      {
       "f_count": 12,
@@ -2852,8 +2852,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 93177.87,
-      "energy_ev": 11.552583524163126
+      "energy_cm1": 80721.34,
+      "energy_ev": 10.008170636787145
      },
      {
       "f_count": 12,
@@ -2866,8 +2866,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 100562.56,
-      "energy_ev": 12.468168394530437
+      "energy_cm1": 88106.03,
+      "energy_ev": 10.923755507154457
      },
      {
       "f_count": 12,
@@ -2880,8 +2880,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 107175.35,
-      "energy_ev": 13.28804986212302
+      "energy_cm1": 94718.82,
+      "energy_ev": 11.743636974747039
      }
     ],
     "13": [
@@ -3036,8 +3036,8 @@
       "reference": "L3974",
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 62337.1,
-      "energy_ev": 7.72881537648488
+      "energy_cm1": 49880.57,
+      "energy_ev": 6.1844024891089
      },
      {
       "f_count": 13,
@@ -3050,8 +3050,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 79961.75,
-      "energy_ev": 9.913993479495193
+      "energy_cm1": 67505.22,
+      "energy_ev": 8.369580592119213
      },
      {
       "f_count": 13,
@@ -3064,8 +3064,8 @@
       "reference": "L3974",
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 88317.12,
-      "energy_ev": 10.949927331602854
+      "energy_cm1": 75860.59,
+      "energy_ev": 9.405514444226874
      },
      {
       "f_count": 13,
@@ -3078,8 +3078,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 116010.13,
-      "energy_ev": 14.383422978804113
+      "energy_cm1": 103553.6,
+      "energy_ev": 12.839010091428134
      }
     ]
    }
@@ -3087,10 +3087,10 @@
   "Yb": {
    "f_shell": "4f",
    "neutral_ionization_limit": {
-    "value_cm1": 71859.7,
+    "value_cm1": 50443.2,
     "measured": true,
     "flag": null,
-    "reference": null
+    "reference": "L4980"
    },
    "levels_by_f_count": {
     "13": [
@@ -3147,8 +3147,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 93278.45,
-      "energy_ev": 11.565053854842077
+      "energy_cm1": 71861.95,
+      "energy_ev": 8.909746268982477
      },
      {
       "f_count": 13,
@@ -3161,8 +3161,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 98618.72,
-      "energy_ev": 12.227162950237611
+      "energy_cm1": 77202.22,
+      "energy_ev": 9.571855364378012
      },
      {
       "f_count": 13,
@@ -3175,8 +3175,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 116872.48999999999,
-      "energy_ev": 14.490341992169595
+      "energy_cm1": 95455.98999999999,
+      "energy_ev": 11.835034406309996
      },
      {
       "f_count": 13,
@@ -3189,8 +3189,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 119772.01,
-      "energy_ev": 14.849836655226193
+      "energy_cm1": 98355.51,
+      "energy_ev": 12.194529069366594
      },
      {
       "f_count": 13,
@@ -3203,8 +3203,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 127561.76999999999,
-      "energy_ev": 15.815643804855016
+      "energy_cm1": 106145.26999999999,
+      "energy_ev": 13.160336218995417
      }
     ],
     "14": [
@@ -4031,8 +4031,8 @@
       "reference": "L3974",
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 71859.7,
-      "energy_ev": 8.90946730453599
+      "energy_cm1": 50443.2,
+      "energy_ev": 6.254159718676391
      },
      {
       "f_count": 14,
@@ -4045,8 +4045,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 94820.5,
-      "energy_ev": 11.756243688044272
+      "energy_cm1": 73404.0,
+      "energy_ev": 9.100936102184672
      },
      {
       "f_count": 14,
@@ -4059,8 +4059,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 98921.51999999999,
-      "energy_ev": 12.264705365524808
+      "energy_cm1": 77505.01999999999,
+      "energy_ev": 9.609397779665208
      },
      {
       "f_count": 14,
@@ -4073,8 +4073,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 126164.0,
-      "energy_ev": 15.642342411803538
+      "energy_cm1": 104747.5,
+      "energy_ev": 12.98703482594394
      },
      {
       "f_count": 14,
@@ -4087,8 +4087,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 134033.8,
-      "energy_ev": 16.618073256675384
+      "energy_cm1": 112617.29999999999,
+      "energy_ev": 13.962765670815784
      },
      {
       "f_count": 14,
@@ -4101,8 +4101,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 135565.95,
-      "energy_ev": 16.808035646313037
+      "energy_cm1": 114149.45,
+      "energy_ev": 14.152728060453438
      },
      {
       "f_count": 14,
@@ -4115,8 +4115,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 142362.59999999998,
-      "energy_ev": 17.65071284863053
+      "energy_cm1": 120946.09999999999,
+      "energy_ev": 14.995405262770932
      },
      {
       "f_count": 14,
@@ -4129,8 +4129,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 144899.31,
-      "energy_ev": 17.965224804651633
+      "energy_cm1": 123482.81,
+      "energy_ev": 15.309917218792034
      },
      {
       "f_count": 14,
@@ -4143,8 +4143,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 152318.65,
-      "energy_ev": 18.88510572749484
+      "energy_cm1": 130902.15,
+      "energy_ev": 16.22979814163524
      },
      {
       "f_count": 14,
@@ -4157,8 +4157,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 152467.15,
-      "energy_ev": 18.903517380962967
+      "energy_cm1": 131050.65,
+      "energy_ev": 16.248209795103367
      },
      {
       "f_count": 14,
@@ -4171,8 +4171,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 155699.56,
-      "energy_ev": 19.30428514383778
+      "energy_cm1": 134283.06,
+      "energy_ev": 16.64897755797818
      },
      {
       "f_count": 14,
@@ -4185,8 +4185,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 157757.83000000002,
-      "energy_ev": 19.559478099957936
+      "energy_cm1": 136341.33000000002,
+      "energy_ev": 16.904170514098336
      },
      {
       "f_count": 14,
@@ -4199,8 +4199,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 157854.62,
-      "energy_ev": 19.5714785305248
+      "energy_cm1": 136438.12,
+      "energy_ev": 16.916170944665204
      },
      {
       "f_count": 14,
@@ -4213,8 +4213,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 158627.96,
-      "energy_ev": 19.667360470545283
+      "energy_cm1": 137211.46,
+      "energy_ev": 17.012052884685684
      },
      {
       "f_count": 14,
@@ -4227,8 +4227,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 159664.58000000002,
-      "energy_ev": 19.795884970330675
+      "energy_cm1": 138248.08000000002,
+      "energy_ev": 17.140577384471076
      },
      {
       "f_count": 14,
@@ -4241,8 +4241,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 161035.55,
-      "energy_ev": 19.965863586863996
+      "energy_cm1": 139619.05,
+      "energy_ev": 17.310556001004397
      },
      {
       "f_count": 14,
@@ -4255,8 +4255,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 162274.05,
-      "energy_ev": 20.119418016630163
+      "energy_cm1": 140857.55,
+      "energy_ev": 17.464110430770564
      },
      {
       "f_count": 14,
@@ -4269,8 +4269,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 163171.09999999998,
-      "energy_ev": 20.23063804183948
+      "energy_cm1": 141754.59999999998,
+      "energy_ev": 17.57533045597988
      },
      {
       "f_count": 14,
@@ -4283,8 +4283,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 164079.22999999998,
-      "energy_ev": 20.343231811967495
+      "energy_cm1": 142662.72999999998,
+      "energy_ev": 17.6879242261079
      },
      {
       "f_count": 14,
@@ -4297,8 +4297,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 164624.32,
-      "energy_ev": 20.41081435869438
+      "energy_cm1": 143207.82,
+      "energy_ev": 17.75550677283478
      },
      {
       "f_count": 14,
@@ -4311,8 +4311,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 165667.82,
-      "energy_ev": 20.540191869765025
+      "energy_cm1": 144251.32,
+      "energy_ev": 17.884884283905425
      },
      {
       "f_count": 14,
@@ -4325,8 +4325,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 166438.74,
-      "energy_ev": 20.635773768025285
+      "energy_cm1": 145022.24,
+      "energy_ev": 17.980466182165685
      },
      {
       "f_count": 14,
@@ -4339,8 +4339,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 167023.05,
-      "energy_ev": 20.708218975014923
+      "energy_cm1": 145606.55,
+      "energy_ev": 18.052911389155327
      },
      {
       "f_count": 14,
@@ -4353,8 +4353,8 @@
       "reference": null,
       "source": "NIST ASD",
       "charge": 1,
-      "energy_cm1": 167479.4,
-      "energy_ev": 20.764799163972366
+      "energy_cm1": 146062.9,
+      "energy_ev": 18.109491578112767
      }
     ]
    }

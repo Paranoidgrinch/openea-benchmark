@@ -98,8 +98,10 @@ def read_nist(path: Path, element: str, shell: str):
         except ValueError:
             continue
         if r.get("Term") == "Limit":
-            limit = {"value_cm1": value, "measured": not flag, "flag": flag or None,
-                     "reference": r.get("Reference") or None}
+            # several limits (to excited ion levels, e.g. Tm I): keep the one to the ion ground level
+            if limit is None or value < limit["value_cm1"]:
+                limit = {"value_cm1": value, "measured": not flag, "flag": flag or None,
+                         "reference": r.get("Reference") or None}
             continue
         if flag:
             continue
