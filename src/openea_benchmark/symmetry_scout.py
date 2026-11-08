@@ -140,12 +140,20 @@ def _falls_to_large_r(block: Mapping[str, Any]) -> bool:
 
 
 def needs_dispersion_rescan(entry: Mapping[str, Any]) -> bool:
-    """No block of this charge brackets a minimum and at least one falls toward its fragments
-    (a block that fails or changes label at short R is not a van der Waals question)."""
+    """No block of this charge brackets a minimum below the lowest fragment asymptote and at
+    least one falls toward its fragments (a block that fails or changes label at short R is not
+    a van der Waals question).  Minima of excited configurations far above the asymptote do not
+    count (2026-11-08: Ne2 had bracketed triplet minima ~16 eV up and was never rescanned)."""
     blocks = [b for b in (entry.get("blocks") or {}).values() if b.get("status") != "SCF_FAILED_AT_START"]
-    return any(_falls_to_large_r(b) for b in blocks) and not any(
+    falling = [b for b in blocks if _falls_to_large_r(b)]
+    if not falling:
+        return False
+    asymptote = min(min(p["energy_hartree"] for p in b["points"] if p["converged"]) for b in falling)
+    return not any(
         classify_block_scan(b["points"], (b.get("side_status") or {}).get("higher_r"), b["label"])
-        in BOUND_SCAN_STATUSES for b in blocks)
+        in BOUND_SCAN_STATUSES
+        and min(p["energy_hartree"] for p in b["points"] if p["converged"]) < asymptote
+        for b in blocks)
 
 
 def dispersion_available() -> bool:

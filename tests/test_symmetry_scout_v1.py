@@ -284,6 +284,9 @@ def test_dispersion_rescan_trigger():
     assert needs_dispersion_rescan({"blocks": {"a": falling}})
     assert not needs_dispersion_rescan({"blocks": {"a": falling, "b": bound}})
     assert not needs_dispersion_rescan({"blocks": {"c": label_edge}})  # not a van der Waals question
+    # Ne2: an excited configuration brackets a minimum far above the fragment asymptote
+    excited = _block("3Sigmau+", 2, [(1.8, -0.3), (2.0, -0.4), (2.2, -0.35)], "BRACKETED_SINGLE_MINIMUM")
+    assert needs_dispersion_rescan({"blocks": {"a": falling, "e": excited}})
     entry = {"blocks": {"a": falling}, "dispersion": {"model": "d3bj", "blocks": {"a": bound}}}
     assert summary_blocks(entry) == ({"a": bound}, "d3bj")
     assert summary_blocks({"blocks": {"a": falling}}) == ({"a": falling}, None)
