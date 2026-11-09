@@ -61,6 +61,13 @@ _MEM_RESERVE_MB = 0
 # slot directory): the memory gate alone would admit two 150-200 GB points side by
 # side, which leaves the shared server no headroom.
 BIG_TASK_MB = 100000
+# Fair share of the core slots: a run (one workflow process and its workers) takes a free
+# slot only while it holds fewer than ceil(n_slots / active runs), active = holding a slot or
+# waiting for one.  Running tasks are never stopped; a run above its share just gets no new
+# slot while others wait (2026-11-07/08: CeO, GdO and LuO held all 16 slots for a day and
+# every light molecule waited).  The run of a held slot is in ``slotNNN.run``; waiting
+# workers hold ``wait_<run>_<pid>.lock``.
+RUN_ID_ENV = "OPENEA_RUN_ID"
 _LOCAL = threading.local()
 _IN_WORKER = False
 
@@ -91,6 +98,7 @@ def configure_point_pool(*, workers: int, threads: int, slot_dir: str | Path | N
     _MEM_RESERVE_MB = max(0, int(mem_reserve_mb))
     if _SLOT_DIR:
         Path(_SLOT_DIR).mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault(RUN_ID_ENV, str(os.getpid()))  # inherited by the spawned workers
     use_process_scratch()
     if _WORKERS > 1:
         # spawn, not fork: forking a process whose OpenMP runtime is initialised can deadlock.
@@ -461,19 +469,7 @@ def core_slot(reserve_mb: float | None = None):
         print(f"[MEMORY GATE] pid {os.getpid()} large task ({float(reserve_mb) / 1024:.0f} GB): "
               f"waiting for the one-at-a-time slot", flush=True)
         fcntl.flock(big, fcntl.LOCK_EX)
-    handle = None
-    while handle is None:
-        for index in range(_N_SLOTS):
-            fh = open(os.path.join(_SLOT_DIR, f"slot{index:03d}.lock"), "a+")
-            try:
-                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                fh.close()
-                continue
-            handle = fh
-            break
-        if handle is None:
-            time.sleep(2.0)
+    handle = _acquire_fair_slot()
     _LOCAL.held, _LOCAL.handle = True, handle
     try:
         _wait_for_cpu(handle)
@@ -493,6 +489,75 @@ def core_slot(reserve_mb: float | None = None):
             big.close()
         if _IN_WORKER:
             prune_process_scratch()  # the task is over: its scratch files are garbage
+
+
+def _run_id() -> str:
+    return os.environ.get(RUN_ID_ENV) or str(os.getpid())
+
+
+def fair_share(n_slots: int, active_runs: int) -> int:
+    """Slots one run may hold while ``active_runs`` runs hold or wait for slots (pure, for tests)."""
+    return max(1, -(-n_slots // max(1, active_runs)))
+
+
+def _slot_runs() -> tuple[dict[str, int], set[str]]:
+    """(held slots per run, runs with a waiting worker); stale wait files are removed."""
+    held: dict[str, int] = {}
+    waiting: set[str] = set()
+    for name in os.listdir(_SLOT_DIR):
+        path = os.path.join(_SLOT_DIR, name)
+        if name.startswith("slot") and name.endswith(".lock") and _still_held(path):
+            try:
+                run = Path(path[:-len(".lock")] + ".run").read_text().strip() or "?"
+            except OSError:
+                run = "?"   # holder of an older version: counts as a run of its own
+            held[run] = held.get(run, 0) + 1
+        elif name.startswith("wait_") and name.endswith(".lock"):
+            if _still_held(path):
+                waiting.add(name[len("wait_"):].rsplit("_", 1)[0])
+            else:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+    return held, waiting
+
+
+def _acquire_fair_slot():
+    """Lock a free core slot once this run is below its fair share; returns the slot handle."""
+    run = _run_id()
+    wait_path = os.path.join(_SLOT_DIR, f"wait_{run}_{os.getpid()}.lock")
+    waiter = open(wait_path, "a+")
+    fcntl.flock(waiter, fcntl.LOCK_EX)
+    announced = False
+    try:
+        while True:
+            with open(os.path.join(_SLOT_DIR, "fairgate.lock"), "a+") as gate:
+                fcntl.flock(gate, fcntl.LOCK_EX)  # no two workers of one run pass on the same count
+                held, waiting = _slot_runs()
+                share = fair_share(_N_SLOTS, len(set(held) | waiting | {run}))
+                if held.get(run, 0) < share:
+                    for index in range(_N_SLOTS):
+                        fh = open(os.path.join(_SLOT_DIR, f"slot{index:03d}.lock"), "a+")
+                        try:
+                            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            fh.close()
+                            continue
+                        Path(os.path.join(_SLOT_DIR, f"slot{index:03d}.run")).write_text(run + "\n")
+                        return fh
+                elif not announced:
+                    print(f"[SLOT SHARE] pid {os.getpid()} waiting: run {run} holds {held.get(run, 0)} "
+                          f"of its {share} slots ({len(set(held) | waiting | {run})} active runs)", flush=True)
+                    announced = True
+            time.sleep(2.0)
+    finally:
+        fcntl.flock(waiter, fcntl.LOCK_UN)
+        waiter.close()
+        try:
+            os.unlink(wait_path)
+        except OSError:
+            pass
 
 
 def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:

@@ -232,3 +232,45 @@ def test_finished_task_leaves_the_cpu_gate_ramp(tmp_path, monkeypatch):
     gate.write_text(f"{tmp_path}/slot000.lock 1.0\n{tmp_path}/slot001.lock 2.0\n")
     pp._leave_cpu_gate(types.SimpleNamespace(name=f"{tmp_path}/slot000.lock"))
     assert gate.read_text() == f"{tmp_path}/slot001.lock 2.000000\n"
+
+
+def test_fair_share_rule():
+    assert point_pool.fair_share(16, 1) == 16
+    assert point_pool.fair_share(16, 3) == 6
+    assert point_pool.fair_share(16, 30) == 1
+    assert point_pool.fair_share(2, 0) == 2
+
+
+def test_run_above_its_fair_share_waits_for_a_slot(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=4)
+    monkeypatch.setenv(point_pool.RUN_ID_ENV, "111")
+    # run 111 already holds two slots, run 222 waits: share ceil(4 / 2) = 2 -> no third slot
+    held = []
+    for index in (0, 1):
+        fh = open(slots / f"slot{index:03d}.lock", "a+")
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        (slots / f"slot{index:03d}.run").write_text("111\n")
+        held.append(fh)
+    other = open(slots / "wait_222_9.lock", "a+")
+    fcntl.flock(other, fcntl.LOCK_EX)
+    (slots / "wait_333_8.lock").write_text("")  # stale waiter: not held, removed
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        other.close()  # run 222 got its slot elsewhere / gave up: 111 alone, share 4
+
+    monkeypatch.setattr(point_pool.time, "sleep", fake_sleep)
+    try:
+        with point_pool.core_slot():
+            assert (slots / "slot002.run").read_text().strip() == "111"
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert len(sleeps) == 1
+    assert not (slots / "wait_333_8.lock").exists()
+    assert not list(slots.glob("wait_111_*.lock"))  # own wait file removed
