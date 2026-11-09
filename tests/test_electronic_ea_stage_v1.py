@@ -208,6 +208,27 @@ def test_open_scout_components_far_above_seed_do_not_block():
     assert comp["status"] == "CLEARED" and comp["selected_job_id"] == "j"
 
 
+def test_anion_plateau_toward_unbound_atomic_anion_does_not_block():
+    # Zn2-: 2Sigmag+ plateau toward Zn + Zn- 0.23 eV above the seed; Zn- unbound by 0.72 eV
+    from openea_benchmark.electronic_ea_stage import (_block_on_open_scout_components,
+                                                      unbound_atomic_anion_gap_ev)
+    fragments = {"Zn+0": {"lowest": {"ccsd_t_total_hartree": -1778.5983}},
+                 "Zn-1": {"lowest": {"ccsd_t_total_hartree": -1778.5720}}}
+    gap = unbound_atomic_anion_gap_ev(("Zn", "Zn"), fragments)
+    assert abs(gap - 0.0263 * 27.211386245988) < 1e-9
+    plateau = {"component_id": "q-1__2Sigmag+__x", "minimum_status": "plateau_not_on_computed_asymptote",
+               "observed_gap_to_bracketed_seed_ev_not_lower_bound": 0.23}
+    comp = {"status": "CLEARED", "selected_job_id": "j"}
+    _block_on_open_scout_components(comp, [plateau], 1.0, gap, 0.3)
+    assert comp["status"] == "CLEARED" and comp["selected_job_id"] == "j"
+    assert [c["component_id"] for c in comp["continuum_channel_components"]] == ["q-1__2Sigmag+__x"]
+    # bound (or barely unbound) atomic anion: the plateau still blocks
+    comp = {"status": "CLEARED", "selected_job_id": "j"}
+    _block_on_open_scout_components(comp, [plateau], 1.0, 0.1, 0.3)
+    assert comp["status"] == "UNRESOLVED"
+    assert unbound_atomic_anion_gap_ev(("Zn", "O"), fragments) is None  # O fragments missing
+
+
 def test_dropped_1s_of_complete_subshell_atom_is_recomputed_once(tmp_path):
     # verify_v1 Li-: 1S cached as SCF_UNSTABLE (RHF -> UHF) made 3P the anion ground state
     energies = {("Li", 0, 1): -7.468, ("Li", -1, 2): -7.4526, ("Li", -1, 4): -5.36, ("Li", 0, 3): -5.34}

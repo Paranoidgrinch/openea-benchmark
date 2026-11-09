@@ -72,6 +72,10 @@ class ElectronicEAStagePolicy:
     # sampled CCSD(T) point) lies this far above the lowest candidate's upper
     # bound is recorded as excluded-by-margin instead of blocking D04.
     competitor_exclusion_margin_ev: float = 1.0
+    # An atomic anion counts as unbound when its lowest CCSD(T) channel lies this far above
+    # the neutral atoms in the stage basis (CCSD(T) atomic EAs in augmented TZ bases are
+    # within ~0.1 eV; a discretised continuum only lies higher).
+    unbound_atomic_anion_margin_ev: float = 0.3
     max_atomic_2s: int = 6
     dissociation_safety_margin_hartree: float = 0.0
     target_half_width_ev: float | None = None
@@ -354,7 +358,7 @@ def anion_dissociation_channels(atoms: Sequence[str], fragments: Mapping[str, Ma
 # refinement-point cache signature so adding them does not recompute points.
 _CLASSIFICATION_ONLY_FIELDS = ("collapse_max_t2_amplitude", "collapse_triples_fraction",
                                "collapsed_reference_scf_margin_ev", "atomic_multistate",
-                               "atomic_multistate_method_ev")
+                               "atomic_multistate_method_ev", "unbound_atomic_anion_margin_ev")
 
 
 def reference_collapse_evidence(record: Mapping[str, Any], policy: "ElectronicEAStagePolicy") -> dict | None:
@@ -522,16 +526,42 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}
 
 
+def unbound_atomic_anion_gap_ev(atoms: Sequence[str], fragments: Mapping[str, Mapping[str, Any]]) -> float | None:
+    """CCSD(T) energy of the lowest anion channel (A- + B or A + B-) above the neutral atoms, eV."""
+    def lowest(key):
+        f = fragments.get(key) or {}
+        return (f.get("lowest") or {}).get("ccsd_t_total_hartree")
+    a, b = atoms
+    neutral = (lowest(f"{a}+0"), lowest(f"{b}+0"))
+    channels = [(lowest(f"{a}-1"), neutral[1]), (neutral[0], lowest(f"{b}-1"))]
+    if None in neutral or any(None in c for c in channels):
+        return None
+    return (min(sum(c) for c in channels) - sum(neutral)) * HARTREE_TO_EV
+
+
+# A dissociative anion curve (scout plateau, no minimum) ends in an anion channel.  When
+# both atomic anions are unbound at CCSD(T) by more than the margin, the lowest anion
+# channel is the neutral atoms plus a free electron: the curve lies above the neutral atoms
+# everywhere and cannot be the ground state of a bound anion (2026-11-09 Zn2-: 2Sigmag+
+# plateau toward Zn + Zn-, Zn- unbound by 0.72 eV, blocked at a 0.23 eV DFT gap).
+CONTINUUM_CHANNEL_STATUSES = ("plateau_not_on_computed_asymptote",)
+
+
 def _block_on_open_scout_components(comp: dict, open_components: Sequence[Mapping[str, Any]],
-                                    margin_ev: float) -> None:
+                                    margin_ev: float, unbound_anion_gap_ev: float | None = None,
+                                    unbound_anion_margin_ev: float = 0.3) -> None:
     """Stage-2 components without a bracketed minimum never reach Stage 3, so the
     high-level competition cannot see them.  One whose lowest sampled DFT energy
     lies below (or within ``margin_ev`` above) the lowest bracketed seed may be the
     true ground state (verify_v1 IO: X2Pi dropped, 4Sigma- selected, EA 1.8 eV too
     large): the competition is not cleared.  Components without any sampled energy
     are listed, not blocking."""
-    near, unsampled = [], []
+    near, unsampled, continuum = [], [], []
     for item in open_components:
+        if (unbound_anion_gap_ev is not None and unbound_anion_gap_ev > unbound_anion_margin_ev
+                and item.get("minimum_status") in CONTINUUM_CHANNEL_STATUSES):
+            continuum.append({**item, "unbound_atomic_anion_gap_ev": unbound_anion_gap_ev})
+            continue
         gap = item.get("observed_gap_to_bracketed_seed_ev_not_lower_bound")
         if gap is None:
             unsampled.append(dict(item))
@@ -539,6 +569,8 @@ def _block_on_open_scout_components(comp: dict, open_components: Sequence[Mappin
             near.append(dict(item))
     comp["open_scout_components_without_energy"] = unsampled
     comp["blocking_open_scout_components"] = near
+    if continuum:
+        comp["continuum_channel_components"] = continuum
     if near:
         comp.update(status="UNRESOLVED", selected_job_id=None,
                     open_scout_rule=f"STAGE2_OPEN_COMPONENT_WITHIN_{margin_ev}_EV_OF_OR_BELOW_SEED")
@@ -740,12 +772,15 @@ def run_electronic_ea_stage(*, system: str, atoms: Sequence[str], requests: Sequ
     competition = {label: _competition(label, items, policy.competitor_exclusion_margin_ev,
                                       policy.collapsed_reference_scf_margin_ev)
                    for label, items in entries.items()}
-    for label, comp in competition.items():
-        _block_on_open_scout_components(comp, (open_scout_components or {}).get(label, ()),
-                                        policy.competitor_exclusion_margin_ev)
     basis = requests[0].basis if requests else None
     fragments = scan_atomic_fragments(atoms=atoms, basis=basis, settings=stage3_settings, policy=policy,
                                       cache_dir=output_dir / "fragments", runner=fragment_runner) if requests else {}
+    anion_gap = unbound_atomic_anion_gap_ev(atoms, fragments) if fragments else None
+    for label, comp in competition.items():
+        _block_on_open_scout_components(comp, (open_scout_components or {}).get(label, ()),
+                                        policy.competitor_exclusion_margin_ev,
+                                        anion_gap if label == "anion" else None,
+                                        policy.unbound_atomic_anion_margin_ev)
     channels = anion_dissociation_channels(atoms, fragments) if fragments else ()
 
     record: dict[str, Any] = {
