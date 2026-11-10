@@ -7,9 +7,9 @@
 set -u
 RUN="$1"; A="$2"; B="$3"
 # CORE_SLOTS caps concurrent tasks machine-wide; the CPU gate (point_pool) admits a slot only
-# while the measured load leaves room for its THREADS, so 16 slots fill the cores when tasks are
+# while the measured busy cores leave room for its THREADS, so 32 slots fill the cores when tasks are
 # partly serial and back off when other users compute.  POINT_WORKERS = parallel points per molecule.
-THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-16}"; POINT_WORKERS="${POINT_WORKERS:-8}"
+THREADS="${THREADS:-10}"; CORE_SLOTS="${CORE_SLOTS:-32}"; POINT_WORKERS="${POINT_WORKERS:-8}"
 OUTPUT="${OPENEA_OUTPUT:-../openea_results}/$RUN"
 LOG="runs/$RUN/$A$B.log"
 mkdir -p "runs/$RUN" "$OUTPUT"

@@ -294,33 +294,63 @@ def _held_slots(own_path: str) -> int:
     return held
 
 
-CPU_GATE_RAMP_S = 60.0   # a task admitted this recently may not show in the load average yet
+CPU_GATE_RAMP_S = 60.0   # a task admitted this recently may still be starting up (SCF setup, I/O)
 CPU_GATE_HEAD_POLL_S = 0.25
 
 
 def cpu_gate_admits(load: float, ncpu: int, held: int, threads: int, frac: float, ramping: int = 0) -> bool:
     """Admission rule of the CPU gate (pure, for tests).
 
-    ``load`` is the measured machine load, ``ramping`` the number of our tasks admitted within
-    the last ``CPU_GATE_RAMP_S`` that still run (counted with their full threads, since the
-    1-min load average lags behind them)."""
+    ``load`` is the measured number of busy cores, ``ramping`` the number of our tasks admitted
+    within the last ``CPU_GATE_RAMP_S`` that still run (counted with their full threads, since
+    a starting task does not use its cores yet)."""
     if frac <= 0.0 or held == 0:
         return True
     return load + (ramping + 1) * threads <= frac * ncpu
 
 
+CPU_BUSY_SAMPLE_S = 2.0
+
+
+def busy_cores(before: Sequence[int], after: Sequence[int], ncpu: int) -> float:
+    """Cores in use between two /proc/stat ``cpu`` lines (pure, for tests).
+
+    Fields: user nice system idle iowait irq softirq steal ...; idle and iowait are not use
+    (a task waiting for GPFS holds no core; 2026-11-10: load ~25-80, 15 cores busy)."""
+    delta = [b - a for a, b in zip(before[:8], after[:8])]
+    total = sum(delta)
+    if total <= 0:
+        return 0.0
+    return (total - delta[3] - delta[4]) / total * ncpu
+
+
+def _cpu_times() -> list[int]:
+    with open("/proc/stat") as fh:
+        return [int(x) for x in fh.readline().split()[1:]]
+
+
+_CPU_SAMPLE: dict[str, Any] = {}
+
+
 def _machine_load() -> float:
-    """max(1-min load average, running threads now)."""
-    running = 0.0
+    """Cores in use machine-wide (all users) since this process's previous reading, at least
+    ``CPU_BUSY_SAMPLE_S`` back (the first call waits that long; later calls return the last
+    value until the interval has passed, so the 0.25 s polls of the queue head stay cheap).
+
+    Not the load average: it counts runnable and I/O-blocked threads, and spinning or waiting
+    OpenMP threads of nice-19 tasks made it read 2-5x the cores really in use, so the gate held
+    tasks back on an idle machine."""
+    ncpu = os.cpu_count() or 1
     try:
-        with open("/proc/stat") as fh:
-            for line in fh:
-                if line.startswith("procs_running"):
-                    running = float(line.split()[1]) - 1.0   # minus this reader
-                    break
-    except OSError:
-        pass
-    return max(os.getloadavg()[0], running)
+        if not _CPU_SAMPLE:
+            _CPU_SAMPLE.update(t=time.monotonic(), times=_cpu_times())
+            time.sleep(CPU_BUSY_SAMPLE_S)
+        now, times = time.monotonic(), _cpu_times()
+        if "busy" not in _CPU_SAMPLE or now - _CPU_SAMPLE["t"] >= CPU_BUSY_SAMPLE_S:
+            _CPU_SAMPLE.update(busy=busy_cores(_CPU_SAMPLE["times"], times, ncpu), t=now, times=times)
+        return _CPU_SAMPLE["busy"]
+    except (OSError, ValueError):
+        return os.getloadavg()[0]
 
 
 def _still_held(path: str) -> bool:
@@ -407,7 +437,7 @@ def _wait_for_cpu(handle) -> None:
         if not announced:
             # Behind others in the queue the load is not the reason to wait (2026-10-26: the
             # "load 38 + 1 x 10 > 96" lines of a cache replay looked like a stuck gate).
-            reason = (f"load {load:.0f} + {len(recent) + 1} x {_THREADS} threads > {frac:g} x {ncpu} cores"
+            reason = (f"busy {load:.0f} + {len(recent) + 1} x {_THREADS} threads > {frac:g} x {ncpu} cores"
                       if first else f"position {position + 1} in the queue")
             print(f"[CPU GATE] pid {os.getpid()} waiting: {reason} ({held} slots held, {len(queue)} in queue)",
                   flush=True)

@@ -274,3 +274,11 @@ def test_run_above_its_fair_share_waits_for_a_slot(tmp_path, monkeypatch):
     assert len(sleeps) == 1
     assert not (slots / "wait_333_8.lock").exists()
     assert not list(slots.glob("wait_111_*.lock"))  # own wait file removed
+
+
+def test_busy_cores_ignores_idle_and_iowait():
+    # user nice system idle iowait irq softirq steal: 30 busy, 50 idle, 20 iowait of 100 ticks
+    before = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    after = [10, 15, 5, 50, 20, 0, 0, 0, 0, 0]
+    assert point_pool.busy_cores(before, after, 80) == 24.0
+    assert point_pool.busy_cores(before, before, 80) == 0.0
