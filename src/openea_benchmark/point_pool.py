@@ -226,7 +226,8 @@ def _record(handle, reserve_mb: float) -> None:
     handle.flush()
 
 
-def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact: bool = False) -> None:
+def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact: bool = False,
+                     default_mb: float | None = None) -> None:
     """Block until this task's reservation fits under the memory limit, then record it.
 
     ``reserve_mb`` (per task, e.g. a CCSDTQ storage estimate) replaces the run-wide
@@ -236,7 +237,8 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact
     reservation is added."""
     if _MEM_LIMIT_FRAC <= 0.0:
         return
-    reserve = float(reserve_mb) if exact else max(float(_MEM_RESERVE_MB), float(reserve_mb or 0.0))
+    default = float(_MEM_RESERVE_MB) if default_mb is None else float(default_mb)
+    reserve = float(reserve_mb) if exact else max(default, float(reserve_mb or 0.0))
     if exact:
         if reserve <= _held_reserve_mb(handle):  # shrinking: already covered, no wait
             _record(handle, reserve)
@@ -473,11 +475,13 @@ def pool_workers() -> int:
 
 
 @contextmanager
-def core_slot(reserve_mb: float | None = None):
+def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = None):
     """Hold one machine-wide core slot (no-op without a slot budget; re-entrant per thread).
 
     Re-entered with ``reserve_mb`` while the slot is held, the slot's reservation becomes
-    ``reserve_mb`` (waiting at the memory gate if it grows) and is restored on exit."""
+    ``reserve_mb`` (waiting at the memory gate if it grows) and is restored on exit.
+    ``default_mb`` replaces the run-wide default reservation for this task (a smaller
+    estimate of the task's own need)."""
     if not _SLOT_DIR:
         yield
         return
@@ -503,7 +507,7 @@ def core_slot(reserve_mb: float | None = None):
     _LOCAL.held, _LOCAL.handle = True, handle
     try:
         _wait_for_cpu(handle)
-        _wait_for_memory(handle, reserve_mb, big)
+        _wait_for_memory(handle, reserve_mb, big, default_mb=default_mb)
         yield
     finally:
         _LOCAL.held, _LOCAL.handle = False, None
@@ -590,8 +594,39 @@ def _acquire_fair_slot():
             pass
 
 
+def stage3_task_estimate_mb(args: tuple) -> float | None:
+    """Memory estimate of a task that runs Stage-3 points (CBS, CV, SR, refinement, ZPE):
+    the largest point budget among the requests in its arguments, plus PySCF's overshoot.
+    None when the task carries no requests or not exactly one settings object."""
+    try:
+        from .adaptive.stage3_execution import (GATE_OVERSHOOT, Stage3ExecutionRequest,
+                                                Stage3ExecutionSettings, point_memory_budget_mb)
+    except Exception:  # noqa: BLE001 - no estimate, the run-wide default applies
+        return None
+    flat = [x for a in args for x in (a if isinstance(a, (list, tuple)) else (a,))]
+    requests = [x for x in flat if isinstance(x, Stage3ExecutionRequest)]
+    settings = [x for x in flat if isinstance(x, Stage3ExecutionSettings)]
+    if not requests or len(settings) != 1:
+        return None
+    try:
+        return max(point_memory_budget_mb(r, settings[0]) for r in requests) * GATE_OVERSHOOT
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:
-    with core_slot(reserve_mb):
+    # A small task enters the memory gate with its own estimate instead of the run-wide
+    # default (2026-11-13: LiH/SeH ZPE and CV points of ~2 GB waited a day at 397 GB
+    # projected vs 395 GB allowed, each reserving 8 GB).  Larger tasks keep the default
+    # and grow into their estimate inside the slot, as before.
+    # An explicit per-task reservation is the task's own estimate: it replaces the
+    # run-wide default also when it is smaller.
+    default_mb = reserve_mb
+    if reserve_mb is None and _SLOT_DIR and _MEM_LIMIT_FRAC > 0.0:
+        estimate = stage3_task_estimate_mb(args)
+        if estimate is not None and estimate < _MEM_RESERVE_MB:
+            default_mb = estimate
+    with core_slot(reserve_mb, default_mb=default_mb):
         return fn(*args)
 
 

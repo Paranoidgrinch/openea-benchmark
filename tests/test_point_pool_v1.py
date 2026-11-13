@@ -282,3 +282,43 @@ def test_busy_cores_ignores_idle_and_iowait():
     after = [10, 15, 5, 50, 20, 0, 0, 0, 0, 0]
     assert point_pool.busy_cores(before, after, 80) == 24.0
     assert point_pool.busy_cores(before, before, 80) == 0.0
+
+
+def _record_of_task(slot_file, *_):
+    return float(open(slot_file).read().split()[2])
+
+
+def test_small_stage3_task_enters_the_gate_with_its_own_estimate(tmp_path, monkeypatch):
+    from test_reference_branches_v1 import request
+    from openea_benchmark.adaptive import stage3_execution
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=1,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "meminfo_mb", lambda: (1000.0, 900.0))
+    budgets = {1.0: 40, 2.0: 400}
+    monkeypatch.setattr(stage3_execution, "point_memory_budget_mb", lambda req, s: budgets[req.r_angstrom])
+    settings = Stage3ExecutionSettings()
+    path = str(slots / "slot000.lock")
+    try:
+        small = point_pool._slotted_call(_record_of_task, (path, request(0, 1.0), settings))
+        chain = point_pool._slotted_call(_record_of_task, (path, [request(0, 1.0), request(1, 2.0)], settings))
+        plain = point_pool._slotted_call(_record_of_task, (path,))
+        explicit = point_pool._slotted_call(_record_of_task, (path, request(0, 1.0), settings), 300)
+        explicit_small = point_pool._slotted_call(_record_of_task, (path,), 30)
+    finally:
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert small == 40 * stage3_execution.GATE_OVERSHOOT  # below the run-wide default: own estimate
+    assert chain == 100  # largest point of the chain exceeds the default: default as before
+    assert plain == 100  # no requests: run-wide default
+    assert explicit == 300  # an explicit reservation is unchanged
+    assert explicit_small == 30  # also when it is below the run-wide default
+
+
+def test_mr_task_reserves_its_estimate_not_the_pyscf_limit():
+    from openea_benchmark.mr_competitors import MRCompetitorPolicy, mr_task_reserve_mb
+    policy = MRCompetitorPolicy()
+    small = mr_task_reserve_mb(("P", "H"), policy)
+    assert 4000 <= small < policy.max_memory_mb
+    assert mr_task_reserve_mb(("P", "H"), MRCompetitorPolicy(max_memory_mb=3000)) == 3000
+    assert mr_task_reserve_mb(("Cr", "Cr"), policy) > mr_task_reserve_mb(("Fe", "O"), policy) > small

@@ -205,6 +205,28 @@ def selected_block(label: str) -> tuple[int, str] | None:
     return None if irrep is None else (int(m.group(1)), irrep)
 
 
+MR_TASK_FLOOR_MB = 4000
+
+
+def mr_task_reserve_mb(atoms, policy: "MRCompetitorPolicy") -> float:
+    """Memory-gate reservation of one SA-CASSCF/SC-NEVPT2 block task: twice the SCF's
+    8-fold AO integrals plus a floor, at most the PySCF limit (2026-11-13: def2-TZVPPD
+    blocks of PH/Na2 need ~1 GB but reserved 16 GB each and waited a day at the gate)."""
+    from pyscf import gto
+    try:
+        mol = gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, 1.0))], **mole_basis_kwargs(atoms, policy.basis),
+                    spin=None, verbose=0, dump_input=False)
+        nao_pair = mol.nao_nr() * (mol.nao_nr() + 1) // 2
+    except Exception:  # noqa: BLE001 - unknown size: the PySCF limit
+        return float(policy.max_memory_mb)
+    integrals_mb = nao_pair * (nao_pair + 1) / 2 * 8 / 1e6
+    # SC-NEVPT2 holds the active-space 4-RDM (ncas^8) and a few same-size intermediates.
+    spaces = [pyscf_valence_space(atoms, q, policy.basis) for q in (0, -1)]
+    ncas = max((sum(sp["ras2"]) for sp in spaces if sp is not None), default=0)
+    rdm_mb = 3 * ncas ** 8 * 8 / 1e6
+    return float(min(policy.max_memory_mb, 2 * integrals_mb + rdm_mb + MR_TASK_FLOOR_MB))
+
+
 def block_energies(atoms, charge, mult, irrep, r, policy: MRCompetitorPolicy, cache: Path) -> dict:
     """Two-root SA-CASSCF/SC-NEVPT2 energies of one (charge, spin, irrep) block at one R."""
     if cache.is_file():
@@ -462,7 +484,7 @@ def run_mr_competitor_stage(*, electronic_ea: Mapping[str, Any], requests: Seque
             jobs.append((selected[q]["atoms"], q, mult, irrep, r, policy,
                          str(output_dir / "blocks" / f"q{q}_m{mult}_{irrep}_r{r:.4f}.json")))
             print(f"[MR] {electronic_ea.get('system')} q={q} 2S+1={mult} {irrep} R={r:.3f}", flush=True)
-        results = run_parallel(fn, jobs, reserve_mb=[policy.max_memory_mb] * len(jobs))  # PySCF may use its limit
+        results = run_parallel(fn, jobs, reserve_mb=[mr_task_reserve_mb(job[0], policy) for job in jobs])
         for (key, r, outside), res in zip(specs, results):
             points.setdefault(key, []).append((r, outside, res))
         sanitize()
