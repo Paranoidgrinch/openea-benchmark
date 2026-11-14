@@ -159,15 +159,10 @@ MEM_GATE_RAMP_S = 900.0     # a reservation counts in full this long after it wa
 MEM_GATE_TAIL_MB = 4096.0   # afterwards at most this much of it above the task's resident memory
 
 
-def _outstanding_reservations_mb(own_path: str, tail_mb: float | None = None) -> float:
-    """Reserved but not yet resident memory of the tasks running on this host.
-
-    A reservation is a guess made at the start; a task that has not grown into it after
-    ``MEM_GATE_RAMP_S`` counts with at most ``tail_mb`` beyond its resident memory (the memory
-    watchdog catches the rest).  Counted in full, unused reservations of out-of-core CC tasks
-    added up to ~225 GB while 390 GB were free, and every task waited (2026-10-25)."""
-    machine, total, now = _machine_id(), 0.0, time.time()
-    tail_mb = MEM_GATE_TAIL_MB if tail_mb is None else tail_mb
+def _held_records(own_path: str):
+    """(reservation MB, resident MB, age s) of every other task holding a slot on this host;
+    stale records of slots nobody holds are cleared on the way."""
+    machine, now = _machine_id(), time.time()
     for name in os.listdir(_SLOT_DIR):
         path = os.path.join(_SLOT_DIR, name)
         if not name.startswith("slot") or not name.endswith(".lock") or path == own_path:
@@ -189,9 +184,45 @@ def _outstanding_reservations_mb(own_path: str, tail_mb: float | None = None) ->
             continue
         rss = _rss_mb(int(fields[1]))
         if rss is not None:
-            rest = max(0.0, float(fields[2]) - rss)
-            total += rest if age < MEM_GATE_RAMP_S else min(rest, tail_mb)
-    return total
+            yield float(fields[2]), rss, age
+
+
+def _unallocated_mb(reserve: float, rss: float, age: float, tail_mb: float) -> float:
+    rest = max(0.0, reserve - rss)
+    return rest if age < MEM_GATE_RAMP_S else min(rest, tail_mb)
+
+
+def _outstanding_reservations_mb(own_path: str, tail_mb: float | None = None) -> float:
+    """Reserved but not yet resident memory of the tasks running on this host.
+
+    A reservation is a guess made at the start; a task that has not grown into it after
+    ``MEM_GATE_RAMP_S`` counts with at most ``tail_mb`` beyond its resident memory (the memory
+    watchdog catches the rest).  Counted in full, unused reservations of out-of-core CC tasks
+    added up to ~225 GB while 390 GB were free, and every task waited (2026-10-25)."""
+    tail_mb = MEM_GATE_TAIL_MB if tail_mb is None else tail_mb
+    return sum(_unallocated_mb(r, rss, age, tail_mb) for r, rss, age in _held_records(own_path))
+
+
+# Large tasks (reservation above LARGE_TASK_MIN_MB: CCSDT/CCSDTQ, big FNO points) may together
+# use at most this share of RAM; the rest up to the memory limit stays free for small tasks
+# (2026-11-14: ~10 out-of-core CC tasks waiting on GPFS held 250 GB at 20 busy cores while
+# LiH/SeH ZPE and CV points and the Na2 MR blocks waited a day for a few GB).
+LARGE_TASK_MIN_MB = 20000.0
+LARGE_TASK_SHARE_ENV = "OPENEA_LARGE_TASK_SHARE"
+DEFAULT_LARGE_TASK_SHARE = 0.55
+
+
+def _large_task_share() -> float:
+    try:
+        return float(os.environ.get(LARGE_TASK_SHARE_ENV, DEFAULT_LARGE_TASK_SHARE))
+    except ValueError:
+        return DEFAULT_LARGE_TASK_SHARE
+
+
+def _large_tasks_mb(own_path: str) -> float:
+    """Memory held or still claimed by the other large tasks on this host."""
+    return sum(rss + _unallocated_mb(r, rss, age, MEM_GATE_TAIL_MB)
+               for r, rss, age in _held_records(own_path) if r > LARGE_TASK_MIN_MB)
 
 
 def _pending_big_reservation_mb() -> float:
@@ -243,11 +274,16 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact
         if reserve <= _held_reserve_mb(handle):  # shrinking: already covered, no wait
             _record(handle, reserve)
             return
-    if big is not None:  # announce the pending large reservation to everyone else
+    def announce(state: str) -> None:
         big.seek(0)
         big.truncate()
-        big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} PENDING\n")
+        big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} {state}\n")
         big.flush()
+
+    large = reserve > LARGE_TASK_MIN_MB
+    share = _large_task_share()
+    if big is not None:  # announce the pending large reservation to everyone else
+        announce("PENDING")
     announced = False
     while True:
         with open(os.path.join(_SLOT_DIR, "memgate.lock"), "a+") as gate:
@@ -260,17 +296,22 @@ def _wait_for_memory(handle, reserve_mb: float | None = None, big=None, *, exact
                 max(0.0, reserve - (_rss_mb(os.getpid()) or 0.0)) if exact else reserve)
             if big is None:
                 projected += _pending_big_reservation_mb()
-            if projected <= _MEM_LIMIT_FRAC * total:
+            # A large task also waits for its share; alone it always may start (its own
+            # reservation may exceed the share).
+            large_held = _large_tasks_mb(handle.name) if large and share > 0.0 else 0.0
+            share_ok = not large or share <= 0.0 or large_held == 0.0 or large_held + reserve <= share * total
+            if projected <= _MEM_LIMIT_FRAC * total and share_ok:
                 if big is not None:
-                    big.seek(0)
-                    big.truncate()
-                    big.write(f"{_machine_id()} {os.getpid()} {reserve:.0f} ADMITTED\n")
-                    big.flush()
+                    announce("ADMITTED")
                 _record(handle, reserve)
                 return
+            if big is not None:  # waiting for the share is no claim on the small tasks' memory
+                announce("PENDING" if share_ok else "SHARE_WAIT")
         if not announced:
-            print(f"[MEMORY GATE] pid {os.getpid()} waiting: projected {projected / 1024:.0f} GB > "
-                  f"{_MEM_LIMIT_FRAC:.0%} of {total / 1024:.0f} GB", flush=True)
+            reason = (f"projected {projected / 1024:.0f} GB > {_MEM_LIMIT_FRAC:.0%} of {total / 1024:.0f} GB"
+                      if share_ok else
+                      f"large tasks {(large_held + reserve) / 1024:.0f} GB > {share:.0%} of {total / 1024:.0f} GB")
+            print(f"[MEMORY GATE] pid {os.getpid()} waiting: {reason}", flush=True)
             announced = True
         time.sleep(15.0)
 

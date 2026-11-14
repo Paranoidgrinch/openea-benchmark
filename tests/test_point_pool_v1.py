@@ -322,3 +322,42 @@ def test_mr_task_reserves_its_estimate_not_the_pyscf_limit():
     assert 4000 <= small < policy.max_memory_mb
     assert mr_task_reserve_mb(("P", "H"), MRCompetitorPolicy(max_memory_mb=3000)) == 3000
     assert mr_task_reserve_mb(("Cr", "Cr"), policy) > mr_task_reserve_mb(("Fe", "O"), policy) > small
+
+
+def test_large_tasks_share_ram_and_leave_room_for_small_ones(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=3,
+                                    mem_limit_frac=0.8, mem_reserve_mb=10)
+    monkeypatch.setattr(point_pool, "LARGE_TASK_MIN_MB", 100.0)
+    monkeypatch.setenv(point_pool.LARGE_TASK_SHARE_ENV, "0.55")
+    monkeypatch.setattr(point_pool, "meminfo_mb", lambda: (1000.0, 950.0))  # 50 used: the total limit 800 never binds here
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 300.0)  # the other large task holds 300
+    slots.mkdir(exist_ok=True)
+    other = open(slots / "slot002.lock", "a+")
+    fcntl.flock(other, fcntl.LOCK_EX)
+    other.write(f"{point_pool._machine_id()} {os.getpid()} 300\n")
+    other.flush()
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        other.truncate(0)  # the other large task ends
+        fcntl.flock(other, fcntl.LOCK_UN)
+
+    monkeypatch.setattr(point_pool.time, "sleep", fake_sleep)
+    try:
+        with point_pool.core_slot():  # small task: not limited by the large-task share
+            assert not sleeps
+        with point_pool.core_slot(reserve_mb=200):  # 300 + 200 <= 550: starts
+            assert not sleeps
+        with point_pool.core_slot(reserve_mb=400):  # 300 + 400 > 550: waits until the other ends
+            pass
+        assert len(sleeps) == 1
+        with point_pool.core_slot(reserve_mb=700):  # alone a large task may exceed the share
+            pass
+        assert len(sleeps) == 1
+    finally:
+        other.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
