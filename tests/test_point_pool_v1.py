@@ -361,3 +361,32 @@ def test_large_tasks_share_ram_and_leave_room_for_small_ones(tmp_path, monkeypat
         other.close()
         point_pool.shutdown_point_pool()
         point_pool.configure_point_pool(workers=1, threads=1)
+
+
+def test_settled_tails_count_together_with_at_most_the_total_cap(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=6,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 0.0)
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_MB", 10.0)
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_TOTAL_MB", 25.0)
+    held = []
+    try:
+        records = [("slot001.lock", 300, 0.0)] + [(f"slot00{i}.lock", 300, 2 * point_pool.MEM_GATE_RAMP_S)
+                                                  for i in range(2, 6)]
+        for name, reserve, age in records:
+            fh = open(slots / name, "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{point_pool._machine_id()} {os.getpid()} {reserve}\n")
+            fh.flush()
+            stamp = time.time() - age
+            os.utime(slots / name, (stamp, stamp))
+            held.append(fh)
+        outstanding = point_pool._outstanding_reservations_mb(str(slots / "slot000.lock"))
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert outstanding == 325.0  # fresh 300 in full, four settled tails of 10 capped at 25

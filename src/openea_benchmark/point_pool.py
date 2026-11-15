@@ -157,6 +157,10 @@ def _machine_id() -> str:
 
 MEM_GATE_RAMP_S = 900.0     # a reservation counts in full this long after it was recorded
 MEM_GATE_TAIL_MB = 4096.0   # afterwards at most this much of it above the task's resident memory
+# ... and all those tails together at most this much: settled tasks rarely grow at the same time,
+# and the memory watchdog catches the rest (2026-11-14: 24 tails held 98 GB on paper while LiH/PH
+# ZPE and the Na2 MR blocks waited 3.5 h for 4 GB).
+MEM_GATE_TAIL_TOTAL_MB = 16384.0
 
 
 def _held_records(own_path: str):
@@ -197,10 +201,17 @@ def _outstanding_reservations_mb(own_path: str, tail_mb: float | None = None) ->
 
     A reservation is a guess made at the start; a task that has not grown into it after
     ``MEM_GATE_RAMP_S`` counts with at most ``tail_mb`` beyond its resident memory (the memory
-    watchdog catches the rest).  Counted in full, unused reservations of out-of-core CC tasks
+    watchdog catches the rest); all tails together count with at most ``MEM_GATE_TAIL_TOTAL_MB``.
+    Counted in full, unused reservations of out-of-core CC tasks
     added up to ~225 GB while 390 GB were free, and every task waited (2026-10-25)."""
     tail_mb = MEM_GATE_TAIL_MB if tail_mb is None else tail_mb
-    return sum(_unallocated_mb(r, rss, age, tail_mb) for r, rss, age in _held_records(own_path))
+    fresh = tails = 0.0
+    for r, rss, age in _held_records(own_path):
+        if age < MEM_GATE_RAMP_S:
+            fresh += _unallocated_mb(r, rss, age, tail_mb)
+        else:
+            tails += _unallocated_mb(r, rss, age, tail_mb)
+    return fresh + min(tails, MEM_GATE_TAIL_TOTAL_MB)
 
 
 # Large tasks (reservation above LARGE_TASK_MIN_MB: CCSDT/CCSDTQ, big FNO points) may together
