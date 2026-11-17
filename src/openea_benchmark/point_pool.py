@@ -666,7 +666,38 @@ def stage3_task_estimate_mb(args: tuple) -> float | None:
         return None
 
 
-def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None) -> Any:
+@contextmanager
+def limit_group(group: tuple[str, int] | None):
+    """At most ``n`` tasks of group ``(name, n)`` run at a time machine-wide (no-op without
+    a slot directory or group).  Taken before the core slot, so a waiting task holds
+    neither a slot nor memory."""
+    if group is None or not _SLOT_DIR:
+        yield
+        return
+    name, n = group
+    announced = False
+    while True:
+        for index in range(max(1, int(n))):
+            fh = open(os.path.join(_SLOT_DIR, f"group_{name}_{index}.lock"), "a+")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fh.close()
+                continue
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                fh.close()
+            return
+        if not announced:
+            print(f"[LIMIT GROUP] pid {os.getpid()} waiting: {n} tasks of group {name} running", flush=True)
+            announced = True
+        time.sleep(10.0)
+
+
+def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None,
+                  group: tuple[str, int] | None = None) -> Any:
     # A small task enters the memory gate with its own estimate instead of the run-wide
     # default (2026-11-13: LiH/SeH ZPE and CV points of ~2 GB waited a day at 397 GB
     # projected vs 395 GB allowed, each reserving 8 GB).  Larger tasks keep the default
@@ -678,13 +709,14 @@ def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None 
         estimate = stage3_task_estimate_mb(args)
         if estimate is not None and estimate < _MEM_RESERVE_MB:
             default_mb = estimate
-    with core_slot(reserve_mb, default_mb=default_mb):
+    with limit_group(group), core_slot(reserve_mb, default_mb=default_mb):
         return fn(*args)
 
 
 def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
                  on_result: Callable[[int, Any], None] | None = None,
-                 reserve_mb: Sequence[float | None] | None = None) -> list[Any]:
+                 reserve_mb: Sequence[float | None] | None = None,
+                 limit_groups: Sequence[tuple[str, int] | None] | None = None) -> list[Any]:
     """``[fn(*args) for args in arg_tuples]`` on the pool; results in input order.
 
     ``fn`` and its arguments must be picklable when a pool is configured.
@@ -692,17 +724,19 @@ def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
     finishes (used to persist results immediately, so a kill loses only running tasks).
     The first task exception is re-raised after the remaining tasks have finished.
     ``reserve_mb[i]`` is task i's memory reservation for the gate (default: run-wide).
+    ``limit_groups[i]`` = (name, n): at most n tasks of that group run at a time machine-wide.
     """
     items: Sequence[tuple] = list(arg_tuples)
     reserves = list(reserve_mb) if reserve_mb is not None else [None] * len(items)
+    groups = list(limit_groups) if limit_groups is not None else [None] * len(items)
     results: list[Any] = [None] * len(items)
     if _POOL is None or len(items) < 2:
         for index, args in enumerate(items):
-            results[index] = _slotted_call(fn, args, reserves[index])
+            results[index] = _slotted_call(fn, args, reserves[index], groups[index])
             if on_result is not None:
                 on_result(index, results[index])
         return results
-    futures = {_POOL.submit(_slotted_call, fn, args, reserves[index]): index for index, args in enumerate(items)}
+    futures = {_POOL.submit(_slotted_call, fn, args, reserves[index], groups[index]): index for index, args in enumerate(items)}
     error: BaseException | None = None
     pending = set(futures)
     while pending:

@@ -390,3 +390,26 @@ def test_settled_tails_count_together_with_at_most_the_total_cap(tmp_path, monke
         point_pool.shutdown_point_pool()
         point_pool.configure_point_pool(workers=1, threads=1)
     assert outstanding == 325.0  # fresh 300 in full, four settled tails of 10 capped at 25
+
+
+def test_limit_group_admits_at_most_n_tasks(tmp_path, monkeypatch):
+    import fcntl
+    from openea_benchmark import point_pool
+    monkeypatch.setattr(point_pool, "_SLOT_DIR", str(tmp_path))
+
+    def free(index):
+        with open(tmp_path / f"group_g_{index}.lock", "a+") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            return True
+
+    with point_pool.limit_group(("g", 2)):
+        assert not free(0) and free(1)
+        with point_pool.limit_group(("g", 2)):
+            assert not free(0) and not free(1)
+    assert free(0) and free(1)
+    with point_pool.limit_group(None):   # no group: no lock files
+        pass

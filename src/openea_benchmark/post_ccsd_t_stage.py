@@ -147,7 +147,18 @@ OUT_OF_CORE_COPIES = 6
 # exceed this size, CCpy writes them to an HDF5 file in a per-point directory on
 # GPFS scratch, removed when the point ends.  OPENEA_DIIS_OUT_OF_CORE=0/1 forces
 # the choice (benchmark in-core vs scratch).
-DIIS_OUT_OF_CORE_MB = 10000
+DIIS_OUT_OF_CORE_MB = 10000  # superseded by IN_CORE_LIMIT_MB (2026-11-17), kept for reference
+# In-core first (user decision 2026-11-17): out-of-core DIIS on GPFS made CC points
+# 8-15x slower (BO aTZ CCSDT neutral 8.0 h -> 1.0 h in-core at 28 GB; VO anion aDZ
+# CCSDT 43.5 h -> 2.9 h at 29 GB; energies equal to 5e-13 Eh).  A point stays in core
+# with DIIS_SIZE vectors when its 16 copies fit IN_CORE_LIMIT_MB, else with
+# REDUCED_DIIS_SIZE vectors (10 copies); only beyond that the DIIS vectors go to
+# scratch, and at most MAX_OUT_OF_CORE_POINTS such points run at a time machine-wide.
+IN_CORE_LIMIT_ENV = "OPENEA_CC_IN_CORE_LIMIT_MB"
+IN_CORE_LIMIT_MB = 120000
+REDUCED_DIIS_SIZE = 3
+MAX_OUT_OF_CORE_POINTS = 2
+OUT_OF_CORE_LIMIT_GROUP = ("cc_out_of_core", MAX_OUT_OF_CORE_POINTS)
 # Resource limits of the quadruples decision; kept out of PostCCSDTStagePolicy because
 # the policy is part of every post-CC point signature (aTZ CCSDT points take days).
 Q_MEMORY_LIMIT_ENV = "OPENEA_Q_MEMORY_LIMIT_MB"
@@ -175,11 +186,29 @@ def _amplitude_mb(spec: Any, basis: str, method: str) -> float:
     return 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
 
 
-def diis_out_of_core(amplitude_mb: float) -> bool:
+def in_core_copies(diis_size: int) -> int:
+    return 2 * diis_size + IN_CORE_COPIES
+
+
+def cc_mode(amplitude_mb: float) -> tuple[bool, int]:
+    """(DIIS out of core, DIIS size) of a point whose amplitude array has ``amplitude_mb``."""
     forced = os.environ.get("OPENEA_DIIS_OUT_OF_CORE")
     if forced in ("0", "1"):
-        return forced == "1"
-    return DIIS_COPIES * amplitude_mb > DIIS_OUT_OF_CORE_MB
+        return forced == "1", DIIS_SIZE
+    limit = float(os.environ.get(IN_CORE_LIMIT_ENV, IN_CORE_LIMIT_MB))
+    for size in (DIIS_SIZE, REDUCED_DIIS_SIZE):
+        if in_core_copies(size) * amplitude_mb <= limit:
+            return False, size
+    return True, DIIS_SIZE
+
+
+def diis_out_of_core(amplitude_mb: float) -> bool:
+    return cc_mode(amplitude_mb)[0]
+
+
+def cc_limit_group(spec: Any, basis: str, method: str):
+    """Machine-wide concurrency group of an out-of-core point (None for in-core points)."""
+    return OUT_OF_CORE_LIMIT_GROUP if diis_out_of_core(_amplitude_mb(spec, basis, method)) else None
 
 
 def q_memory_limit_mb(policy: "PostCCSDTStagePolicy") -> int:
@@ -202,7 +231,8 @@ def scratch_free_mb() -> float:
 def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
     """Memory (RAM) estimate of a CCpy point; DIIS copies count only when kept in core."""
     one = _amplitude_mb(spec, basis, method)
-    return (OUT_OF_CORE_COPIES if diis_out_of_core(one) else AMPLITUDE_COPIES) * one
+    out_of_core, size = cc_mode(one)
+    return (OUT_OF_CORE_COPIES if out_of_core else in_core_copies(size)) * one
 
 
 def cached_diis_class():
@@ -297,10 +327,11 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
         driver.options["energy_convergence"] = policy.cc_convergence
         driver.options["amp_convergence"] = policy.cc_convergence
         driver.options["maximum_iterations"] = policy.cc_max_iterations
-        driver.options["diis_size"] = DIIS_SIZE
-        out_of_core = diis_out_of_core(_amplitude_mb(spec, basis, method))
+        out_of_core, diis_size = cc_mode(_amplitude_mb(spec, basis, method))
+        driver.options["diis_size"] = diis_size
         driver.options["diis_out_of_core"] = out_of_core
         record["diis_out_of_core"] = out_of_core
+        record["diis_size"] = diis_size
         if out_of_core:
             import ccpy.drivers.solvers as solvers
             solvers.DIIS = cached_diis_class()
@@ -406,7 +437,7 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
             tasks.append((q_basis, "CCSDT"))
         tasks.append((q_basis, "CCSDTQ"))
     fn = point_fn or _run_point
-    jobs, reserves = [], []
+    jobs, reserves, groups = [], [], []
     for role, spec in states.items():
         for basis, method in tasks:
             path = str(output_dir / "points" / f"{role}__{basis}__{METHOD_TOKEN[method]}.json")
@@ -414,10 +445,11 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
             # not wait behind a running large point for the one-at-a-time slot.
             done_already = cached_point(spec, basis, method, policy, path) is not None
             reserves.append(0.0 if done_already else cc_storage_mb(spec, basis, method))
+            groups.append(None if done_already else cc_limit_group(spec, basis, method))
             print(f"[POST-CC] {spec.system} {role} {basis} {method}{' (cached)' if done_already else ''}",
                   flush=True)
             jobs.append((spec, basis, method, policy, path))
-    results = run_parallel(fn, jobs, reserve_mb=reserves)
+    results = run_parallel(fn, jobs, reserve_mb=reserves, limit_groups=groups)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]
     failed = [r for r in results if r.get("status") != "COMPLETED"]

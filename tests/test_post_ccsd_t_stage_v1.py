@@ -37,6 +37,9 @@ def run(tmp_path, monkeypatch, limit, scratch_free_mb=1.0e9):
     monkeypatch.setattr(post_ccsd_t_stage, "cc_scratch_need_mb",
                         lambda spec, basis, method: 100000.0 if method == "CCSDTQ" else 0.0)
     monkeypatch.setattr(post_ccsd_t_stage, "scratch_free_mb", lambda: scratch_free_mb)
+    monkeypatch.setattr(post_ccsd_t_stage, "cc_limit_group",
+                        lambda spec, basis, method: post_ccsd_t_stage.OUT_OF_CORE_LIMIT_GROUP
+                        if method == "CCSDTQ" else None)
     reqs = [request("N", 0, 1), request("A", -1, 0)]
     recs = {f"{j}-{i}": {"job_id": j, "request_id": f"{j}-{i}", "status": "COMPLETED", "r_angstrom": r,
                          "high_level_checkpoint_path": f"/hl/{j}{r}"} for j in "NA" for i, r in enumerate((0.9, 1.0))}
@@ -88,7 +91,7 @@ def test_point_files_are_distinct_per_method():
 def test_reservations_follow_the_estimates(tmp_path, monkeypatch):
     seen = {}
 
-    def fake_parallel(fn, jobs, reserve_mb=None):
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
         seen["reserves"] = list(reserve_mb)
         return [fn(*job) for job in jobs]
 
@@ -144,7 +147,7 @@ def test_cached_points_reserve_no_memory(tmp_path, monkeypatch):
     seen = []
     base_point = fake_point
 
-    def fake_parallel(fn, jobs, reserve_mb=None):
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
         seen.append(list(reserve_mb))
         return [fn(*job) for job in jobs]
 
@@ -222,3 +225,42 @@ def test_failed_fno_falls_back_to_the_allowance(tmp_path, monkeypatch):
                         lambda states, policy, out: {"status": "FAILED", "reason": "x"})
     res = run(tmp_path, monkeypatch, limit=5000)
     assert res["status"] == "CLEARED_WITH_QUADRUPLES_ALLOWANCE" and res["fno_ccsdtq"]["status"] == "FAILED"
+
+
+def test_points_stay_in_core_with_a_smaller_diis_before_going_out_of_core(monkeypatch):
+    monkeypatch.delenv("OPENEA_DIIS_OUT_OF_CORE", raising=False)
+    monkeypatch.setenv(post_ccsd_t_stage.IN_CORE_LIMIT_ENV, "120000")
+    mode = post_ccsd_t_stage.cc_mode
+    assert mode(2000.0) == (False, 6)        # VO anion aDZ CCSDT: 16 copies = 32 GB
+    assert mode(7000.0) == (False, 6)        # 112 GB
+    assert mode(10000.0) == (False, 3)       # 160 GB with 6 vectors, 100 GB with 3
+    assert mode(13000.0) == (True, 6)        # 130 GB even with 3 vectors: DIIS on scratch
+    monkeypatch.setenv("OPENEA_DIIS_OUT_OF_CORE", "1")
+    assert mode(1.0) == (True, 6)
+    monkeypatch.setenv("OPENEA_DIIS_OUT_OF_CORE", "0")
+    assert mode(1.0e6) == (False, 6)
+
+
+def test_storage_estimate_follows_the_mode(monkeypatch):
+    monkeypatch.delenv("OPENEA_DIIS_OUT_OF_CORE", raising=False)
+    monkeypatch.setenv(post_ccsd_t_stage.IN_CORE_LIMIT_ENV, "120000")
+    for one, copies, scratch in ((2000.0, 16, 0.0), (10000.0, 10, 0.0), (13000.0, 6, 12 * 13000.0)):
+        monkeypatch.setattr(post_ccsd_t_stage, "_amplitude_mb", lambda spec, basis, method, one=one: one)
+        assert post_ccsd_t_stage.cc_storage_mb(None, "b", "CCSDT") == copies * one
+        assert post_ccsd_t_stage.cc_scratch_need_mb(None, "b", "CCSDT") == scratch
+        group = post_ccsd_t_stage.cc_limit_group(None, "b", "CCSDT")
+        assert (group is not None) == (scratch > 0.0)
+
+
+def test_out_of_core_points_carry_the_limit_group(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
+        seen["groups"] = list(limit_groups)
+        seen["methods"] = [job[2] for job in jobs]
+        return [fn(*job) for job in jobs]
+
+    monkeypatch.setattr(post_ccsd_t_stage, "run_parallel", fake_parallel)
+    run(tmp_path, monkeypatch, limit=60000)
+    for method, group in zip(seen["methods"], seen["groups"]):
+        assert (group == post_ccsd_t_stage.OUT_OF_CORE_LIMIT_GROUP) == (method == "CCSDTQ")
