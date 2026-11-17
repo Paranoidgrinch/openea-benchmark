@@ -507,8 +507,15 @@ def run_benchmark_acquisition(
             stage3_settings=stage3_settings, output_dir=output_dir / "cbs",
             policy=CBSStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
+    # The final verdict of an anion unbound at CBS reads no later correction layer (only open
+    # anion MR-only candidates could change it): CV, SR, SOC, post-CCSD(T) and ZPE are skipped
+    # (2026-11-16: Ne2 computed four more days, POST-CC included, after CBS had shown -0.83 to -0.98 eV).
+    unbound = anion_unbound_at_cbs(cbs)
+    if unbound:
+        print(f"[CBS] {system}: anion unbound at CBS -> CV, SR, SOC, post-CCSD(T), ZPE skipped; "
+              "MR only for anion candidates", flush=True)
     core_valence = None
-    if electronic_ea is not None and settings.cv_stage:
+    if electronic_ea is not None and settings.cv_stage and not unbound:
         from .core_valence_stage import CoreValenceStagePolicy, run_core_valence_stage
         core_valence = run_core_valence_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
@@ -518,7 +525,7 @@ def run_benchmark_acquisition(
             policy=CoreValenceStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
     scalar_relativity = None
-    if electronic_ea is not None and settings.sr_stage:
+    if electronic_ea is not None and settings.sr_stage and not unbound:
         from .scalar_relativity_stage import ScalarRelativityStagePolicy, run_scalar_relativity_stage
         scalar_relativity = run_scalar_relativity_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
@@ -528,14 +535,14 @@ def run_benchmark_acquisition(
             policy=ScalarRelativityStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
     spin_orbit = None
-    if electronic_ea is not None and settings.soc_stage:
+    if electronic_ea is not None and settings.soc_stage and not unbound:
         from .spin_orbit_stage import run_spin_orbit_stage
         spin_orbit = run_spin_orbit_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
             output_dir=output_dir / "spin_orbit")
 
     post_ccsd_t = None
-    if electronic_ea is not None and settings.post_cc_stage:
+    if electronic_ea is not None and settings.post_cc_stage and not unbound:
         from .post_ccsd_t_stage import PostCCSDTStagePolicy, run_post_ccsd_t_stage
         post_ccsd_t = run_post_ccsd_t_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
@@ -547,11 +554,12 @@ def run_benchmark_acquisition(
     mr_labels = [f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())]
     pending_labels, pending_r = pending_mr_competitor_labels(electronic_ea, requests)
     mr_labels += [label for label in pending_labels if label not in mr_labels]
-    if electronic_ea is not None and settings.mr_competitor_stage and mr_labels:
+    mr_run_labels = mr_labels_to_run(mr_labels, unbound)
+    if electronic_ea is not None and settings.mr_competitor_stage and mr_run_labels:
         from .mr_competitors import run_mr_competitor_stage
         mr_competitors = run_mr_competitor_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            mr_only_labels=mr_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
+            mr_only_labels=mr_run_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
 
     # Patch 54: MR-only candidates the lower bound could not exclude are computed
     # relative to the SR state of their charge (term gap); the EA uses the lower one.
@@ -562,7 +570,7 @@ def run_benchmark_acquisition(
                                             competitor_blocks_dir=output_dir / "mr_competitors" / "blocks")
 
     nuclear = adiabatic = None
-    if electronic_ea is not None and settings.zpe_stage:
+    if electronic_ea is not None and settings.zpe_stage and not unbound:
         from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
         nuclear = run_vibrational_stage(
             electronic_ea=electronic_ea, loops=ea_loops, atoms=tuple(manifest_system["atoms"]),
@@ -682,3 +690,15 @@ def run_benchmark_acquisition(
     }
     _save(state_path, state)
     return state
+
+
+def anion_unbound_at_cbs(cbs: Mapping[str, Any] | None) -> bool:
+    """CBS showed the anion unbound (whole interval below zero): the final verdict is UNBOUND
+    unless an open anion MR-only candidate could bind it; later correction layers are not read."""
+    return bool(cbs) and cbs.get("status") == "ANION_UNBOUND_AT_CBS"
+
+
+def mr_labels_to_run(labels: Sequence[str], unbound_at_cbs: bool) -> list[str]:
+    """MR-only candidates to compute: all of them, or after an unbound CBS only the anion ones
+    (a lower neutral state only makes the EA more negative)."""
+    return [label for label in labels if not unbound_at_cbs or str(label).startswith("q=-1")]
