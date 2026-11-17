@@ -93,6 +93,12 @@ class ZPEStagePolicy:
     # Flat anion curves move their minimum with the basis: MgH- def2-TZVPPD 1.883 A,
     # def2-QZVPPD 1.858 A (literature CBS 1.865 A) with a smooth 0.1 mEh offset.
     max_cross_model_re_shift_angstrom: float = 0.05
+    # Very flat curves move their minimum further: Na2- (ZPE 6.6 meV, zero-point
+    # amplitude 0.17 A) def2-TZVPPD 3.508 A vs def2-QZVPPD 3.445 A, offset kink 7e-7 Eh,
+    # Delta_ZPE equal to 0.14 meV (verify_v1, 2026-11-17).  The allowed shift is the
+    # larger of the fixed value and this fraction of the state's harmonic zero-point
+    # amplitude sqrt(hbar / (mu omega)); a different state still shows as an offset kink.
+    cross_model_re_shift_zero_point_fraction: float = 0.5
     # Largest deviation of one comparison-minus-primary offset from the line through
     # its two neighbours: smooth basis-set curvature stays far below this, a jump to
     # another state or reference branch (mEh) does not.
@@ -146,9 +152,26 @@ def _pec_summary(context: NuclearPECStage3Context) -> dict:
             "r_min_angstrom": r[0], "r_max_angstrom": r[-1]}
 
 
+HARTREE_EV = 27.211386245988
+AMU_ME = 1822.888486209
+BOHR_ANGSTROM = 0.529177210903
+
+
+def zero_point_amplitude_angstrom(zpe_ev: float | None, masses: DiatomicMassSpecification) -> float | None:
+    """Harmonic zero-point amplitude sqrt(hbar / (mu omega)) = hbar / sqrt(2 mu ZPE), in Angstrom."""
+    if zpe_ev is None or not zpe_ev > 0.0:
+        return None
+    mu = masses.mass_a_u * masses.mass_b_u / (masses.mass_a_u + masses.mass_b_u) * AMU_ME
+    return BOHR_ANGSTROM / float(np.sqrt(2.0 * mu * zpe_ev / HARTREE_EV))
+
+
 def cross_model_identity_evidence(primary: NuclearPECStage3Context, comparison: NuclearPECStage3Context,
-                                  policy: ZPEStagePolicy) -> tuple[tuple[str, ...], dict]:
-    """Evidence IDs (empty = not established) that both curves describe one state."""
+                                  policy: ZPEStagePolicy,
+                                  zero_point_amplitude: float | None = None) -> tuple[tuple[str, ...], dict]:
+    """Evidence IDs (empty = not established) that both curves describe one state.
+
+    ``zero_point_amplitude`` (Angstrom, of the primary curve's state) widens the allowed
+    equilibrium shift for flat curves, see ``cross_model_re_shift_zero_point_fraction``."""
     prim = {round(float(p.r_angstrom), 6): float(p.energy_hartree) for p in primary.pec.points}
     comp = {round(float(p.r_angstrom), 6): float(p.energy_hartree) for p in comparison.pec.points}
     common = sorted(set(prim) & set(comp))
@@ -168,7 +191,12 @@ def cross_model_identity_evidence(primary: NuclearPECStage3Context, comparison: 
     failed = []
     if checks["comparison_stability_following_steps"] > 0:
         failed.append("a comparison point followed an SCF instability")
-    if abs(re_p - re_c) > policy.max_cross_model_re_shift_angstrom:
+    re_tolerance = policy.max_cross_model_re_shift_angstrom
+    if zero_point_amplitude is not None:
+        checks["zero_point_amplitude_angstrom"] = float(zero_point_amplitude)
+        re_tolerance = max(re_tolerance, policy.cross_model_re_shift_zero_point_fraction * zero_point_amplitude)
+    checks["re_shift_tolerance_angstrom"] = float(re_tolerance)
+    if abs(re_p - re_c) > re_tolerance:
         failed.append("equilibrium bond lengths differ")
     if checks["offset_kink_hartree"] > policy.max_cross_model_offset_kink_hartree:
         failed.append("comparison-minus-primary energy offset is not smooth")
@@ -480,7 +508,8 @@ def _run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[s
         evidence, checks = [], {}
         for role, cmp_ctx in (("neutral", model_run.comparison_neutral_context),
                               ("anion", model_run.comparison_anion_context)):
-            ids, checks[role] = cross_model_identity_evidence(contexts[role], cmp_ctx, policy)
+            x0 = zero_point_amplitude_angstrom(getattr(assessment, role).zpe_ev, masses)
+            ids, checks[role] = cross_model_identity_evidence(contexts[role], cmp_ctx, policy, x0)
             evidence.append(ids)
         record["cross_model_identity_checks"] = checks
         if all(evidence):

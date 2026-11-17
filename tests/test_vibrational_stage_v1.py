@@ -146,3 +146,22 @@ def test_comparison_curve_drives_extension_of_the_primary_curve(tmp_path, monkey
     assert seen == [20, 21, 22]
     assert rec["status"] == "CLEARED" and len(rec["comparison_rounds"]) == 2
     assert rec["primary_pec"]["anion"]["n_points"] == 22
+
+
+def test_zero_point_amplitude_of_na2_anion():
+    from openea_benchmark.vibrational_stage import zero_point_amplitude_angstrom
+    x0 = zero_point_amplitude_angstrom(0.0066, main_isotopologue_masses(("Na", "Na")))
+    assert x0 == pytest.approx(0.166, abs=0.002)
+    assert zero_point_amplitude_angstrom(None, main_isotopologue_masses(("Na", "Na"))) is None
+
+
+def test_flat_curve_may_shift_its_minimum_by_half_the_zero_point_amplitude():
+    grid = [3.2 + 0.02 * i for i in range(31)]
+    prim = context("anion", [(r, morse(r, re=3.50, d=0.01, a=0.6)) for r in grid])
+    comp = context("anion", [(r, morse(r, re=3.43, d=0.01, a=0.6, shift=-0.02)) for r in grid])
+    ids, checks = cross_model_identity_evidence(prim, comp, ZPEStagePolicy())
+    assert ids == () and "bond lengths differ" in checks["failed"]       # 0.07 A > 0.05 A
+    ids, checks = cross_model_identity_evidence(prim, comp, ZPEStagePolicy(), 0.17)
+    assert len(ids) == 3 and checks["re_shift_tolerance_angstrom"] == pytest.approx(0.085)
+    ids, checks = cross_model_identity_evidence(prim, comp, ZPEStagePolicy(), 0.04)   # stiff: 0.05 A stays
+    assert ids == () and checks["re_shift_tolerance_angstrom"] == pytest.approx(0.05)
