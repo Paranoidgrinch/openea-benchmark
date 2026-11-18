@@ -413,3 +413,45 @@ def test_limit_group_admits_at_most_n_tasks(tmp_path, monkeypatch):
     assert free(0) and free(1)
     with point_pool.limit_group(None):   # no group: no lock files
         pass
+
+
+def test_held_reservations_count_in_full_after_the_ramp(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=4,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 100.0)
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_MB", 10.0)
+    held = []
+    try:
+        for name, mark in (("slot001.lock", " HOLD"), ("slot002.lock", "")):
+            fh = open(slots / name, "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{point_pool._machine_id()} {os.getpid()} 400{mark}\n")
+            fh.flush()
+            stamp = time.time() - 2 * point_pool.MEM_GATE_RAMP_S
+            os.utime(slots / name, (stamp, stamp))
+            held.append(fh)
+        outstanding = point_pool._outstanding_reservations_mb(str(slots / "slot000.lock"))
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert outstanding == 300.0 + 10.0  # held: 400 - 100 resident in full; settled: tail of 10
+
+
+def test_core_slot_marks_held_reservations(tmp_path):
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=2,
+                                    mem_limit_frac=0.99, mem_reserve_mb=1)
+    try:
+        with point_pool.core_slot(5.0, hold=True):
+            text = point_pool._LOCAL.handle.name
+            line = open(text).read().split()
+        with point_pool.core_slot(5.0):
+            plain = open(point_pool._LOCAL.handle.name).read().split()
+    finally:
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert line[3:] == ["HOLD"] and len(plain) == 3

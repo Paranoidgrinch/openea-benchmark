@@ -94,6 +94,27 @@ def _mol(spec: Any, basis: str, symmetry: Any, max_memory_mb: int):
                  verbose=0, max_memory=max_memory_mb, dump_input=False)
 
 
+def _kernel_with_soscf_rescue(mf, dm0, conv_tol: float) -> bool:
+    """Run the SCF from dm0; a stalled DIIS run is continued by second-order SCF from its
+    last orbitals (same occupations and symmetry block), as in Stage 3.  Returns True when
+    the rescue was needed and converged.
+
+    MnO- and MoO- (verify_v2, 2026-11-13..18): the symmetry-block SCF from the Stage-3
+    checkpoint did not converge in 200 DIIS cycles in aug-cc-pVDZ and aug-cc-pVTZ, so every
+    anion post-CC point failed while the neutral points ran for days."""
+    mf.kernel(dm0=dm0)
+    if mf.converged:
+        return False
+    soscf = mf.newton()
+    soscf.conv_tol, soscf.max_cycle = conv_tol, mf.max_cycle
+    soscf.kernel(mf.mo_coeff, mf.mo_occ)
+    if not soscf.converged:
+        return False
+    mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
+    mf.e_tot, mf.converged = soscf.e_tot, True
+    return True
+
+
 def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     """Reference converged in the symmetry block, then carried into C1 unchanged."""
     from pyscf import scf
@@ -105,16 +126,19 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
                           else {k: int(v[0]) + int(v[1]) for k, v in spec.irrep_nelec.items()})
     guess = scf.rohf.init_guess_by_chkfile if open_shell else scf.hf.init_guess_by_chkfile
     mf.conv_tol, mf.max_cycle, mf.max_memory = policy.scf_conv_tol, 200, policy.max_memory_mb
-    mf.kernel(dm0=guess(mol, spec.source_checkpoint_path, project=True))
+    rescued = _kernel_with_soscf_rescue(mf, guess(mol, spec.source_checkpoint_path, project=True),
+                                        policy.scf_conv_tol)
     if not mf.converged:
         raise RuntimeError(f"symmetry-block SCF not converged ({basis})")
     mol1 = _mol(spec, basis, "C1", policy.max_memory_mb)
     mf1 = apply_hamiltonian(scf.ROHF(mol1) if open_shell else scf.RHF(mol1))
     mf1.conv_tol, mf1.max_cycle, mf1.max_memory = policy.scf_conv_tol, 50, policy.max_memory_mb
-    mf1.kernel(dm0=mf.make_rdm1())
+    rescued |= _kernel_with_soscf_rescue(mf1, mf.make_rdm1(), policy.scf_conv_tol)
     if not mf1.converged or abs(mf1.e_tot - mf.e_tot) > policy.c1_energy_tolerance_hartree:
         raise RuntimeError(f"C1 reference left the symmetry-block solution ({mf1.e_tot} vs {mf.e_tot})")
-    return occupation_ordered(mf1)
+    mf1 = occupation_ordered(mf1)
+    mf1.openea_soscf_rescue = rescued
+    return mf1
 
 
 def occupation_ordered(mf):
@@ -322,6 +346,7 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
     record: dict[str, Any] = {"signature": signature, "role": spec.role, "basis": basis, "method": method}
     try:
         mf = reference_c1(spec, basis, policy)
+        record["scf_soscf_rescue"] = bool(getattr(mf, "openea_soscf_rescue", False))
         nfz = valence_frozen_core_orbitals(mf.mol)
         driver = Driver.from_pyscf(mf, nfrozen=nfz)
         driver.options["energy_convergence"] = policy.cc_convergence
@@ -374,7 +399,7 @@ def _fno_increment(states: Mapping[str, Any], policy: PostCCSDTStagePolicy, outp
             jobs.append((spec, basis, keep, fno_policy, policy, path))
             keys.append((role, level))
             reserve.append(fno_policy.amplitude_copies * t4_amplitude_mb(na, nb, keep, keep + na - nb))
-    results = run_parallel(run_fno_point, jobs, reserve_mb=reserve)
+    results = run_parallel(run_fno_point, jobs, reserve_mb=reserve, hold_reservations=True)
     points = dict(zip(keys, results))
     out = {"policy": asdict(fno_policy), "basis": basis, "virtuals_by_level": list(levels),
            "points": {f"{r}:L{lv}": {k: v for k, v in p.items() if k != "signature"} for (r, lv), p in points.items()}}
@@ -449,7 +474,8 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
             print(f"[POST-CC] {spec.system} {role} {basis} {method}{' (cached)' if done_already else ''}",
                   flush=True)
             jobs.append((spec, basis, method, policy, path))
-    results = run_parallel(fn, jobs, reserve_mb=reserves, limit_groups=groups)
+    # CC points grow into their (exact) estimate over the first DIIS iterations: held in full.
+    results = run_parallel(fn, jobs, reserve_mb=reserves, limit_groups=groups, hold_reservations=True)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]
     failed = [r for r in results if r.get("status") != "COMPLETED"]

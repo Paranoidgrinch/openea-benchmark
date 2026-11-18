@@ -91,7 +91,7 @@ def test_point_files_are_distinct_per_method():
 def test_reservations_follow_the_estimates(tmp_path, monkeypatch):
     seen = {}
 
-    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None, hold_reservations=False):
         seen["reserves"] = list(reserve_mb)
         return [fn(*job) for job in jobs]
 
@@ -147,7 +147,7 @@ def test_cached_points_reserve_no_memory(tmp_path, monkeypatch):
     seen = []
     base_point = fake_point
 
-    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None, hold_reservations=False):
         seen.append(list(reserve_mb))
         return [fn(*job) for job in jobs]
 
@@ -255,7 +255,7 @@ def test_storage_estimate_follows_the_mode(monkeypatch):
 def test_out_of_core_points_carry_the_limit_group(tmp_path, monkeypatch):
     seen = {}
 
-    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None):
+    def fake_parallel(fn, jobs, reserve_mb=None, limit_groups=None, hold_reservations=False):
         seen["groups"] = list(limit_groups)
         seen["methods"] = [job[2] for job in jobs]
         return [fn(*job) for job in jobs]
@@ -264,3 +264,30 @@ def test_out_of_core_points_carry_the_limit_group(tmp_path, monkeypatch):
     run(tmp_path, monkeypatch, limit=60000)
     for method, group in zip(seen["methods"], seen["groups"]):
         assert (group == post_ccsd_t_stage.OUT_OF_CORE_LIMIT_GROUP) == (method == "CCSDTQ")
+
+
+def test_stalled_reference_scf_is_rescued_by_second_order_scf():
+    class FakeSOSCF:
+        def __init__(self, parent):
+            self.parent, self.converged = parent, False
+        def kernel(self, mo, occ):
+            self.converged = self.parent.newton_converges
+            self.mo_coeff, self.mo_occ, self.mo_energy, self.e_tot = "C", "occ", "eps", -1.0
+
+    class FakeSCF:
+        max_cycle = 200
+        def __init__(self, diis, newton):
+            self.diis_converges, self.newton_converges, self.converged = diis, newton, False
+            self.mo_coeff = self.mo_occ = None
+        def kernel(self, dm0=None):
+            self.converged = self.diis_converges
+        def newton(self):
+            return FakeSOSCF(self)
+
+    rescue = post_ccsd_t_stage._kernel_with_soscf_rescue
+    mf = FakeSCF(True, False)
+    assert rescue(mf, None, 1e-10) is False and mf.converged
+    mf = FakeSCF(False, True)
+    assert rescue(mf, None, 1e-10) is True and mf.converged and mf.e_tot == -1.0 and mf.mo_coeff == "C"
+    mf = FakeSCF(False, False)
+    assert rescue(mf, None, 1e-10) is False and not mf.converged

@@ -161,6 +161,12 @@ MEM_GATE_TAIL_MB = 4096.0   # afterwards at most this much of it above the task'
 # and the memory watchdog catches the rest (2026-11-14: 24 tails held 98 GB on paper while LiH/PH
 # ZPE and the Na2 MR blocks waited 3.5 h for 4 GB).
 MEM_GATE_TAIL_TOTAL_MB = 16384.0
+# A task whose reservation is an exact estimate of memory it grows into slowly marks its
+# record HOLD: the reservation then counts in full until the task ends, not only for
+# MEM_GATE_RAMP_S.  In-core CC points fill their DIIS vectors over the first ~6 iterations
+# (20-60 min); after the ramp the gate gave the rest away and the watchdog killed the
+# growing point (ScO aTZ CCSDT, 73 GB of a 76 GB estimate, 2026-11-18 00:29 and 07:55).
+HOLD_MARK = "HOLD"
 
 
 def _held_records(own_path: str):
@@ -184,11 +190,12 @@ def _held_records(own_path: str):
                 age = now - os.fstat(fh.fileno()).st_mtime
         except OSError:
             continue
-        if len(fields) != 3 or fields[0] != machine:
+        if len(fields) not in (3, 4) or fields[0] != machine:
             continue
         rss = _rss_mb(int(fields[1]))
         if rss is not None:
-            yield float(fields[2]), rss, age
+            # A held reservation (CC points) counts in full for the task's whole life.
+            yield float(fields[2]), rss, (0.0 if len(fields) == 4 and fields[3] == HOLD_MARK else age)
 
 
 def _unallocated_mb(reserve: float, rss: float, age: float, tail_mb: float) -> float:
@@ -264,7 +271,8 @@ def _pending_big_reservation_mb() -> float:
 def _record(handle, reserve_mb: float) -> None:
     handle.seek(0)
     handle.truncate()
-    handle.write(f"{_machine_id()} {os.getpid()} {reserve_mb:.0f}\n")
+    hold = f" {HOLD_MARK}" if getattr(_LOCAL, "hold", False) else ""
+    handle.write(f"{_machine_id()} {os.getpid()} {reserve_mb:.0f}{hold}\n")
     handle.flush()
 
 
@@ -517,7 +525,7 @@ def _held_reserve_mb(handle) -> float:
     try:
         handle.seek(0)
         fields = handle.read().split()
-        return float(fields[2]) if len(fields) == 3 else 0.0
+        return float(fields[2]) if len(fields) in (3, 4) else 0.0
     except (OSError, ValueError):
         return 0.0
 
@@ -527,13 +535,14 @@ def pool_workers() -> int:
 
 
 @contextmanager
-def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = None):
+def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = None, hold: bool = False):
     """Hold one machine-wide core slot (no-op without a slot budget; re-entrant per thread).
 
     Re-entered with ``reserve_mb`` while the slot is held, the slot's reservation becomes
     ``reserve_mb`` (waiting at the memory gate if it grows) and is restored on exit.
     ``default_mb`` replaces the run-wide default reservation for this task (a smaller
-    estimate of the task's own need)."""
+    estimate of the task's own need).  ``hold``: the reservation counts in full until the
+    task ends (see ``HOLD_MARK``)."""
     if not _SLOT_DIR:
         yield
         return
@@ -556,13 +565,13 @@ def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = Non
               f"waiting for the one-at-a-time slot", flush=True)
         fcntl.flock(big, fcntl.LOCK_EX)
     handle = _acquire_fair_slot()
-    _LOCAL.held, _LOCAL.handle = True, handle
+    _LOCAL.held, _LOCAL.handle, _LOCAL.hold = True, handle, bool(hold)
     try:
         _wait_for_cpu(handle)
         _wait_for_memory(handle, reserve_mb, big, default_mb=default_mb)
         yield
     finally:
-        _LOCAL.held, _LOCAL.handle = False, None
+        _LOCAL.held, _LOCAL.handle, _LOCAL.hold = False, None, False
         _leave_cpu_gate(handle)
         handle.seek(0)
         handle.truncate()
@@ -697,7 +706,7 @@ def limit_group(group: tuple[str, int] | None):
 
 
 def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None = None,
-                  group: tuple[str, int] | None = None) -> Any:
+                  group: tuple[str, int] | None = None, hold: bool = False) -> Any:
     # A small task enters the memory gate with its own estimate instead of the run-wide
     # default (2026-11-13: LiH/SeH ZPE and CV points of ~2 GB waited a day at 397 GB
     # projected vs 395 GB allowed, each reserving 8 GB).  Larger tasks keep the default
@@ -709,14 +718,15 @@ def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None 
         estimate = stage3_task_estimate_mb(args)
         if estimate is not None and estimate < _MEM_RESERVE_MB:
             default_mb = estimate
-    with limit_group(group), core_slot(reserve_mb, default_mb=default_mb):
+    with limit_group(group), core_slot(reserve_mb, default_mb=default_mb, hold=hold):
         return fn(*args)
 
 
 def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
                  on_result: Callable[[int, Any], None] | None = None,
                  reserve_mb: Sequence[float | None] | None = None,
-                 limit_groups: Sequence[tuple[str, int] | None] | None = None) -> list[Any]:
+                 limit_groups: Sequence[tuple[str, int] | None] | None = None,
+                 hold_reservations: bool = False) -> list[Any]:
     """``[fn(*args) for args in arg_tuples]`` on the pool; results in input order.
 
     ``fn`` and its arguments must be picklable when a pool is configured.
@@ -725,6 +735,7 @@ def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
     The first task exception is re-raised after the remaining tasks have finished.
     ``reserve_mb[i]`` is task i's memory reservation for the gate (default: run-wide).
     ``limit_groups[i]`` = (name, n): at most n tasks of that group run at a time machine-wide.
+    ``hold_reservations``: each reservation counts in full until its task ends.
     """
     items: Sequence[tuple] = list(arg_tuples)
     reserves = list(reserve_mb) if reserve_mb is not None else [None] * len(items)
@@ -732,11 +743,11 @@ def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
     results: list[Any] = [None] * len(items)
     if _POOL is None or len(items) < 2:
         for index, args in enumerate(items):
-            results[index] = _slotted_call(fn, args, reserves[index], groups[index])
+            results[index] = _slotted_call(fn, args, reserves[index], groups[index], hold_reservations)
             if on_result is not None:
                 on_result(index, results[index])
         return results
-    futures = {_POOL.submit(_slotted_call, fn, args, reserves[index], groups[index]): index for index, args in enumerate(items)}
+    futures = {_POOL.submit(_slotted_call, fn, args, reserves[index], groups[index], hold_reservations): index for index, args in enumerate(items)}
     error: BaseException | None = None
     pending = set(futures)
     while pending:
