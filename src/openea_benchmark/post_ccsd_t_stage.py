@@ -474,7 +474,7 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
             print(f"[POST-CC] {spec.system} {role} {basis} {method}{' (cached)' if done_already else ''}",
                   flush=True)
             jobs.append((spec, basis, method, policy, path))
-    # CC points grow into their (exact) estimate over the first DIIS iterations: held in full.
+    # CC points grow into their (exact) estimate over the first DIIS iterations: held (MEM_GATE_HOLD_S).
     results = run_parallel(fn, jobs, reserve_mb=reserves, limit_groups=groups, hold_reservations=True)
     energies = {(r["role"], r["basis"], r["method"]): r for r in results}
     record["points"] = [{k: v for k, v in r.items() if k != "signature"} for r in results]

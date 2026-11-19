@@ -162,11 +162,16 @@ MEM_GATE_TAIL_MB = 4096.0   # afterwards at most this much of it above the task'
 # ZPE and the Na2 MR blocks waited 3.5 h for 4 GB).
 MEM_GATE_TAIL_TOTAL_MB = 16384.0
 # A task whose reservation is an exact estimate of memory it grows into slowly marks its
-# record HOLD: the reservation then counts in full until the task ends, not only for
+# record HOLD: the reservation then counts in full for MEM_GATE_HOLD_S, not only for
 # MEM_GATE_RAMP_S.  In-core CC points fill their DIIS vectors over the first ~6 iterations
 # (20-60 min); after the ramp the gate gave the rest away and the watchdog killed the
 # growing point (ScO aTZ CCSDT, 73 GB of a 76 GB estimate, 2026-11-18 00:29 and 07:55).
+# Not for the task's whole life: estimates above the real need then blocked RAM nobody
+# used (IO out-of-core 90 GB reserved / 51 GB resident, a VO point 76 / 35 GB; ScO and OO
+# waited 10 h at 38 of 80 busy cores, 2026-11-18/19).  Three hours cover the growth
+# (ScO aTZ CCSDT: 20-60 min to its full DIIS); afterwards the normal tail rule applies.
 HOLD_MARK = "HOLD"
+MEM_GATE_HOLD_S = 3 * 3600.0
 
 
 def _held_records(own_path: str):
@@ -194,8 +199,9 @@ def _held_records(own_path: str):
             continue
         rss = _rss_mb(int(fields[1]))
         if rss is not None:
-            # A held reservation (CC points) counts in full for the task's whole life.
-            yield float(fields[2]), rss, (0.0 if len(fields) == 4 and fields[3] == HOLD_MARK else age)
+            # A held reservation (CC points) counts in full for MEM_GATE_HOLD_S.
+            hold = len(fields) == 4 and fields[3] == HOLD_MARK and age < MEM_GATE_HOLD_S
+            yield float(fields[2]), rss, (0.0 if hold else age)
 
 
 def _unallocated_mb(reserve: float, rss: float, age: float, tail_mb: float) -> float:
@@ -541,8 +547,8 @@ def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = Non
     Re-entered with ``reserve_mb`` while the slot is held, the slot's reservation becomes
     ``reserve_mb`` (waiting at the memory gate if it grows) and is restored on exit.
     ``default_mb`` replaces the run-wide default reservation for this task (a smaller
-    estimate of the task's own need).  ``hold``: the reservation counts in full until the
-    task ends (see ``HOLD_MARK``)."""
+    estimate of the task's own need).  ``hold``: the reservation counts in full for
+    MEM_GATE_HOLD_S after it was recorded (see ``HOLD_MARK``)."""
     if not _SLOT_DIR:
         yield
         return
@@ -735,7 +741,7 @@ def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
     The first task exception is re-raised after the remaining tasks have finished.
     ``reserve_mb[i]`` is task i's memory reservation for the gate (default: run-wide).
     ``limit_groups[i]`` = (name, n): at most n tasks of that group run at a time machine-wide.
-    ``hold_reservations``: each reservation counts in full until its task ends.
+    ``hold_reservations``: each reservation counts in full for MEM_GATE_HOLD_S (see HOLD_MARK).
     """
     items: Sequence[tuple] = list(arg_tuples)
     reserves = list(reserve_mb) if reserve_mb is not None else [None] * len(items)

@@ -441,6 +441,33 @@ def test_held_reservations_count_in_full_after_the_ramp(tmp_path, monkeypatch):
     assert outstanding == 300.0 + 10.0  # held: 400 - 100 resident in full; settled: tail of 10
 
 
+def test_held_reservations_fall_back_to_the_tail_after_the_hold_time(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=4,
+                                    mem_limit_frac=0.8, mem_reserve_mb=100)
+    monkeypatch.setattr(point_pool, "_rss_mb", lambda pid: 100.0)
+    monkeypatch.setattr(point_pool, "MEM_GATE_TAIL_MB", 10.0)
+    held = []
+    try:
+        for name, age in (("slot001.lock", 0.5 * point_pool.MEM_GATE_HOLD_S),
+                          ("slot002.lock", 1.5 * point_pool.MEM_GATE_HOLD_S)):
+            fh = open(slots / name, "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{point_pool._machine_id()} {os.getpid()} 400 HOLD\n")
+            fh.flush()
+            stamp = time.time() - age
+            os.utime(slots / name, (stamp, stamp))
+            held.append(fh)
+        outstanding = point_pool._outstanding_reservations_mb(str(slots / "slot000.lock"))
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
+    assert outstanding == 300.0 + 10.0  # within the hold time in full; after it the tail of 10
+
+
 def test_core_slot_marks_held_reservations(tmp_path):
     slots = tmp_path / "slots"
     point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=2,
