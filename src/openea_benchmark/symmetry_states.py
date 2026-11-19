@@ -55,21 +55,51 @@ def build_symmetric_molecule(atoms: tuple[str, str], r_angstrom: float, *, basis
                  symmetry=point_group_for(*atoms), verbose=verbose, dump_input=False)
 
 
-def orbital_m_values(mol, mo_coeff) -> np.ndarray:
-    """|m| of each orbital from <Lz^2> (the molecule lies on the z axis)."""
+# Orbitals of one irrep (and occupation) closer than this in energy are one degenerate
+# set: SCF may return any rotation of it.  The 4d shell of Te (5p) / 3d of As, Se
+# (verify_v2 SeH, 2026-11-19): dz2 (m=0) and dx2-y2 (m=2), both A1 in C2v, 0.017 Eh
+# apart, came out mixed with <Lz^2> ~ 1; the "m=1" A1 orbital broke the label of
+# every doublet determinant, and the scout planned no doublet block at all (the
+# X 2Pi ground state of SeH was missing; a 4Sigma- curve at 3.4 A was selected).
+DEGENERATE_ORBITAL_TOLERANCE_HARTREE = 0.03
+
+
+def orbital_m_values(mol, mo_coeff, mo_energy=None, irreps=None, mo_occ=None,
+                     tolerance: float = DEGENERATE_ORBITAL_TOLERANCE_HARTREE) -> np.ndarray:
+    """|m| of each orbital from <Lz^2> (the molecule lies on the z axis).
+
+    With energies and irreps, each set of near-degenerate orbitals of one irrep (and one
+    occupation) is rotated to the eigenvectors of Lz^2 first; m comes from the eigenvalues."""
     s = mol.intor("int1e_ovlp")
     with mol.with_common_origin((0.0, 0.0, 0.0)):
         a = mol.intor("int1e_cg_irxp", comp=3)[2]   # real antisymmetric, Lz = -i a
     lz2 = -a @ np.linalg.solve(s, a)
     m2 = np.einsum("pi,pq,qi->i", mo_coeff, lz2, mo_coeff)
+    if mo_energy is not None and irreps is not None:
+        energy = np.asarray(mo_energy, dtype=float)
+        occ = np.zeros(len(energy)) if mo_occ is None else np.asarray(mo_occ, dtype=float)
+        for key in {(irreps[i], round(float(occ[i]), 3)) for i in range(len(energy))}:
+            idx = sorted((i for i in range(len(energy)) if (irreps[i], round(float(occ[i]), 3)) == key),
+                         key=lambda i: energy[i])
+            cluster = idx[:1]
+            for i in idx[1:] + [None]:
+                if i is not None and energy[i] - energy[cluster[-1]] < tolerance:
+                    cluster.append(i)
+                    continue
+                if len(cluster) > 1:
+                    c = mo_coeff[:, cluster]
+                    m2[cluster] = np.sort(np.linalg.eigvalsh(c.T @ lz2 @ c))[
+                        np.argsort(np.argsort(m2[cluster]))]
+                if i is not None:
+                    cluster = [i]
     return np.rint(np.sqrt(np.clip(m2, 0.0, None))).astype(int)
 
 
-def orbital_table(mol, mo_coeff, mo_energy) -> list[OrbitalInfo]:
+def orbital_table(mol, mo_coeff, mo_energy, mo_occ=None) -> list[OrbitalInfo]:
     from pyscf.scf import hf_symm
     names = dict(zip(mol.irrep_id, mol.irrep_name))
     irreps = [names[i] for i in hf_symm.get_orbsym(mol, mo_coeff)]
-    ms = orbital_m_values(mol, mo_coeff)
+    ms = orbital_m_values(mol, mo_coeff, mo_energy, irreps, mo_occ)
     out = []
     for i, (e, irrep, m) in enumerate(zip(mo_energy, irreps, ms)):
         gu = irrep[-1] if mol.groupname == "D2h" else None
@@ -189,10 +219,10 @@ class BlockSCFResult:
 def _occupied_tables(mf) -> tuple[list[OrbitalInfo], list[OrbitalInfo]]:
     mol = mf.mol
     if getattr(mf.mo_occ, "ndim", 1) == 2:  # UHF/UKS
-        ta = orbital_table(mol, mf.mo_coeff[0], mf.mo_energy[0])
-        tb = orbital_table(mol, mf.mo_coeff[1], mf.mo_energy[1])
+        ta = orbital_table(mol, mf.mo_coeff[0], mf.mo_energy[0], mf.mo_occ[0])
+        tb = orbital_table(mol, mf.mo_coeff[1], mf.mo_energy[1], mf.mo_occ[1])
         return ([o for o, n in zip(ta, mf.mo_occ[0]) if n > 0.5], [o for o, n in zip(tb, mf.mo_occ[1]) if n > 0.5])
-    t = orbital_table(mol, mf.mo_coeff, mf.mo_energy)
+    t = orbital_table(mol, mf.mo_coeff, mf.mo_energy, mf.mo_occ)
     return ([o for o, n in zip(t, mf.mo_occ) if n > 0.5], [o for o, n in zip(t, mf.mo_occ) if n > 1.5])
 
 

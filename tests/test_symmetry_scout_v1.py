@@ -301,3 +301,57 @@ def test_summary_uses_dispersion_blocks_and_marks_the_method():
     sector = to_legacy_summary(record)["sectors"][0]
     assert sector["method"]["dispersion"] == "d3bj"
     assert sector["manifold_pec_scouts"][0]["minimum_scout"]["status"] == "bracketed_single_minimum"
+
+
+def test_mixed_degenerate_d_orbitals_get_their_own_m():
+    """dz2 and dx2-y2 (both A1) of a near-degenerate shell, returned mixed by the SCF:
+    each alone has <Lz^2> = 2 (m 'rounds' to 1); rotated within the set they are m = 0, 2."""
+    import numpy as np
+    from pyscf import gto
+    from openea_benchmark.symmetry_states import orbital_m_values
+    mol = gto.M(atom="Ti 0 0 0; H 0 0 1.7", basis="sto-3g", spin=1, verbose=0)
+    labels = mol.ao_labels()
+    iz2 = next(i for i, l in enumerate(labels) if "3dz^2" in l)
+    ix2 = next(i for i, l in enumerate(labels) if "3dx2-y2" in l)
+    s = mol.intor("int1e_ovlp")
+    c = np.zeros((mol.nao, 2))
+    c[iz2, 0] = c[ix2, 0] = 1.0
+    c[iz2, 1], c[ix2, 1] = 1.0, -1.0
+    c /= np.sqrt(np.einsum("pi,pq,qi->i", c, s, c))
+    assert list(orbital_m_values(mol, c)) == [1, 1]           # the old per-orbital rule
+    m = orbital_m_values(mol, c, mo_energy=[-1.639, -1.622], irreps=["A1", "A1"], mo_occ=[1, 1])
+    assert sorted(m) == [0, 2]
+    m = orbital_m_values(mol, c, mo_energy=[-1.6, -1.0], irreps=["A1", "A1"], mo_occ=[1, 1])
+    assert list(m) == [1, 1]                                  # far apart: not one set
+
+
+def test_old_plan_is_completed_by_labels_it_could_not_cover(tmp_path, monkeypatch):
+    import json
+    from openea_benchmark import symmetry_scout as s
+    old = {"label": "4Sigma-", "two_s": 3, "irrep_nelec": [["A1", [4, 3]], ["B1", [1, 0]], ["B2", [1, 0]]],
+           "orbital_energy_sum": -1.0}
+    record = {"signature": None, "charges": {"0": {"blocks": {}, "plan": {
+        "candidate_labels": ["2Pi", "4Sigma-"], "blocks": [old],
+        "mr_only_or_outside_window": [{"label": "2Pi", "count": 1, "channels": []}]}}}}
+    out = tmp_path / "scout"
+    out.mkdir()
+    level = {k: v for k, v in s.asdict(POLICY).items() if k not in s.SCAN_EXTENT_FIELDS}
+    record["signature"] = s.sha256(json.dumps({"policy": level, "atoms": ["O", "H"], "r0": 0.97},
+                                              sort_keys=True).encode()).hexdigest()
+    record.update(atoms=["O", "H"], r0_angstrom=0.97, policy=s.asdict(POLICY))
+    (out / "symmetry_scout.json").write_text(json.dumps(record))
+    monkeypatch.setattr(s, "core_slot", lambda *a, **k: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(s, "scan_block", lambda *a, **k: {"status": "SCF_FAILED_AT_START", "points": []})
+    monkeypatch.setattr(s, "run_parallel", lambda fn, args, on_result=None, **k: [
+        on_result(i, fn(*a)) for i, a in enumerate(args)] if on_result else [fn(*a) for a in args])
+    try:
+        s.run_symmetry_scout("O", "H", output_dir=out, charges=(0,), r0=0.97, policy=POLICY,
+                             reference=fake_reference)
+    except Exception:  # noqa: BLE001 - only the stored plan is checked here
+        pass
+    plan = json.loads((out / "symmetry_scout.json").read_text())["charges"]["0"]["plan"]
+    labels = [b["label"] for b in plan["blocks"]]
+    assert plan["plan_rule"] == s.PLAN_RULE
+    assert labels.count("4Sigma-") == 1 and plan["blocks"][0] == old   # covered label kept as it was
+    assert "2Pi" in labels                                              # missing label added
+    assert all(m["label"] != "2Pi" for m in plan["mr_only_or_outside_window"])

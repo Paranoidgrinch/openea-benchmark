@@ -115,6 +115,9 @@ def plan_blocks(atom_a: str, atom_b: str, charge: int, r0: float, policy: Symmet
 # Blocks scanned under the former per-orbital |m| rule are relabelled from their
 # stored checkpoints on load (no new SCF).
 LABEL_RULE = "DETERMINANT_LZ2_V1"
+# Plans made before the degenerate-orbital m fix (symmetry_states.orbital_m_values) can
+# lack whole labels (SeH: every doublet); they are completed by the labels a new plan covers.
+PLAN_RULE = "DEGENERATE_M_V2"
 # Scan extent is not part of the scout signature: cached blocks stopped by a smaller
 # extent are continued from their stored points (no rescan of existing geometries).
 SCAN_EXTENT_FIELDS = ("max_r_angstrom", "max_points_per_side", "max_bracket_refinements")
@@ -483,14 +486,22 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
             run_parallel(scan_block, args, on_result=store_cont)
     for charge in charges:
         entry = record["charges"].setdefault(str(charge), {"blocks": {}})
-        if "plan" not in entry:
+        if "plan" not in entry or entry["plan"].get("plan_rule") != PLAN_RULE:
             with core_slot():  # reference DFT per spin sector: one machine-wide core slot
                 plan = plan_blocks(atom_a, atom_b, charge, r0, policy, reference)
-            entry["plan"] = {"candidate_labels": plan["candidate_labels"],
-                             "mr_only_or_outside_window": plan["mr_only_or_outside_window"],
-                             "blocks": [{"label": o.symmetry.label, "two_s": o.symmetry.two_s,
-                                         "irrep_nelec": [[k, list(v)] for k, v in o.irrep_nelec],
-                                         "orbital_energy_sum": o.orbital_energy_sum} for o in plan["blocks"]]}
+            blocks = [{"label": o.symmetry.label, "two_s": o.symmetry.two_s,
+                       "irrep_nelec": [[k, list(v)] for k, v in o.irrep_nelec],
+                       "orbital_energy_sum": o.orbital_energy_sum} for o in plan["blocks"]]
+            if "plan" in entry:
+                # Older plan: keep its blocks (scanned, used downstream) and add only the labels
+                # it could not cover; other occupations of a covered label stay as they were.
+                old_labels = {b["label"] for b in entry["plan"]["blocks"]}
+                blocks = entry["plan"]["blocks"] + [b for b in blocks if b["label"] not in old_labels]
+            covered = {b["label"] for b in blocks}
+            entry["plan"] = {"plan_rule": PLAN_RULE, "candidate_labels": plan["candidate_labels"],
+                             "mr_only_or_outside_window": [m for m in plan["mr_only_or_outside_window"]
+                                                           if m["label"] not in covered],
+                             "blocks": blocks}
             _save(path, record)
         todo = []
         for b in entry["plan"]["blocks"]:
