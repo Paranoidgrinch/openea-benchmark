@@ -555,11 +555,23 @@ def run_benchmark_acquisition(
     pending_labels, pending_r = pending_mr_competitor_labels(electronic_ea, requests)
     mr_labels += [label for label in pending_labels if label not in mr_labels]
     mr_run_labels = mr_labels_to_run(mr_labels, unbound)
+    cc_competitors = None
     if electronic_ea is not None and settings.mr_competitor_stage and mr_run_labels:
-        from .mr_competitors import run_mr_competitor_stage
-        mr_competitors = run_mr_competitor_stage(
-            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            mr_only_labels=mr_run_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
+        # CC route first (CCSD / EOM-CCSD block energies); the NEVPT2 layer runs only for
+        # what it leaves open, and a block counts as excluded when either layer excludes it.
+        from .cc_competitors import merge_competitor_records, run_cc_competitor_stage
+        live = [r for r in requests if r.job_id not in superseded]
+        cc_competitors = run_cc_competitor_stage(
+            electronic_ea=electronic_ea, requests=live, mr_only_labels=mr_run_labels,
+            output_dir=output_dir / "cc_competitors", candidate_r_angstrom=pending_r)
+        if cc_competitors.get("status") == "CLEARED":
+            mr_competitors = cc_competitors
+        else:
+            from .mr_competitors import run_mr_competitor_stage
+            mr_only = run_mr_competitor_stage(
+                electronic_ea=electronic_ea, requests=live,
+                mr_only_labels=mr_run_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
+            mr_competitors = merge_competitor_records(cc_competitors, mr_only)
 
     # Patch 54: MR-only candidates the lower bound could not exclude are computed
     # relative to the SR state of their charge (term gap); the EA uses the lower one.

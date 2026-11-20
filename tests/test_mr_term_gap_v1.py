@@ -66,6 +66,13 @@ def test_term_gap_follows_the_lambda_root(tmp_path):
     assert res["gap0_half_width_ev"] == pytest.approx(0.02 + 0.10, abs=1e-3)
 
 
+def test_too_wide_gap_is_no_evidence(tmp_path):
+    res = term_gap(atoms=("O", "O"), charge=0, reference=X, state=D, r_start=1.2,
+                   policy=MRTermGapPolicy(max_gap0_half_width_ev=0.1),
+                   cache_dir=tmp_path, block_fn=fake_blocks({("def2-QZVPPD", 1): -0.02 / EV}))
+    assert res["status"] == "GAP_UNRELIABLE" and res["gap0_half_width_ev"] > 0.1
+
+
 def test_stage_runs_only_open_candidates(tmp_path):
     comp = {"status": "UNRESOLVED_MR_COMPETITOR", "policy": {"r_offsets_angstrom": [-0.075, 0.0, 0.075]},
             "selected": {"0": {"role": "neutral", "label": "3Sigmag-", "r": 1.21, "atoms": ["O", "O"]}},

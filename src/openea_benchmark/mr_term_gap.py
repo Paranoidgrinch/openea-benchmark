@@ -57,6 +57,9 @@ class MRTermGapPolicy:
     method_uncertainty_ev: float = 0.10
     zpe_relative_uncertainty: float = 0.25
     max_memory_mb: int = 16000
+    # Widest gap0 interval accepted as a computed gap (method 0.1 eV + basis + ZPE terms
+    # of smooth curves stay well below; jumping curves give eV to 100 eV).
+    max_gap0_half_width_ev: float = 0.5
 
     def block_policy(self, basis: str | None = None) -> MRCompetitorPolicy:
         return MRCompetitorPolicy(basis=basis or self.basis, max_memory_mb=self.max_memory_mb)
@@ -196,7 +199,11 @@ def term_gap(*, atoms: tuple[str, str], charge: int, reference: Mapping[str, Any
     d_so = so["state"]["delta_so_ev"] - so["reference"]["delta_so_ev"]
     gap0 += d_so
     half += so["state"]["bound_ev"] + so["reference"]["bound_ev"]
-    return {**out, "status": "COMPLETED", "delta_so_ev": d_so,
+    # A curve that jumps between neighbouring points (intruder roots, root flips) gives
+    # an absurd harmonic ZPE and fit spread; such a gap is no evidence (verify_v1 CuO-
+    # 1Pi: ZPE 1.07 eV, half-width 1.05 eV; verify_v2 SeH: half-width 120 eV).
+    status = "COMPLETED" if half <= policy.max_gap0_half_width_ev else "GAP_UNRELIABLE"
+    return {**out, "status": status, "delta_so_ev": d_so,
             "spin_orbit": {k: {x: v.get(x) for x in ("status", "delta_so_ev", "bound_ev", "splitting_cm1")}
                            for k, v in so.items()},
             "gap_e_tz_ev": gap_tz, "basis_shift_ev": basis_shift,
