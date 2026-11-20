@@ -8,6 +8,7 @@ from openea_benchmark.adaptive.stage3_naming import checkpoint_artifact_basename
 from openea_benchmark.electronic_ea_stage import _competition
 from openea_benchmark.reference_branches import (
     branch_parent, branches_identical, build_branch_requests, followed_only_jobs, mixed_reference_jobs,
+    unfollowed_only_jobs,
 )
 
 H = 1.0 / 27.211386245988
@@ -112,3 +113,17 @@ def test_seed_branch_unstable_reference_is_a_converged_identity_root():
     assert _root_for_high_level_result(req, stable).status is SCFRunStatus.CANONICALIZED
     root = _root_for_high_level_result(req, unstable)
     assert root.status is SCFRunStatus.CONVERGED and root.internal_stable is False
+
+
+def test_discontinuous_curve_without_following_gets_a_propagated_branch(tmp_path):
+    """v2 CrO- 4Pi: no following anywhere, two neighbours on different ROHF solutions."""
+    reqs = [request(i, r) for i, r in enumerate(RS)]
+    recs = records(reqs, set())
+    scf = dict(zip(RS, (-1118.10, -1118.12, -1118.11, -1118.05, -1118.04)))
+    for r in reqs:
+        recs[r.request_id]["scf_energy_hartree"] = scf[r.r_angstrom]
+    assert unfollowed_only_jobs(reqs, recs) == ["AlO__q+0__2Sigma+"]
+    assert unfollowed_only_jobs(reqs, records(reqs, {1.62})) == []
+    fol = [r for r in build_branch_requests(reqs, recs, tmp_path) if r.reference_branch == "STABILITY_FOLLOWED"]
+    assert [r.r_angstrom for r in fol] == [1.57, 1.545, 1.595, 1.62, 1.645]   # from the lowest-SCF point outward
+    assert fol[0].source_link_status == "REFERENCE_BRANCH_ANCHOR"

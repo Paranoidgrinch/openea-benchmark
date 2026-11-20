@@ -25,7 +25,7 @@ from .point_pool import run_parallel
 from .open_pec_extension import apply_open_pec_extension, asymptote_review_from_extension
 from .reference_branches import (
     FOLLOWED_SUFFIX, MERGED_STATUS, SEED_SUFFIX, SUPERSEDED_STATUS, branches_identical,
-    build_branch_requests, followed_only_jobs, mixed_reference_jobs,
+    build_branch_requests, followed_only_jobs, mixed_reference_jobs, unfollowed_only_jobs,
 )
 from .state_selection import build_state_selection_report
 
@@ -454,6 +454,14 @@ def run_benchmark_acquisition(
         for parent in followed_only_jobs(requests, point_result_records):
             review = review_job(parent) or {}
             if review.get("geometry_continuity_review") not in (None, "CLEARED"):
+                to_split.add(parent)
+        # The same without any following, when the review shows neighbouring points with
+        # different occupied spaces (CrO- 4Pi: overlap 0.38), not for other review failures.
+        for parent in unfollowed_only_jobs(requests, point_result_records):
+            review = review_job(parent) or {}
+            if review.get("geometry_continuity_review") not in (None, "CLEARED") and any(
+                    e.get("stage") == "geometry_continuity" and e.get("status") == "NOT_EQUIVALENT"
+                    for e in review.get("axial_symmetry_evidence") or ()):
                 to_split.add(parent)
         for parent in sorted(to_split):
             parent_reqs = [r for r in requests if r.job_id == parent]

@@ -77,6 +77,20 @@ def followed_only_jobs(requests: Sequence[Stage3ExecutionRequest],
     return sorted(job for job, steps in by_job.items() if len(steps) >= 2 and all(s > 0 for s in steps))
 
 
+def unfollowed_only_jobs(requests: Sequence[Stage3ExecutionRequest],
+                         records: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """Jobs (>= 2 completed points) where no completed point followed an instability."""
+    by_job: dict[str, list[int]] = {}
+    for req in requests:
+        if req.reference_branch is not None:
+            continue
+        rec = records.get(req.request_id) or {}
+        if rec.get("status") != "COMPLETED":
+            continue
+        by_job.setdefault(req.job_id, []).append(int(rec.get("stability_following_steps") or 0))
+    return sorted(job for job, steps in by_job.items() if len(steps) >= 2 and all(s == 0 for s in steps))
+
+
 def _branch_request(req: Stage3ExecutionRequest, suffix: str, branch: str, **changes) -> Stage3ExecutionRequest:
     return replace(req, request_id=req.request_id + suffix, job_id=req.job_id + suffix,
                    reference_branch=branch, **changes)
@@ -100,6 +114,13 @@ def build_branch_requests(parent_requests: Sequence[Stage3ExecutionRequest],
                 and (records.get(r.request_id) or {}).get("status") == "COMPLETED"]
         anchors = [i for i, r in enumerate(line)
                    if int(records[r.request_id].get("stability_following_steps") or 0) > 0]
+        if not anchors and len(line) > 1:
+            # No following anywhere, yet the seeded points landed on different ROHF
+            # solutions (verify_v2 CrO- 4Pi: occupied-space overlap 0.38 between two
+            # neighbours): the second branch is the lowest-SCF point, continued from
+            # neighbour to neighbour.
+            anchors = [min(range(len(line)), key=lambda i: float(records[line[i].request_id].get(
+                "scf_energy_hartree") or float("inf")))]
         if not anchors:
             continue
         if len(anchors) == len(line) and len(line) > 1:
