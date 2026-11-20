@@ -121,3 +121,17 @@ def test_merge_with_a_layer_that_did_not_get_to_the_blocks():
     mr = {"status": "UNRESOLVED_UNCLASSIFIED_LABELS", "blocks": [_block(-1, 1, "B1", "EXCLUDED")],
           "unclassified_labels": ["q=0 9X"]}
     assert merge_competitor_records(cc, mr)["status"] == "UNRESOLVED_UNCLASSIFIED_LABELS"
+
+
+def test_lower_eom_root_in_the_selected_block_never_replaces_the_selected_energy(tmp_path, monkeypatch):
+    ea, reqs = _ea_and_requests()
+    refs = stage_references(ea, reqs)
+
+    def fake_roots(atoms, charge, mult, irrep, r, policy, keep, flip):
+        return [{"e_hartree": -2.0, "method": "EOM-EE-CCSD spin-keeping", "singles_weight": 0.9,
+                 "lambda": None, "parity": None},
+                {"e_hartree": -1.0, "method": "CCSD", "singles_weight": 1.0, "lambda": None, "parity": None}]
+
+    monkeypatch.setattr(cc_competitors, "block_roots", fake_roots)
+    rec = cc_block_task(refs, CCCompetitorPolicy(), ("Cu", "O"), -1, 1, "A1", 1.67, None, tmp_path / "s.json")
+    assert rec["energies_hartree"] == [-1.0, -2.0]      # selected first; the lower state is a competitor

@@ -264,6 +264,14 @@ def cc_block_task(references: Mapping[str, Any], cc_policy: CCCompetitorPolicy, 
         roots = block_roots(tuple(atoms), charge, mult, irrep, r, cc_policy, keep, flip)
         if not roots:
             raise RuntimeError("no CC state in this block")
+        if selected is not None:
+            # Root 0 is the selected state's own CCSD energy; an EOM root below it is a
+            # lower state of the same block and must show up as a competitor (second
+            # root), never replace the selected energy.
+            own = [x for x in roots if x["method"] == "CCSD"]
+            if not own:
+                raise RuntimeError("selected state's CCSD reference missing in its block")
+            roots = own[:1] + [x for x in roots if x is not own[0]]
         record.update(status="COMPLETED", roots=roots, energies_hartree=[x["e_hartree"] for x in roots],
                       casci_only=False)
     except Exception as exc:  # noqa: BLE001 - recorded, the block stays unresolved
