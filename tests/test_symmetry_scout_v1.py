@@ -355,3 +355,15 @@ def test_old_plan_is_completed_by_labels_it_could_not_cover(tmp_path, monkeypatc
     assert labels.count("4Sigma-") == 1 and plan["blocks"][0] == old   # covered label kept as it was
     assert "2Pi" in labels                                              # missing label added
     assert all(m["label"] != "2Pi" for m in plan["mr_only_or_outside_window"])
+
+
+def test_window_edges_do_not_split_a_degenerate_pair():
+    """Mo2-like closed shell: one delta_g component below the window, its partner above it."""
+    from openea_benchmark.symmetry_states import OrbitalInfo, enumerate_block_occupations
+    spec = [("Ag", 0, "g", -1.0), ("B1u", 0, "u", -0.9), ("B1g", 2, "g", -0.5),            # delta_g xy (core)
+            ("Ag", 0, "g", -0.40), ("B2u", 1, "u", -0.30), ("B3u", 1, "u", -0.30),
+            ("Ag", 0, "g", -0.10), ("B1u", 0, "u", 0.05),
+            ("B2g", 1, "g", 0.10), ("B3g", 1, "g", 0.10), ("B1u", 0, "u", 0.15), ("Ag", 2, "g", 0.20)]  # x2-y2
+    table = [OrbitalInfo(i, e, irrep, m, gu) for i, (irrep, m, gu, e) in enumerate(spec)]
+    occ = enumerate_block_occupations(table, n_alpha=6, n_beta=6, like_nuclei=True, below=3, above=1)
+    assert "1Sigmag+" in {o.symmetry.label for o in occ}

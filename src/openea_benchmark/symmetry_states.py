@@ -149,13 +149,40 @@ class BlockOccupation:
         return dict(self.irrep_nelec)
 
 
+PAIR_EDGE_EXTENSION = 6
+
+
+def _pairs_closed(orbitals: Sequence[OrbitalInfo]) -> bool:
+    """True when every |m| > 0 family (per g/u) holds equally many orbitals of its two components."""
+    families: dict[tuple[int, str | None], dict[str, int]] = {}
+    for o in orbitals:
+        if o.m > 0:
+            families.setdefault((o.m, o.gu), {}).setdefault(o.irrep, 0)
+            families[(o.m, o.gu)][o.irrep] += 1
+    return all(len(c) == 2 and len(set(c.values())) == 1 for c in families.values())
+
+
 def enumerate_block_occupations(orbitals: Sequence[OrbitalInfo], *, n_alpha: int, n_beta: int,
                                 like_nuclei: bool, below: int = 3, above: int = 5,
                                 keep_per_label: int = 2) -> list[BlockOccupation]:
-    """High-spin determinants (doubly-occupied set inside singly-occupied set) in a frontier window."""
+    """High-spin determinants (doubly-occupied set inside singly-occupied set) in a frontier window.
+
+    The window edges never split a degenerate pair (same |m| > 0 and g/u, two components):
+    a core holding one component without the other has no Lambda label at all (Mo2 at its
+    3.08 A start: delta_g xy in the core, x2-y2 above it; no singlet or quintet block was
+    planned).  Each edge moves outward until both sides are closed, at most
+    ``PAIR_EDGE_EXTENSION`` orbitals."""
     order = sorted(orbitals, key=lambda o: o.energy)
     lo = max(0, n_beta - below)
     hi = min(len(order), n_alpha + above)
+    for _ in range(PAIR_EDGE_EXTENSION):
+        if lo == 0 or _pairs_closed(order[:lo]):
+            break
+        lo -= 1
+    for _ in range(PAIR_EDGE_EXTENSION):
+        if hi == len(order) or _pairs_closed(order[:hi]):
+            break
+        hi += 1
     core, window = order[:lo], order[lo:hi]
     n_double_win, n_single = n_beta - lo, n_alpha - n_beta
     if n_double_win < 0 or n_double_win + n_single > len(window):
