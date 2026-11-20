@@ -79,12 +79,16 @@ def test_selected_block_uses_its_own_determinant_and_no_spin_flip(tmp_path, monk
     cc_block_task(refs, pol, ("Cu", "O"), -1, 1, "A1", 1.67, None, tmp_path / "a.json")
     cc_block_task(refs, pol, ("Cu", "O"), -1, 1, "B1", 1.67, None, tmp_path / "b.json")
     cc_block_task(refs, pol, ("Cu", "O"), -1, 5, "A2", 1.67, None, tmp_path / "c.json")
-    sel, pi, quintet = seen
+    cc_block_task(refs, pol, ("Cu", "O"), 0, 1, "A2", 1.72, None, tmp_path / "d.json")
+    sel, pi, quintet, neutral_singlet = seen
     assert sel[3]["irrep_nelec"]["A1"] == [10, 10] and sel[4] is None
-    assert pi[3]["irrep_nelec"]["A1"] == [10, 10] and pi[4]["two_s"] == 2 and pi[4]["irrep_nelec"]["B1"] == [5, 4]
+    # a Stage-3 singlet of the anion exists: spin-adapted singlets only, no spin flip
+    assert pi[3]["irrep_nelec"]["A1"] == [10, 10] and pi[4] is None
     assert quintet[3] == {"two_s": 4, "irrep_nelec": None} and quintet[4] is None   # S = 2: no spin flip
+    # no Stage-3 singlet of the neutral: aufbau singlet plus spin flip from the triplet
+    assert neutral_singlet[3] == {"two_s": 0, "irrep_nelec": None} and neutral_singlet[4]["two_s"] == 2
     again = cc_block_task(refs, pol, ("Cu", "O"), -1, 1, "B1", 1.67, None, tmp_path / "b.json")
-    assert len(seen) == 3 and again["status"] == "COMPLETED"                       # cached
+    assert len(seen) == 4 and again["status"] == "COMPLETED"                       # cached
 
 
 def test_doubly_excited_root_is_lowered_by_the_allowance(monkeypatch):

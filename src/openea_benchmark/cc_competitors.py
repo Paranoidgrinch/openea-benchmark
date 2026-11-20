@@ -60,6 +60,10 @@ class CCCompetitorPolicy:
     # A spin-flip root this close to the reference (excitation ~0) is the reference's own
     # Ms = S component (NH: 1e-6 eV), a state of the higher-spin block.
     spin_partner_ev: float = 0.05
+    # CCSD iterations (PySCF default 50: CuO sextet at 2.02 A did not converge).
+    cc_max_cycle: int = 200
+    # Spin flip only for a (charge, 2S) without a Stage-3 state (2026-11-20).
+    spin_flip_only_without_stage3_state: bool = True
 
     def window_policy(self) -> MRCompetitorPolicy:
         """Window, edge extensions and exclusion test of the MR layer, with this margin."""
@@ -164,7 +168,7 @@ def block_roots(atoms, charge, mult, irrep, r, policy: CCCompetitorPolicy,
             from .post_ccsd_t_stage import occupation_ordered
             mf = occupation_ordered(mf)
             mycc = cc.RCCSD(mf)
-            mycc.frozen = nfz
+            mycc.frozen, mycc.max_cycle = nfz, policy.cc_max_cycle
             mycc.kernel()
             if not mycc.converged:
                 raise RuntimeError("closed-shell CCSD not converged")
@@ -190,7 +194,7 @@ def block_roots(atoms, charge, mult, irrep, r, policy: CCCompetitorPolicy,
             continue
         umf = _occupied_first(mf)
         mycc = cc.UCCSD(umf)
-        mycc.frozen = nfz
+        mycc.frozen, mycc.max_cycle = nfz, policy.cc_max_cycle
         mycc.kernel()
         if not mycc.converged:
             raise RuntimeError(f"UCCSD not converged (2S={ref['two_s']})")
@@ -258,8 +262,14 @@ def cc_block_task(references: Mapping[str, Any], cc_policy: CCCompetitorPolicy, 
             # spin-flip partner of the selected state would pose as a second root).
             keep, flip = {"two_s": two_s, "irrep_nelec": selected}, None
         else:
-            keep = {"two_s": two_s, "irrep_nelec": references.get("lowest", {}).get(f"{charge}:{two_s}")}
-            flip = (None if two_s / 2.0 > cc_policy.max_spin_flip_s else
+            own = references.get("lowest", {}).get(f"{charge}:{two_s}")
+            keep = {"two_s": two_s, "irrep_nelec": own}
+            # Spin flip only without a Stage-3 state of this charge and spin: its roots
+            # include the Ms = S components of the higher-spin states, which Stage 3 has
+            # already compared (verify_v1 CuO-: triplet partners 0.2 eV above X 1Sigma+ in
+            # the 1Pi block at 1.94 A, while the spin-adapted singlets lie 0.8-0.9 eV up).
+            flip = (None if two_s / 2.0 > cc_policy.max_spin_flip_s
+                    or (cc_policy.spin_flip_only_without_stage3_state and own is not None) else
                     {"two_s": two_s + 2, "irrep_nelec": references.get("lowest", {}).get(f"{charge}:{two_s + 2}")})
         roots = block_roots(tuple(atoms), charge, mult, irrep, r, cc_policy, keep, flip)
         if not roots:
