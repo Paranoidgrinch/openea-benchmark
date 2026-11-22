@@ -10,6 +10,10 @@ Collects the layer results and issues exactly one outcome:
 * ``NO_BOUND_NEUTRAL`` - the neutral has no bound state but the anion has one: there
                    is no neutral molecule, so a molecular EA is not defined (the anion
                    detaches onto a repulsive neutral curve);
+* ``EA_NEAR_ZERO`` - every layer cleared except the sign: the final EA_0 interval
+                   (all corrections included) contains zero and its half-width is at most
+                   ``NEAR_ZERO_MAX_HALF_WIDTH_EV``; the EA is reported with its interval, the
+                   sign (bound / unbound anion) is not determined within that accuracy;
 * ``UNRESOLVED`` - otherwise, with every blocking reason listed.
 
 A charge without any bound state is a result, not a gap: an anion whose every curve
@@ -45,6 +49,34 @@ CORRECTION_FLAGS = (("includes_core_valence", "core_valence_status", "core-valen
                     ("includes_scalar_relativity", "scalar_relativity_status", "scalar relativity"),
                     ("includes_soc", "spin_orbit_status", "spin-orbit"),
                     ("includes_post_ccsd_t", "post_ccsd_t_status", "post-CCSD(T)"))
+
+# Largest half-width of a zero-straddling EA_0 interval that is still reported as a result.
+NEAR_ZERO_MAX_HALF_WIDTH_EV = 0.1
+# Reasons the binding is open that are a matter of precision only (a diffuse-basis
+# continuum warning is not: the anion description itself is in question there).
+_PRECISION_ONLY_CBS_REASONS = ("CBS_INTERVAL_CONTAINS_ZERO",)
+
+
+def _near_zero(cbs: Mapping[str, Any] | None, adiabatic: Mapping[str, Any] | None) -> bool:
+    """The only open item is the sign of an otherwise complete, narrow EA_0 interval."""
+    if not cbs or not adiabatic:
+        return False
+    if cbs.get("status") == "NEED_MORE_EVIDENCE_BINDING":
+        if cbs.get("binding_reason") not in _PRECISION_ONLY_CBS_REASONS:
+            return False
+        # the binding status hides the CBS-model status: it must have cleared on its own
+        if cbs.get("cbs_model_status") != "CLEARED" and not cbs.get("cbs_model_bound_above_target_in_interval"):
+            return False
+    elif cbs.get("status") != "CLEARED":
+        return False
+    if adiabatic.get("binding") != "UNDETERMINED" or adiabatic.get("anion_vibrational_binding") != "BOUND":
+        return False
+    if not all(adiabatic.get(flag) for flag, _, _ in CORRECTION_FLAGS):
+        return False
+    lo, hi = adiabatic.get("ea0_lower_ev"), adiabatic.get("ea0_upper_ev")
+    if lo is None or hi is None or adiabatic.get("ea0_ev") is None:
+        return False
+    return lo <= 0.0 <= hi and (hi - lo) / 2.0 <= NEAR_ZERO_MAX_HALF_WIDTH_EV
 
 
 def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mapping[str, Any] | None,
@@ -109,10 +141,18 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
                     "note": "anion unbound at CBS, but the state assignment is open"}
         return {"outcome": "UNBOUND", "blocking": [], "warnings": warnings,
                 "reason": (cbs or {}).get("binding_reason")}
-    if cbs_status != "CLEARED":
+    near_zero = _near_zero(cbs, adiabatic)
+    if cbs_status != "CLEARED" and not near_zero:
         blocking.append(f"CBS layer: {cbs_status}")
 
-    if not adiabatic or adiabatic.get("status") != "CLEARED":
+    if near_zero:
+        if adiabatic.get("post_ccsd_t_triples_computed") is False:
+            warnings.append("post-CCSD(T): no CCSDT/CCSDTQ (exceeds RAM/scratch); "
+                            f"+-{adiabatic['post_ccsd_t_allowance_ev']:.3f} eV allowance in the interval")
+        elif adiabatic.get("post_ccsd_t_quadruples_allowance_ev") is not None:
+            warnings.append("post-CCSD(T): connected quadruples not computed (CCSDTQ exceeds RAM/scratch); "
+                            f"+-{adiabatic['post_ccsd_t_quadruples_allowance_ev']:.3f} eV allowance in the interval")
+    elif not adiabatic or adiabatic.get("status") != "CLEARED":
         blocking.append(f"adiabatic EA: {None if not adiabatic else adiabatic.get('status')}"
                         + ("" if not adiabatic or not adiabatic.get("reason") else f" ({adiabatic['reason']})"))
     else:
@@ -128,6 +168,13 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
 
     if blocking:
         return {"outcome": "UNRESOLVED", "blocking": blocking, "warnings": warnings}
+    if near_zero:
+        return {"outcome": "EA_NEAR_ZERO", "blocking": [], "warnings": warnings,
+                "ea_ev": adiabatic["ea0_ev"], "ea_lower_ev": adiabatic["ea0_lower_ev"],
+                "ea_upper_ev": adiabatic["ea0_upper_ev"],
+                "reason": ("EA_0 interval contains zero: sign (bound or unbound anion) not determined "
+                           f"within the accuracy (half-width <= {NEAR_ZERO_MAX_HALF_WIDTH_EV} eV)"),
+                "scope": "adiabatic EA_0, lowest spin-orbit levels, main isotopologue"}
     return {"outcome": "EA", "blocking": [], "warnings": warnings,
             "ea_ev": adiabatic["ea0_ev"], "ea_lower_ev": adiabatic["ea0_lower_ev"],
             "ea_upper_ev": adiabatic["ea0_upper_ev"],

@@ -56,7 +56,7 @@ def build_state_inventory(electronic_ea: Mapping[str, Any] | None, *,
         row = next((r for r in rows if r["job_id"] == job and r["energy_hartree"] is not None), None)
         if row is not None:
             ground[role] = row
-    final_ea = (final_verdict or {}).get("ea_ev") if (final_verdict or {}).get("outcome") == "EA" else None
+    final_ea = (final_verdict or {}).get("ea_ev") if (final_verdict or {}).get("outcome") in ("EA", "EA_NEAR_ZERO") else None
     for r in rows:
         r["is_ground_state"] = r["job_id"] == selected.get(r["role"])
         e = r["energy_hartree"]

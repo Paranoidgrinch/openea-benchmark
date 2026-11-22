@@ -99,3 +99,37 @@ def test_open_neutral_mr_states_cannot_block_unbound():
                               mr_competitors={"status": "UNRESOLVED_MR_COMPETITOR"},
                               mr_only_labels=["q=-1 2Deltag"])
     assert v["outcome"] == "UNRESOLVED"
+
+
+NEAR_CBS = {"status": "NEED_MORE_EVIDENCE_BINDING", "binding_reason": "CBS_INTERVAL_CONTAINS_ZERO",
+            "cbs_model_status": "CLEARED"}
+NEAR_ADI = {**ADI, "status": "NEED_MORE_EVIDENCE_BINDING", "binding": "UNDETERMINED",
+            "anion_vibrational_binding": "BOUND", "ea0_ev": 0.01, "ea0_lower_ev": -0.01, "ea0_upper_ev": 0.03}
+
+
+def test_narrow_interval_around_zero_is_reported_with_its_error():
+    res = resolve_final_verdict(electronic_ea=EA, cbs=NEAR_CBS, adiabatic=NEAR_ADI, mr_competitors=None)
+    assert res["outcome"] == "EA_NEAR_ZERO" and not res["blocking"]
+    assert (res["ea_ev"], res["ea_lower_ev"], res["ea_upper_ev"]) == (0.01, -0.01, 0.03)
+    # bound at CBS, the corrections pull the interval across zero: same result
+    adi = {**NEAR_ADI, "status": "NEED_MORE_EVIDENCE_BINDING_UNDETERMINED"}
+    assert resolve_final_verdict(electronic_ea=EA, cbs=CBS, adiabatic=adi, mr_competitors=None)["outcome"] \
+        == "EA_NEAR_ZERO"
+
+
+def test_wide_or_incomplete_interval_around_zero_stays_unresolved():
+    wide = {**NEAR_ADI, "ea0_lower_ev": -0.15, "ea0_upper_ev": 0.07}            # half-width 0.11 eV
+    missing = {**NEAR_ADI, "includes_soc": False}
+    floppy = {**NEAR_ADI, "anion_vibrational_binding": "UNBOUND"}
+    for adi in (wide, missing, floppy):
+        res = resolve_final_verdict(electronic_ea=EA, cbs=NEAR_CBS, adiabatic=adi, mr_competitors=None)
+        assert res["outcome"] == "UNRESOLVED"
+    diffuse = {**NEAR_CBS, "binding_reason": "DIFFUSE_CORRECTION_ABOVE_CONTINUUM_THRESHOLD"}
+    model = {**NEAR_CBS, "cbs_model_status": "NEED_MORE_EVIDENCE_CBS"}
+    for cbs in (diffuse, model):
+        assert resolve_final_verdict(electronic_ea=EA, cbs=cbs, adiabatic=NEAR_ADI,
+                                     mr_competitors=None)["outcome"] == "UNRESOLVED"
+    # an open state question still blocks
+    res = resolve_final_verdict(electronic_ea=EA, cbs=NEAR_CBS, adiabatic=NEAR_ADI,
+                                mr_competitors={"status": "UNRESOLVED_MR_COMPETITOR"}, mr_only_labels=["q=-1 1Delta"])
+    assert res["outcome"] == "UNRESOLVED" and any("MR-only" in b for b in res["blocking"])
