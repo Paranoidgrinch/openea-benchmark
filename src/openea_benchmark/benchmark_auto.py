@@ -42,6 +42,27 @@ def no_bound_state_groups(selection: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(out))
 
 
+def _spin_coverage_extended(previous_sha: str | None, manifest: Mapping[str, Any], system: str) -> bool:
+    """The previous manifest equals the current one with a subset of its spin sectors."""
+    if not previous_sha:
+        return False
+    from itertools import combinations
+    entry = manifest["systems"][system]
+    keys = ("candidate_neutral_2S", "candidate_anion_2S")
+    if not all(isinstance(entry.get(k), list) for k in keys):
+        return False
+
+    def subsets(values):
+        return [list(c) for n in range(1, len(values) + 1) for c in combinations(values, n)]
+
+    for neutral in subsets(entry[keys[0]]):
+        for anion in subsets(entry[keys[1]]):
+            old = {**entry, keys[0]: neutral, keys[1]: anion}
+            if old != entry and _digest({"system": old, "protocol": manifest["protocol"]}) == previous_sha:
+                return True
+    return False
+
+
 def _digest(value: Any) -> str:
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
@@ -231,8 +252,14 @@ def run_benchmark_acquisition(
     if state_path.exists():
         previous = _load(state_path)
         if previous.get("manifest_sha256") != identity["manifest_sha256"]:
-            raise ValueError("Existing acquisition uses a different manifest; use a new output directory")
-        if previous.get("scout_sha256") != identity["scout_sha256"]:
+            if not _spin_coverage_extended(previous.get("manifest_sha256"), manifest, system):
+                raise ValueError("Existing acquisition uses a different manifest; use a new output directory")
+            # Same atoms, geometry and protocol; the scout only found further spin sectors
+            # (an automatic manifest follows the scout).  Cached points are validated by
+            # their full request, so the acquisition resumes with the extended coverage.
+            digest = str(previous.get("manifest_sha256", "unknown"))[:12]
+            os.replace(state_path, state_path.with_name(f"auto_state.manifest_{digest}.json"))
+        elif previous.get("scout_sha256") != identity["scout_sha256"]:
             # The scout summary changed (e.g. a corrected classification rule).  Stage-3
             # points are validated individually by their full request below, so the
             # acquisition resumes; the superseded state is kept for provenance.

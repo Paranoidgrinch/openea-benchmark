@@ -151,3 +151,24 @@ def test_source_checkpoint_change_invalidates_point_cache(tmp_path):
     with pytest.raises(ValueError, match="Stale/conflicting point artifact"):
         run_benchmark_acquisition(summary=summary, manifest=manifest, output_dir=path,
                                   settings=AcquisitionSettings(max_points=1), point_runner=fake)
+
+
+def test_extended_spin_coverage_resumes_the_cached_run(tmp_path):
+    summary, manifest = fixture(tmp_path)
+    path = tmp_path / "output"
+    system = next(iter(manifest["systems"]))
+    entry = manifest["systems"][system]
+    entry.update(candidate_neutral_2S=[0], candidate_anion_2S=[1])
+    run_benchmark_acquisition(summary=summary, manifest=manifest, output_dir=path,
+                              settings=AcquisitionSettings(compute_points=False))
+    old = json.loads((path / "auto_state.json").read_text())["manifest_sha256"]
+    # the scout found a further neutral spin sector: same atoms, geometry and protocol
+    entry["candidate_neutral_2S"] = [0, 2]
+    run_benchmark_acquisition(summary=summary, manifest=manifest, output_dir=path,
+                              settings=AcquisitionSettings(compute_points=False))
+    assert (path / f"auto_state.manifest_{old[:12]}.json").is_file()
+    assert json.loads((path / "auto_state.json").read_text())["manifest_sha256"] != old
+    entry["candidate_anion_2S"] = [3]                       # a sector disappeared: no extension
+    with pytest.raises(ValueError, match="different manifest"):
+        run_benchmark_acquisition(summary=summary, manifest=manifest, output_dir=path,
+                                  settings=AcquisitionSettings(compute_points=False))
