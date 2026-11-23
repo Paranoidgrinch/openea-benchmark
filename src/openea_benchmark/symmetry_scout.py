@@ -92,16 +92,23 @@ def plan_blocks(atom_a: str, atom_b: str, charge: int, r0: float, policy: Symmet
     candidates = enumerate_state_candidates(atom_a, atom_b, charge)
     wanted = {c.symmetry for c in candidates}
     like = atom_a == atom_b
-    blocks, covered = [], set()
+    blocks, covered, seen = [], set(), set()
     for two_s in candidate_spin_sectors(atom_a, atom_b, charge):
-        orbitals, (n_a, n_b) = reference((atom_a, atom_b), r0, charge, two_s, policy)
-        for occ in enumerate_block_occupations(
-                orbitals, n_alpha=n_a, n_beta=n_b, like_nuclei=like,
-                below=policy.occupation_window_below, above=policy.occupation_window_above,
-                keep_per_label=policy.occupations_per_label):
-            if occ.symmetry in wanted:
-                blocks.append(occ)
-                covered.add(occ.symmetry)
+        # The window is ranked by orbital energies at r0 (sum of covalent radii) and, with
+        # one occupation per label, at a compressed geometry: multiply bonded pairs lie far
+        # inside r0 and their bonding occupation can rank outside the r0 window (verify_v2
+        # Cr2: the sextuple-bond 1Sigmag+ occupation at 1.68 A was not planned at 2.78 A).
+        for r_plan, keep in ((r0, policy.occupations_per_label), (COMPRESSED_PLAN_FACTOR * r0, 1)):
+            orbitals, (n_a, n_b) = reference((atom_a, atom_b), r_plan, charge, two_s, policy)
+            for occ in enumerate_block_occupations(
+                    orbitals, n_alpha=n_a, n_beta=n_b, like_nuclei=like,
+                    below=policy.occupation_window_below, above=policy.occupation_window_above,
+                    keep_per_label=keep):
+                key = (occ.symmetry, occ.irrep_nelec)
+                if occ.symmetry in wanted and key not in seen:
+                    seen.add(key)
+                    blocks.append(occ)
+                    covered.add(occ.symmetry)
     missing = sorted((c for c in candidates if c.symmetry not in covered), key=lambda c: c.symmetry.label)
     return {
         "blocks": blocks,
@@ -117,7 +124,11 @@ def plan_blocks(atom_a: str, atom_b: str, charge: int, r0: float, policy: Symmet
 LABEL_RULE = "DETERMINANT_LZ2_V1"
 # Plans made before the degenerate-orbital m fix (symmetry_states.orbital_m_values) can
 # lack whole labels (SeH: every doublet); they are completed by the labels a new plan covers.
-PLAN_RULE = "DEGENERATE_M_V2"
+PLAN_RULE = "COMPRESSED_GEOMETRY_V3"
+# V3: occupations also ranked at this fraction of r0 (one per label); a cached plan is
+# completed by every occupation it lacks.  Not a policy field, so the scan signature
+# (and every cached block scan) is unchanged.
+COMPRESSED_PLAN_FACTOR = 0.65
 # Scan extent is not part of the scout signature: cached blocks stopped by a smaller
 # extent are continued from their stored points (no rescan of existing geometries).
 SCAN_EXTENT_FIELDS = ("max_r_angstrom", "max_points_per_side", "max_bracket_refinements")
@@ -493,10 +504,12 @@ def run_symmetry_scout(atom_a: str, atom_b: str, *, output_dir: Path, charges=(0
                        "irrep_nelec": [[k, list(v)] for k, v in o.irrep_nelec],
                        "orbital_energy_sum": o.orbital_energy_sum} for o in plan["blocks"]]
             if "plan" in entry:
-                # Older plan: keep its blocks (scanned, used downstream) and add only the labels
-                # it could not cover; other occupations of a covered label stay as they were.
-                old_labels = {b["label"] for b in entry["plan"]["blocks"]}
-                blocks = entry["plan"]["blocks"] + [b for b in blocks if b["label"] not in old_labels]
+                # Older plan: keep its blocks (scanned, used downstream) and add the occupations
+                # it lacks (V3: compressed-geometry occupations of already covered labels too).
+                def occ_key(b):
+                    return b["label"], tuple((k, tuple(v)) for k, v in b["irrep_nelec"])
+                old_keys = {occ_key(b) for b in entry["plan"]["blocks"]}
+                blocks = entry["plan"]["blocks"] + [b for b in blocks if occ_key(b) not in old_keys]
             covered = {b["label"] for b in blocks}
             entry["plan"] = {"plan_rule": PLAN_RULE, "candidate_labels": plan["candidate_labels"],
                              "mr_only_or_outside_window": [m for m in plan["mr_only_or_outside_window"]
@@ -591,6 +604,23 @@ def lowest_dissociation_limit(atomic: Mapping[str, Any], atom_a: str, atom_b: st
     return best
 
 
+def limit_representable(channel: str, two_s: int, homonuclear: bool) -> bool:
+    """Can a symmetry-block determinant of spin 2S dissociate onto this fragment channel?
+
+    Only the maximal spin coupling of two open-shell fragments is one determinant at
+    large R.  A lower coupling needs the fragment spins to point opposite ways: a
+    spin-restricted singlet never can, and a homonuclear D2h block cannot localize
+    them on either atom (verify_v2 Cr2 1Sigmag+: RKS 7 eV above Cr(7S) + Cr(7S), whereas
+    the real state is bound by ~1.5 eV).  For such blocks the distance to the limit is
+    no evidence; they are compared with the lowest block of their own spin instead.
+    """
+    from .open_pec_extension import _parse_atom_key
+    (_, _, s_a), (_, _, s_b) = (_parse_atom_key(k.strip()) for k in channel.split(" + "))
+    if two_s >= s_a + s_b:   # maximal coupling, or a spin this channel cannot form at all
+        return True
+    return not homonuclear and two_s > 0
+
+
 def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | None = None,
                       asymptote_tolerance_ev: float = 0.25,
                       above_limit_margin_ev: float = 1.0) -> dict:
@@ -622,6 +652,14 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
         # DFT margin cannot be the ground state of this charge.
         limit = lowest_dissociation_limit(atomic, atom_a, atom_b, charge) if atomic else None
         blocks, dispersion = summary_blocks(entry)
+        # Lowest sampled energy per spin: the reference for blocks whose determinant cannot
+        # reach the limit (see ``limit_representable``).
+        spin_floor: dict[int, float] = {}
+        for block in blocks.values():
+            energies = [p["energy_hartree"] for p in block["points"] if p["converged"]]
+            if energies:
+                two_s = int(block["two_s"])
+                spin_floor[two_s] = min(min(energies), spin_floor.get(two_s, float("inf")))
         charge_method = method if dispersion is None else {**method, "dispersion": dispersion}
         for bid, block in blocks.items():
             two_s = int(block["two_s"])
@@ -668,14 +706,20 @@ def to_legacy_summary(record: Mapping[str, Any], *, atomic: Mapping[str, Any] | 
             lowest = min((p["energy_center_hartree"] for p in pts), default=None)
             reaches_large_r = block.get("side_status", {}).get("higher_r") in ("R_LIMIT", "PLATEAU", "RISES",
                                                                               DISPERSION_R_LIMIT)
-            if (limit is not None and lowest is not None and reaches_large_r
-                    and (lowest - limit["energy_hartree"]) * HARTREE_TO_EV > above_limit_margin_ev):
+            representable = limit is not None and limit_representable(limit["channel"], two_s, atom_a == atom_b)
+            reference = (None if limit is None else limit["energy_hartree"] if representable
+                         else spin_floor.get(two_s))
+            if (reference is not None and lowest is not None and reaches_large_r
+                    and (lowest - reference) * HARTREE_TO_EV > above_limit_margin_ev):
                 minimum_scout = {"status": "above_lowest_dissociation_limit", "component_id": bid, "candidates": [],
                                  "scout_status": status,
                                  "dissociation_limit_evidence": {
                                      "channel": limit["channel"], "limit_hartree": limit["energy_hartree"],
                                      "lowest_sampled_hartree": lowest, "margin_ev": above_limit_margin_ev,
-                                     "lowest_minus_limit_ev": (lowest - limit["energy_hartree"]) * HARTREE_TO_EV}}
+                                     "lowest_minus_limit_ev": (lowest - limit["energy_hartree"]) * HARTREE_TO_EV,
+                                     "reference": ("LOWEST_DISSOCIATION_LIMIT" if representable
+                                                   else "LOWEST_BLOCK_OF_THIS_SPIN"),
+                                     "lowest_minus_reference_ev": (lowest - reference) * HARTREE_TO_EV}}
             elif status == "bracketed_single_minimum":
                 m = block["minimum"]
                 minimum_scout["candidates"] = [{"r_angstrom": m["r_angstrom"], "energy_hartree": m["energy_hartree"],

@@ -325,7 +325,7 @@ def test_mixed_degenerate_d_orbitals_get_their_own_m():
     assert list(m) == [1, 1]                                  # far apart: not one set
 
 
-def test_old_plan_is_completed_by_labels_it_could_not_cover(tmp_path, monkeypatch):
+def test_old_plan_is_completed_by_the_occupations_it_lacks(tmp_path, monkeypatch):
     import json
     from openea_benchmark import symmetry_scout as s
     old = {"label": "4Sigma-", "two_s": 3, "irrep_nelec": [["A1", [4, 3]], ["B1", [1, 0]], ["B2", [1, 0]]],
@@ -352,7 +352,9 @@ def test_old_plan_is_completed_by_labels_it_could_not_cover(tmp_path, monkeypatc
     plan = json.loads((out / "symmetry_scout.json").read_text())["charges"]["0"]["plan"]
     labels = [b["label"] for b in plan["blocks"]]
     assert plan["plan_rule"] == s.PLAN_RULE
-    assert labels.count("4Sigma-") == 1 and plan["blocks"][0] == old   # covered label kept as it was
+    assert plan["blocks"][0] == old                                     # scanned block kept as it was
+    keys = [(b["label"], json.dumps(b["irrep_nelec"])) for b in plan["blocks"]]
+    assert len(keys) == len(set(keys))                                  # its occupation not added twice
     assert "2Pi" in labels                                              # missing label added
     assert all(m["label"] != "2Pi" for m in plan["mr_only_or_outside_window"])
 
@@ -367,3 +369,27 @@ def test_window_edges_do_not_split_a_degenerate_pair():
     table = [OrbitalInfo(i, e, irrep, m, gu) for i, (irrep, m, gu, e) in enumerate(spec)]
     occ = enumerate_block_occupations(table, n_alpha=6, n_beta=6, like_nuclei=True, below=3, above=1)
     assert "1Sigmag+" in {o.symmetry.label for o in occ}
+
+
+def test_plan_adds_the_compressed_geometry_occupation(monkeypatch):
+    """A bonding occupation that ranks outside the r0 window is planned from 0.65 r0."""
+    from openea_benchmark import symmetry_scout as s
+    seen_r = []
+
+    def ref(atoms, r, charge, two_s, policy):
+        seen_r.append(round(r, 4))
+        return fake_reference(atoms, r, charge, two_s, policy)
+
+    s.plan_blocks("O", "H", 0, 0.97, POLICY, reference=ref)
+    assert {0.97, round(0.65 * 0.97, 4)} <= set(seen_r)
+
+
+def test_dissociation_limit_only_judges_blocks_that_can_reach_it():
+    from openea_benchmark.symmetry_scout import limit_representable
+    septets = "Cr|q+0|2S6 + Cr|q+0|2S6"
+    assert limit_representable(septets, 12, True)            # maximal coupling
+    assert not limit_representable(septets, 0, True)         # Cr2 1Sigmag+: no single determinant
+    assert not limit_representable(septets, 4, True)         # homonuclear: spins cannot localize
+    assert limit_representable("N|q+0|2S3 + O|q+0|2S2", 1, False)      # heteronuclear UKS
+    assert not limit_representable("N|q+0|2S3 + H|q+0|2S1", 0, False)  # restricted singlet
+    assert limit_representable("Ag|q+0|2S1 + Ag|q+0|2S1", 4, True)    # spin the channel cannot form
