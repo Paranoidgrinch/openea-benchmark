@@ -359,3 +359,18 @@ def test_unresolved_branch_of_a_cleared_competitor_state_does_not_block():
     assert _competition("anion", [low, ref_f, below], 1.0)["status"] == "UNRESOLVED"
     # Without a resolved sibling the margin rule applies as before.
     assert _competition("anion", [low, ref_s], 1.0)["status"] == "UNRESOLVED"
+
+
+def test_reference_branch_without_any_converged_point_does_not_block():
+    # VO- 7Sigma+: refS SCF failed at all five points (no rescue on the seed branch), refF resolved.
+    low = entry("q", center=-1.0, lo=-1.00001, hi=-0.99999)
+    ref_f = {**entry("p__refF", center=-1.0 + 0.5 * H, lo=-1.0 + 0.49 * H, hi=-1.0 + 0.51 * H), "branch_of": "p"}
+    empty = {**entry("p__refS", status="NOT_ELIGIBLE_REVIEW_NOT_CLEARED", sampled=None), "branch_of": "p"}
+    res = _competition("anion", [low, ref_f, empty], 1.0)
+    assert res["status"] == "CLEARED" and res["empty_reference_branches"][0]["carried_by"] == "p__refF"
+    # the carrying branch is reviewed as usual: below the selected margin it blocks
+    close = {**ref_f, "equilibrium_status": "NOT_ELIGIBLE_REVIEW_NOT_CLEARED", "lowest_sampled_hartree": -1.0 + 0.1 * H}
+    assert _competition("anion", [low, close, empty], 1.0)["status"] == "UNRESOLVED"
+    # an empty job that is not a reference branch still blocks
+    lone = {**empty, "branch_of": None}
+    assert _competition("anion", [low, lone], 1.0)["status"] == "UNRESOLVED"

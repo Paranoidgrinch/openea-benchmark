@@ -208,3 +208,12 @@ def test_high_lambda_labels_are_classified():
     assert candidate_block("q=0 2H") == (0, 2, "B1")
     assert candidate_block("q=0 4I") == (0, 4, "A2")
     assert candidate_block("q=0 2Ig") == (0, 2, "A2") and candidate_parity("q=0 2Hu") == -1
+
+
+def test_high_lambda_asymptote_labels_are_classified():
+    # verify_v1 ScO: Sc-(1H) + O(1D) gives Lambda = 7; it was labelled "1L7" and left unclassified.
+    from openea_benchmark.mr_competitors import LAMBDA_IRREP, candidate_lambda
+    from openea_benchmark.state_candidates import _LAMBDA_LETTER
+    assert _LAMBDA_LETTER[7] == "K" and _LAMBDA_LETTER[8] == "L"
+    assert candidate_lambda("q=-1 1K") == 7 and LAMBDA_IRREP["K"] == "B1" and LAMBDA_IRREP["L"] == "A2"
+    assert candidate_lambda("2Deltag") == 2 and candidate_lambda("1Sigma+") == 0

@@ -445,6 +445,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
                        and e.get("label_matches_determinant")), lowest)
     upper = lowest["energy_upper_hartree"]
     blocking, excluded, siblings, multireference_only, competitor_siblings = [], [], [], [], []
+    empty_branches = []
     for e in entries:
         if e is lowest:
             continue
@@ -465,6 +466,17 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
                 blocking.append({**item, "scf_lowest_r_angstrom": e.get("scf_lowest_r_angstrom")})
             continue
         if floor is None:
+            carrier = next((s for s in entries if s is not e and e.get("branch_of")
+                            and s.get("branch_of") == e["branch_of"]
+                            and (s["equilibrium_status"] == "RESOLVED" or s.get("lowest_sampled_hartree") is not None)),
+                           None)
+            if carrier is not None:
+                # A reference branch without a single converged point does not exist as a
+                # separate SCF solution (verify_v1 VO- 7Sigma+ refS: the seed converges only
+                # with the second-order rescue the seed branch forbids).  Its state is the
+                # other branch, which is reviewed on its own like every candidate.
+                empty_branches.append({"job_id": e["job_id"], "carried_by": carrier["job_id"]})
+                continue
             blocking.append({"job_id": e["job_id"], "reason": "no energy evidence"})
             continue
         gap_ev = (floor - upper) * HARTREE_TO_EV
@@ -521,6 +533,7 @@ def _competition(label: str, entries: list[dict], margin_ev: float,
             "lowest_job_id": lowest["job_id"], "blocking": blocking, "excluded_by_margin": excluded,
             "reference_branch_siblings": siblings, "multireference_only_excluded": multireference_only,
             "competitor_branch_siblings": competitor_siblings,
+            "empty_reference_branches": empty_branches,
             "reference_sensitivity_ev": max((abs(x["offset_ev"]) for x in siblings), default=0.0),
             "rule": "AUTOMATED_HIGH_LEVEL_D04: lowest resolved equilibrium interval must lie below every "
                     "other candidate's lower bound; unresolved candidates only by explicit margin"}

@@ -29,7 +29,10 @@ _MADELUNG = [(1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (4, 0), (3, 2), (4, 1), (5,
              (6, 0), (4, 3), (5, 2), (6, 1), (7, 0), (5, 3), (6, 2), (7, 1)]
 _CAPACITY = {0: 2, 1: 6, 2: 10, 3: 14}
 _L_LETTER = "SPDFGHIKLMNOQRTUV"
-_LAMBDA_LETTER = {0: "Sigma", 1: "Pi", 2: "Delta", 3: "Phi", 4: "Gamma", 5: "H", 6: "I"}
+# Lambda = 0..4 by Greek name, above that the letters of atomic L (H, I, K, L, M, ...; no J).
+# Two atoms reach Lambda = L_A + L_B (verify_v1 ScO: Sc-(1H) + O(1D) gives Lambda = 7, K).
+LAMBDA_NAMES = ("Sigma", "Pi", "Delta", "Phi", "Gamma") + tuple(_L_LETTER[5:])
+_LAMBDA_LETTER = dict(enumerate(LAMBDA_NAMES))
 
 
 def atomic_number(symbol: str) -> int:

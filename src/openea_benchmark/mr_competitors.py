@@ -54,7 +54,7 @@ EDGE_TOLERANCE_HARTREE = 1.0e-6
 # Lambda = 0, 1, 2, ...: Sigma, Pi, Delta, Phi, Gamma, H, I, K (verify_v1 CuO: excited
 # asymptotes give 2H, 2I, 4H, 4I, 6H, which were left unclassified).  Odd Lambda lies in
 # B1 (and B2), even Lambda > 0 in A1 and A2 (the A2 component is used).
-LAMBDA_NAMES = ("Sigma", "Pi", "Delta", "Phi", "Gamma", "H", "I", "K")
+from .state_candidates import LAMBDA_NAMES
 LAMBDA_OF = {name: lam for lam, name in enumerate(LAMBDA_NAMES)}
 LAMBDA_IRREP = {"Sigma+": "A1", "Sigma-": "A2",
                 **{name: ("B1" if lam % 2 else "A2") for lam, name in enumerate(LAMBDA_NAMES) if lam}}

@@ -43,7 +43,7 @@ from typing import Any, Mapping, Sequence
 
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json
 
-LAMBDA_NAMES = ("Sigma", "Pi", "Delta", "Phi", "Gamma", "H", "I", "K")
+from .state_candidates import LAMBDA_NAMES
 LAMBDA_OF = {name: lam for lam, name in enumerate(LAMBDA_NAMES)}
 # D2h irreps (molecular axis z, PySCF convention) collapsed onto C2v.
 D2H_TO_C2V = {"Ag": "A1", "B1u": "A1", "B1g": "A2", "Au": "A2",
