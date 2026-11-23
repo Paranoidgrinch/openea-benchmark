@@ -14,6 +14,15 @@ of aug-cc-pVXZ.  A DK contraction used for the NR member gave NR energies rising
 with X (MgH) and a 0.02 eV spurious 5Z change (ClO).  States carry their symmetry block and the
 seed-continuous reference branch, as in the CBS and CV layers.
 
+Pseudopotential-route atoms (beyond Kr): the "NR" member is the ECP chain's own
+model (aug-cc-pVXZ-PP with its ECP), the sfX2C member all-electron (dyall-avXz), so
+Delta_SR is the error of the ECP.  Both members then run in the valence frozen-core
+space (``valence_frozen_core_orbitals``; for the all-electron member this includes the
+ECP core): the two basis families describe semicore correlation very differently
+(verify_v1 PbO, all-electron with only the ECP core frozen: Pb 5s5p5d correlated,
+Delta_SR 0.011 / 0.045 / 0.068 eV at X = 3/4/5, no convergence).  Semicore correlation
+is the core-valence layer's, in a core-correlating basis of the ECP chain.
+
 The result is the one-electron spin-free X2C correction only; spin-orbit is a
 separate layer and two-electron relativistic terms are not included.
 """
@@ -34,6 +43,11 @@ from .core_valence_basis import sr_element_series
 from .core_valence_stage import _run_point, basis_specs_for, selected_state_specs
 from .electronic_ea_stage import _save_json, cached_point_runner
 from .point_pool import run_parallel
+
+
+def has_pseudopotential_atom(atoms: Sequence[str]) -> bool:
+    from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, element_route
+    return any(element_route(a)["route"] == ROUTE_PSEUDOPOTENTIAL for a in atoms)
 
 BASIS_RULE_ID = "OPENEA_SR_BASIS_RULE_V2"  # V2: NR member in the nonrelativistic partner family
 
@@ -92,7 +106,9 @@ def run_scalar_relativity_stage(*, electronic_ea: Mapping[str, Any], requests: S
     specs, provenance = built
     record["basis_provenance"] = {f"X{x}": p for x, p in provenance.items()}
 
-    settings = replace(stage3_settings, frozen_core=False, scalar_relativistic="NONE",
+    valence_space = has_pseudopotential_atom(states["neutral"].atoms)
+    record["correlation_space"] = "VALENCE_FROZEN_CORE" if valence_space else "ALL_ELECTRON"
+    settings = replace(stage3_settings, frozen_core=valence_space, scalar_relativistic="NONE",
                        max_memory_mb=policy.max_memory_mb, artifact_dir=str(output_dir / "checkpoints"))
     signature = sha256(json.dumps({"basis_rule": BASIS_RULE_ID}, sort_keys=True).encode()).hexdigest()
     runner = cached_point_runner(output_dir / "points", signature, point_backend)

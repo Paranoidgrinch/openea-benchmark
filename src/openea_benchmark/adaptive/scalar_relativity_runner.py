@@ -360,10 +360,9 @@ def _settings_for(
 ) -> Stage3ExecutionSettings:
     if not base.run_ccsd_t:
         raise ValueError("Scalar-relativity correction requires CCSD(T) totals")
-    if base.frozen_core:
-        raise ValueError(
-            "Generic scalar-relativity correction is defined here at matched all-electron CCSD(T); frozen-core scalar-relativity would leave a distinct core-correlation relativistic contribution unaccounted"
-        )
+    # All-electron by default.  A frozen-core base is the valence space of molecules with
+    # pseudopotential-route atoms (``scalar_relativity_stage``): there the two members use
+    # different basis families, and only the valence space is described alike by both.
     if base.scalar_relativistic != "NONE":
         raise ValueError(
             "Scalar-relativity runner owns the NR/SFX2C1E Hamiltonian switch; supply scalar_relativistic='NONE' in the base settings"
@@ -371,7 +370,7 @@ def _settings_for(
     return replace(
         base,
         checkpoint_project=True,
-        frozen_core=False,
+        frozen_core=base.frozen_core,
         scalar_relativistic=(
             "NONE"
             if hamiltonian is ScalarRelativityHamiltonian.NONRELATIVISTIC
@@ -389,7 +388,7 @@ def _checkpoint_signature(
         "schema": "OPENEA_SCALAR_RELATIVITY_SUBPOINT_V1",
         "request": request.to_dict(),
         "hamiltonian": hamiltonian.value,
-        "correlation_space": "ALL_ELECTRON",
+        "correlation_space": "VALENCE_FROZEN_CORE" if settings.frozen_core else "ALL_ELECTRON",
         "frozen_core": settings.frozen_core,
         "run_ccsd_t": settings.run_ccsd_t,
         "scalar_relativistic": settings.scalar_relativistic,

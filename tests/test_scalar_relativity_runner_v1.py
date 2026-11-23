@@ -281,7 +281,7 @@ def test_missing_requested_basis_policy_fails_closed_without_guessing():
     assert "X=5" in result.execution_error_message
 
 
-def test_scalar_runner_owns_hamiltonian_and_requires_all_electron_correlation():
+def test_scalar_runner_owns_hamiltonian_and_keeps_the_correlation_space():
     neutral, anion = states()
     with pytest.raises(ValueError, match="owns the NR/SFX2C1E"):
         run_adaptive_scalar_relativity_series(
@@ -292,15 +292,23 @@ def test_scalar_runner_owns_hamiltonian_and_requires_all_electron_correlation():
             point_runner=synthetic_runner({3: -0.0010, 4: -0.0011}),
             basis_validator=noop_basis_validator,
         )
-    with pytest.raises(ValueError, match="all-electron"):
-        run_adaptive_scalar_relativity_series(
-            neutral=neutral,
-            anion=anion,
-            basis_specs=bases(),
-            execution_settings=Stage3ExecutionSettings(frozen_core=True),
-            point_runner=synthetic_runner({3: -0.0010, 4: -0.0011}),
-            basis_validator=noop_basis_validator,
-        )
+    # A frozen-core base (valence space of pseudopotential molecules) reaches both members.
+    seen = []
+    inner = synthetic_runner({3: -0.0010, 4: -0.0011})
+
+    def recording(request, settings):
+        seen.append(settings.frozen_core)
+        return inner(request, settings)
+
+    run_adaptive_scalar_relativity_series(
+        neutral=neutral,
+        anion=anion,
+        basis_specs=bases(),
+        execution_settings=Stage3ExecutionSettings(frozen_core=True),
+        point_runner=recording,
+        basis_validator=noop_basis_validator,
+    )
+    assert seen and all(seen)
 
 
 def test_execution_failure_blocks_without_fabricating_sr_point():
@@ -426,3 +434,9 @@ def test_result_keeps_missing_physics_explicit():
     assert result.includes_soc is False
     assert result.includes_two_electron_relativistic_terms is False
     assert result.requires_scalar_relativistic_remainder_assessment is True
+
+
+def test_pseudopotential_molecules_use_the_valence_space():
+    from openea_benchmark.scalar_relativity_stage import has_pseudopotential_atom
+    assert has_pseudopotential_atom(("Pb", "O")) and has_pseudopotential_atom(("I", "O"))
+    assert not has_pseudopotential_atom(("Cu", "O")) and not has_pseudopotential_atom(("N", "O"))
