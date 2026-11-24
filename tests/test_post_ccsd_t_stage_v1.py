@@ -348,3 +348,59 @@ def test_closed_shell_ccsd_t_points_keep_their_cache_signature(tmp_path, monkeyp
     assert _point_signature(closed, "cc-pvdz", "CCSD(T)", policy) == legacy(closed, "CCSD(T)")
     assert _point_signature(open_, "cc-pvdz", "CCSDT", policy) == legacy(open_, "CCSDT")
     assert _point_signature(open_, "cc-pvdz", "CCSD(T)", policy) != legacy(open_, "CCSD(T)")
+
+
+def test_symmetric_ccp_ccsdt_point_equals_the_dense_point(tmp_path, monkeypatch):
+    """CCSDT through _run_point: CC(P) over the symmetry-allowed triples on the symmetry-block
+    reference equals CCpy's dense ccsdt on the C1 reference (same determinant); the point
+    stays in core and records its triples count."""
+    import dataclasses
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.core_valence_runner import CoreValenceStateSpec
+    from openea_benchmark.post_ccsd_t_stage import _run_point, occupation_ordered
+
+    def ref(symmetry):
+        mol = gto.M(atom="C 0 0 0; N 0 0 1.1718", basis="cc-pvdz", spin=1, symmetry=symmetry, verbose=0)
+        mf = scf.ROHF(mol)
+        mf.conv_tol = 1e-11
+        mf.kernel()
+        return occupation_ordered(mf)
+    sym, c1 = ref("C2v"), ref("C1")
+    assert sym.e_tot == pytest.approx(c1.e_tot, abs=1e-8)
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_c1", lambda spec, basis, policy: c1)
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_symmetric", lambda spec, basis, policy: sym)
+    spec = CoreValenceStateSpec(role="neutral", system="CN", atoms=("C", "N"), charge=0, spin_2s=1,
+                                state_id="X", r_angstrom=1.1718, source_root_id="X", source_checkpoint_path="none",
+                                state_identity_validated=True)
+    spec = dataclasses.replace(spec, point_group="C2v") if hasattr(spec, "point_group") else spec
+    assert post_ccsd_t_stage.symmetric_ccp_applies(spec, "CCSDT")
+    packed = _run_point(spec, "cc-pvdz", "CCSDT", PostCCSDTStagePolicy(), str(tmp_path / "ccp.json"))
+    monkeypatch.setattr(post_ccsd_t_stage, "CCSDT_ALGORITHM", "dense")
+    dense = _run_point(spec, "cc-pvdz", "CCSDT", PostCCSDTStagePolicy(), str(tmp_path / "dense.json"))
+    assert packed["status"] == dense["status"] == "COMPLETED", (packed, dense)
+    assert packed["triples_algorithm"] == "CCP_SYMMETRY_ALLOWED_TRIPLES" and "triples_algorithm" not in dense
+    assert packed["total_hartree"] == pytest.approx(dense["total_hartree"], abs=1e-8)
+    assert packed["diis_out_of_core"] is False
+    monkeypatch.setattr(post_ccsd_t_stage, "CCSDT_ALGORITHM", "symmetric_ccp")
+    assert post_ccsd_t_stage.cc_limit_group(spec, "cc-pvdz", "CCSDT") is None
+
+
+def test_unconverged_cc_point_fails_closed(tmp_path, monkeypatch):
+    from openea_benchmark.post_ccsd_t_stage import PostCCSDTStagePolicy as P
+    mf, rec = _ch_point_policy(tmp_path, monkeypatch, P(cc_max_iterations=2))
+    assert rec["status"] == "FAILED" and "without convergence" in rec["error"]
+
+
+def _ch_point_policy(tmp_path, monkeypatch, policy):
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.core_valence_runner import CoreValenceStateSpec
+    from openea_benchmark.post_ccsd_t_stage import _run_point, occupation_ordered
+    mol = gto.M(atom="C 0 0 0; H 0 0 1.12", basis="cc-pvdz", spin=1, symmetry="C1", verbose=0)
+    mf = scf.ROHF(mol)
+    mf.conv_tol = 1e-10
+    mf.kernel()
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_c1", lambda spec, basis, policy: occupation_ordered(mf))
+    spec = CoreValenceStateSpec(role="neutral", system="CH", atoms=("C", "H"), charge=0, spin_2s=1,
+                                state_id="X", r_angstrom=1.12, source_root_id="X", source_checkpoint_path="none",
+                                state_identity_validated=True)
+    return mf, _run_point(spec, "cc-pvdz", "CCSDT", policy, str(tmp_path / "unconv.json"))

@@ -52,11 +52,14 @@ from .heavy_elements import apply_hamiltonian, mole_basis_kwargs
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import socket
+import sys
 import tempfile
 import time
 import uuid
@@ -137,6 +140,18 @@ def _kernel_with_soscf_rescue(mf, dm0, conv_tol: float) -> bool:
 
 def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     """Reference converged in the symmetry block, then carried into C1 unchanged."""
+    return _references(spec, basis, policy)[1]
+
+
+def reference_symmetric(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
+    """The symmetry-block reference itself (orbitals carry irrep labels), after the same C1
+    check as ``reference_c1``; None without a point group."""
+    if not spec.point_group or str(spec.point_group).upper() == "C1":
+        return None
+    return occupation_ordered(_references(spec, basis, policy)[0])
+
+
+def _references(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
     from pyscf import scf
     open_shell = spec.spin_2s > 0
     mol = _mol(spec, basis, spec.point_group or False, policy.max_memory_mb)
@@ -158,7 +173,8 @@ def reference_c1(spec: Any, basis: str, policy: PostCCSDTStagePolicy):
         raise RuntimeError(f"C1 reference left the symmetry-block solution ({mf1.e_tot} vs {mf.e_tot})")
     mf1 = occupation_ordered(mf1)
     mf1.openea_soscf_rescue = rescued
-    return mf1
+    mf.openea_soscf_rescue = rescued
+    return mf, mf1
 
 
 def occupation_ordered(mf):
@@ -215,6 +231,17 @@ POST_CC_ALLOWANCE_EV = 0.05
 # (fno_increment) replaces the quadruples allowance.  Not a policy field: the policy is
 # part of every post-CC point signature.  OPENEA_FNO=0 disables it.
 FNO_BEYOND_TRIPLES = os.environ.get("OPENEA_FNO", "1") != "0"
+# CCSDT as CCpy CC(P) over every symmetry-allowed triple (cc_pspace.py): the same equations
+# as the dense ``ccsdt`` (CN aDZ/cc-pVDZ to 1e-10 Eh), amplitudes packed (a<b<c, i<j<k) and
+# only triples of the reference symmetry, so the point stays in core.  CN 2Sigma+ aTZ C2v,
+# 8 threads: dense 263 s/iteration 29.9 GB, CC(P) 276 s 5.5 GB (Fortran serial), 94 s with
+# CCpy built with OpenMP.  Not part of the point signature (same energies): cached dense
+# points stay valid.  OPENEA_CCSDT_ALGORITHM=dense restores the dense code.
+CCSDT_ALGORITHM = os.environ.get("OPENEA_CCSDT_ALGORITHM", "symmetric_ccp")
+GROUP_ORDER = {"C1": 1, "CS": 2, "C2": 2, "C2V": 4, "C2H": 4, "D2": 4, "D2H": 8}
+CCP_BYTES_PER_TRIPLE = 400          # T3, residual, 6 DIIS pairs, excitation list, loop copies (CN aTZ fit)
+CCP_INTEGRAL_COPIES = 2             # sorted H blocks and the CCSD-like intermediates
+CCP_BASE_MB = 1000
 CC_SCRATCH_ROOT = Path(os.environ.get("OPENEA_CC_SCRATCH", f"/scratch/{os.environ.get('USER', 'openea')}/openea_cc"))
 
 
@@ -228,6 +255,28 @@ def _amplitude_mb(spec: Any, basis: str, method: str) -> float:
     nmo = mol.nao_nr()
     x, y = (na - nfz) * (nmo - na), (nb - nfz) * (nmo - nb)
     return 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
+
+
+def symmetric_ccp_applies(spec: Any, method: str) -> bool:
+    group = str(getattr(spec, "point_group", None) or "C1").upper()
+    return method == "CCSDT" and CCSDT_ALGORITHM == "symmetric_ccp" and group in GROUP_ORDER and group != "C1"
+
+
+def ccp_storage_mb(spec: Any, basis: str) -> float:
+    """RAM of a symmetric CC(P) CCSDT point: packed triples (all unique ones / group order)
+    plus the dense integral blocks CCpy keeps (aa, ab, bb over the correlated orbitals)."""
+    from math import comb
+    from .adaptive.stage3_execution import valence_frozen_core_orbitals
+    mol = _mol(spec, basis, False, 1000)
+    nfz = valence_frozen_core_orbitals(mol)
+    na, nb = mol.nelec
+    nmo = mol.nao_nr()
+    oa, ob, va, vb = na - nfz, nb - nfz, nmo - na, nmo - nb
+    unique = (comb(oa, 3) * comb(va, 3) + comb(oa, 2) * ob * comb(va, 2) * vb
+              + oa * comb(ob, 2) * va * comb(vb, 2) + comb(ob, 3) * comb(vb, 3))
+    triples = unique / GROUP_ORDER[str(spec.point_group).upper()]
+    n = nmo - nfz
+    return CCP_BASE_MB + (CCP_BYTES_PER_TRIPLE * triples + CCP_INTEGRAL_COPIES * 3 * 8 * n ** 4) / 1.0e6
 
 
 def in_core_copies(diis_size: int) -> int:
@@ -252,6 +301,8 @@ def diis_out_of_core(amplitude_mb: float) -> bool:
 
 def cc_limit_group(spec: Any, basis: str, method: str):
     """Machine-wide concurrency group of an out-of-core point (None for in-core points)."""
+    if symmetric_ccp_applies(spec, method):
+        return None
     return OUT_OF_CORE_LIMIT_GROUP if diis_out_of_core(_amplitude_mb(spec, basis, method)) else None
 
 
@@ -261,6 +312,8 @@ def q_memory_limit_mb(policy: "PostCCSDTStagePolicy") -> int:
 
 def cc_scratch_need_mb(spec: Any, basis: str, method: str) -> float:
     """Scratch for the DIIS file of an out-of-core point (amplitude and residual vectors)."""
+    if symmetric_ccp_applies(spec, method):
+        return 0.0
     one = _amplitude_mb(spec, basis, method)
     return DIIS_COPIES * one if diis_out_of_core(one) else 0.0
 
@@ -274,6 +327,8 @@ def scratch_free_mb() -> float:
 
 def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
     """Memory (RAM) estimate of a CCpy point; DIIS copies count only when kept in core."""
+    if symmetric_ccp_applies(spec, method):
+        return ccp_storage_mb(spec, basis)
     one = _amplitude_mb(spec, basis, method)
     out_of_core, size = cc_mode(one)
     return (OUT_OF_CORE_COPIES if out_of_core else in_core_copies(size)) * one
@@ -397,14 +452,15 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
     from .adaptive.stage3_execution import valence_frozen_core_orbitals
     record: dict[str, Any] = {"signature": signature, "role": spec.role, "basis": basis, "method": method}
     try:
-        mf = reference_c1(spec, basis, policy)
+        symmetric = symmetric_ccp_applies(spec, method)
+        mf = reference_symmetric(spec, basis, policy) if symmetric else reference_c1(spec, basis, policy)
         record["scf_soscf_rescue"] = bool(getattr(mf, "openea_soscf_rescue", False))
         nfz = valence_frozen_core_orbitals(mf.mol)
         driver = Driver.from_pyscf(mf, nfrozen=nfz)
         driver.options["energy_convergence"] = policy.cc_convergence
         driver.options["amp_convergence"] = policy.cc_convergence
         driver.options["maximum_iterations"] = policy.cc_max_iterations
-        out_of_core, diis_size = cc_mode(_amplitude_mb(spec, basis, method))
+        out_of_core, diis_size = (False, DIIS_SIZE) if symmetric else cc_mode(_amplitude_mb(spec, basis, method))
         driver.options["diis_size"] = diis_size
         driver.options["diis_out_of_core"] = out_of_core
         record["diis_out_of_core"] = out_of_core
@@ -413,7 +469,8 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
             import ccpy.drivers.solvers as solvers
             solvers.DIIS = cached_diis_class()
         t0 = time.perf_counter()
-        with cc_scratch_dir() if out_of_core else nullcontext():
+        log = _TeeStdout()
+        with cc_scratch_dir() if out_of_core else nullcontext(), contextlib.redirect_stdout(log):
             if method == "CCSD(T)":
                 driver.run_cc(method="ccsd")
                 ccsd_corr = float(driver.correlation_energy)
@@ -427,15 +484,48 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
                         raise RuntimeError(f"CCpy and PySCF CCSD differ by {sc_ccsd - ccsd_corr:.2e} Eh "
                                            "(correlation space or reference not the same)")
                     corr = sc_total
+            elif symmetric:
+                from .cc_pspace import run_symmetric_ccsdt
+                system = driver.system
+                labels = [system.point_group_irrep_to_number[x] for x in system.orbital_symmetries]
+                counts = run_symmetric_ccsdt(driver, labels, labels, system.noccupied_alpha,
+                                             system.noccupied_beta, "xor")
+                corr = float(driver.correlation_energy)
+                record.update(triples_algorithm="CCP_SYMMETRY_ALLOWED_TRIPLES", triples_count=counts,
+                              point_group=str(spec.point_group))
             else:
                 driver.run_cc(method=method.lower())
                 corr = float(driver.correlation_energy)
+        if CC_CONVERGED_MESSAGE not in log.text():
+            raise RuntimeError(f"{method}: CCpy iterations ended without convergence "
+                               f"({policy.cc_max_iterations} iterations)")
         record.update(status="COMPLETED", cc_wall_seconds=time.perf_counter() - t0, nfrozen=nfz,
                       reference_hartree=float(mf.e_tot), total_hartree=float(mf.e_tot) + corr)
     except Exception as exc:  # noqa: BLE001 - recorded, layer fails closed
         record.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
     _save_json(Path(path), record)
     return record
+
+
+# CCpy's driver discards the solver's convergence flag; its message is the evidence.
+CC_CONVERGED_MESSAGE = "CC calculation successfully converged"
+
+
+class _TeeStdout(io.TextIOBase):
+    """Passes CCpy's output on to the log and keeps a copy for the convergence check."""
+    def __init__(self):
+        self._target = sys.stdout
+        self._parts: list[str] = []
+
+    def write(self, text):
+        self._parts.append(text)
+        return self._target.write(text)
+
+    def flush(self):
+        self._target.flush()
+
+    def text(self) -> str:
+        return "".join(self._parts)
 
 
 def _fno_increment(states: Mapping[str, Any], policy: PostCCSDTStagePolicy, output_dir: Path) -> dict:
