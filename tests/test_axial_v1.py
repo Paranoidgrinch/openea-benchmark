@@ -161,3 +161,31 @@ def test_cholesky_integrals_reproduce_dense_scf_and_cc():
     assert u_c.e_tot + e_c["ccsd(t)"] == pytest.approx(u_d.e_tot + e_d["ccsd(t)"], abs=1e-7)
     with pytest.raises(NotImplementedError):
         axial_cc(chol, r_c, mol.nelectron, 1, semicanonical=False)
+
+
+def test_frozen_reference_orbital_at_its_converged_shape_changes_nothing():
+    """freeze_reference: freezing an orbital of the converged UHF reproduces that UHF; a
+    frozen orbital of another shape gives a higher (upper-bound) energy."""
+    from openea_benchmark.axial.scf import axial_uhf
+    mol = gto.M(atom="N 0 0 0; H 0 0 1.037", basis="cc-pvdz", spin=2, symmetry="C1", verbose=0)
+    ints = axial_integrals(mol)
+    free = axial_uhf(ints, X3, minao_density(mol, ints))
+    j = [i for i in range(free.nocc[0]) if free.mo_m[0][i] == 1][0]
+    none = np.zeros((int(np.sum(ints.m == 1)), 0))
+    ref = {1: (free.mo_coeff[0][ints.m == 1][:, [j]], none)}
+    frozen = axial_uhf(ints, X3, minao_density(mol, ints), reference=ref, freeze_reference=True)
+    assert frozen.converged and frozen.e_tot == pytest.approx(free.e_tot, abs=1e-8)
+    s_k = ints.ovlp[np.ix_(ints.m == 1, ints.m == 1)]
+    v = [i for i in range(free.nocc[0], len(free.mo_m[0])) if free.mo_m[0][i] == 1][0]
+    bent = free.mo_coeff[0][ints.m == 1][:, [j]] + 0.05 * free.mo_coeff[0][ints.m == 1][:, [v]]
+    bent /= np.sqrt(bent.T @ s_k @ bent)
+    worse = axial_uhf(ints, X3, minao_density(mol, ints), reference={1: (bent, none)}, freeze_reference=True)
+    assert worse.converged and worse.e_tot > free.e_tot + 1e-6
+
+
+def test_ln_oxide_configurations_count_mirror_pairs_once():
+    from openea_benchmark.axial.ln_oxide import f_configurations, molecular_occupation
+    assert [len(f_configurations(n, 1)) for n in (1, 2, 3, 6, 7, 8, 13, 14)] == [4, 12, 19, 4, 1, 4, 4, 1]
+    assert all(c.m_l >= 0 for c in f_configurations(3, 0))
+    pro = [c for c in f_configurations(2, 1) if c.f_alpha == (3, 2)][0]
+    assert molecular_occupation(pro) == {0: (15, 14), 1: (7, 7), -1: (7, 7), 2: (3, 2), -2: (2, 2), 3: (1, 0)}

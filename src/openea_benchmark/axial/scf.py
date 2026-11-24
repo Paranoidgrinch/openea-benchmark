@@ -220,14 +220,23 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
               reference: dict | None = None, max_cycle: int = 300, conv_tol: float = 1e-10,
               conv_tol_grad: float = 1e-7, diis_space: int = 12, level_shift: float = 0.0,
               follow: str = "update", block_of_ao: np.ndarray | None = None,
-              verbose: bool = False) -> AxialUHFResult:
+              diis_start: int = 2, freeze_reference: bool = False, verbose: bool = False) -> AxialUHFResult:
     """UHF of one axial determinant: (n_alpha, n_beta) fixed per m block (as the UO pilot GHF).
 
     ``reference``: {m: (C_alpha_occ, C_beta_occ)} block orbitals to follow by maximum overlap
     (``follow="update"``: the previous iteration, MOM; ``"initial"``: the reference, IMOM);
     without it each block is filled by energy.  ``block_of_ao``: finer block key per axial AO
     (``atomic_blocks``: (l, m) for one atom, where l is a symmetry of the restricted
-    problem); ``occupation`` and ``reference`` are then keyed by it."""
+    problem); ``occupation`` and ``reference`` are then keyed by it.
+
+    ``freeze_reference``: the reference orbitals (orthonormal per block and spin, e.g. the
+    open 4f of the free ion) stay fixed and occupied; all other orbitals are optimized in
+    their orthogonal complement (Fock F' = Q^T F Q + S P (P^T F P) P^T S, Q = 1 - P P^T S,
+    block diagonal between the two spaces).  For f configurations that slide to 5d in the
+    molecule (TbO 4f9: the m = 2 beta f electron goes to 5d over ~100 cycles, with DIIS the
+    SCF circles at grad 4e-3).  Converged: stationary except for rotations of the frozen
+    orbitals, which CC relaxes (T1); the returned orbitals are semicanonical (true Fock
+    diagonal within occupied and within virtual orbitals of each block and spin)."""
     from pyscf.lib.diis import DIIS
     keys = [int(k) for k in ints.m] if block_of_ao is None else [tuple(k) for k in block_of_ao]
     blocks = {}
@@ -250,6 +259,32 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
     diis.space = diis_space
     ref = reference
     e_old, converged, e_tot = None, False, None
+    frozen = {}
+    if freeze_reference:
+        if reference is None or block_of_ao is not None:
+            raise ValueError("freeze_reference needs a reference and m blocks")
+        follow = "initial"
+        for k, pair in reference.items():
+            for spin, p in enumerate(pair):
+                if p is not None and p.shape[1]:
+                    idx = blocks[k]
+                    s_k = s[np.ix_(idx, idx)]
+                    if np.abs(p.T @ s_k @ p - np.eye(p.shape[1])).max() > 1e-8:
+                        raise ValueError(f"frozen orbitals of block {k} spin {spin} not orthonormal")
+                    frozen[(k, spin)] = (idx, p, s_k)
+
+    def freeze(f, spin):
+        if not frozen:
+            return f
+        f = f.copy()
+        for (k, sp), (idx, p, s_k) in frozen.items():
+            if sp != spin:
+                continue
+            f_k = f[np.ix_(idx, idx)]
+            q = np.eye(len(idx)) - p @ p.T @ s_k
+            sp_ = s_k @ p
+            f[np.ix_(idx, idx)] = q.T @ f_k @ q + sp_ @ (p.T @ f_k @ p) @ sp_.T
+        return f
 
     def diagonalize(fa, fb, ref):
         out, new_ref = [], {}
@@ -288,7 +323,7 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
     for cycle in range(1, max_cycle + 1):
         ja, ka = coulomb_exchange(eri, da)
         jb, kb = coulomb_exchange(eri, db)
-        fa, fb = (h + ja + jb - ka) * same, (h + ja + jb - kb) * same
+        fa, fb = freeze((h + ja + jb - ka) * same, 0), freeze((h + ja + jb - kb) * same, 1)
         e_tot = float(np.sum(h * (da + db)) + 0.5 * (np.sum((ja + jb) * (da + db)) - np.sum(ka * da)
                                                      - np.sum(kb * db)) + ints.energy_nuc)
         err = np.concatenate([(fa @ da @ s - s @ da @ fa).ravel(), (fb @ db @ s - s @ db @ fb).ravel()])
@@ -299,7 +334,7 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
             converged = True
             break
         e_old = e_tot
-        if cycle > 1:
+        if diis_space and cycle >= diis_start:
             fa, fb = diis.update(np.array([fa, fb]), err)
         if level_shift:
             fa = fa + level_shift * (s - s @ da @ s)
@@ -309,7 +344,20 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
             ref = new_ref
         (ca, _, _, oa), (cb, _, _, ob) = res
         da, db = ca[:, oa > 0] @ ca[:, oa > 0].T, cb[:, ob > 0] @ cb[:, ob > 0].T
-    res, _ = diagonalize((h + ja + jb - ka) * same, (h + ja + jb - kb) * same, ref)
+    f_true = ((h + ja + jb - ka) * same, (h + ja + jb - kb) * same)
+    res, _ = diagonalize(freeze(f_true[0], 0), freeze(f_true[1], 1), ref)
+    if frozen:   # semicanonical in the true Fock, per block: occupied and virtual separately
+        canon = []
+        for spin, (coeff, energy, ms, occs) in enumerate(res):
+            coeff, energy = coeff.copy(), energy.copy()
+            for k in np.unique(ms):
+                for space in (occs > 0, occs == 0):
+                    cols = np.flatnonzero(space & (ms == k))
+                    if cols.size:
+                        e_k, v = np.linalg.eigh(coeff[:, cols].T @ f_true[spin] @ coeff[:, cols])
+                        coeff[:, cols], energy[cols] = coeff[:, cols] @ v, e_k
+            canon.append((coeff, energy, ms, occs))
+        res = canon
     coeffs, energies, mss, noccs = [], [], [], []
     for coeff, energy, ms, occs in res:
         order = np.lexsort((energy, -occs))
