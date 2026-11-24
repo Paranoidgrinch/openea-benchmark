@@ -135,10 +135,25 @@ def oxide_point(element: str, cfg: LnConfig, r: float, x: str = "D", methods=("c
     ``freeze_f``: the open 4f orbitals stay those of the free ion (``axial_uhf``
     freeze_reference), the 6s is not followed; for configurations whose free SCF slides
     4f -> 5d.  CC relaxes the f orbitals."""
-    from pyscf import gto, scf
     from openea_benchmark.adaptive.stage3_execution import valence_frozen_core_orbitals
-    from .basis import axial_integrals
     from .cc import axial_cc
+    mol, ints, res, ion = oxide_scf(element, cfg, r, x, cholesky_tol=cholesky_tol, level_shift=level_shift,
+                                    follow=follow, max_cycle=max_cycle, diis_space=diis_space,
+                                    diis_start=diis_start, freeze_f=freeze_f, verbose=verbose)
+    purity = f_purity(mol, ints, res, cfg)
+    point = OxidePoint(cfg, mol.charge, r, res.e_tot, res.converged, res.s2, purity, {}, ion.e_tot,
+                       "frozen_f" if freeze_f else "free")
+    if methods and res.converged:
+        point.correlation = axial_cc(ints, res, mol.nelectron, valence_frozen_core_orbitals(mol), methods)
+    return point
+
+
+def oxide_scf(element: str, cfg: LnConfig, r: float, x: str = "D", *, cholesky_tol: float = 1e-8,
+              level_shift: float = 0.1, follow: str = "update", max_cycle: int = 300, diis_space: int = 12,
+              diis_start: int = 2, freeze_f: bool = False, verbose: bool = False):
+    """(mol, ints, axial UHF result, ion result) of one LnO^q determinant."""
+    from pyscf import gto, scf
+    from .basis import axial_integrals
     from .scf import axial_uhf, embed_atomic_orbitals, minao_density
     ln_basis = _ln_basis(element, x)
     atom, ion = ion_orbitals(element, cfg, ln_basis, cholesky_tol)
@@ -159,12 +174,39 @@ def oxide_point(element: str, cfg: LnConfig, r: float, x: str = "D", methods=("c
     res = axial_uhf(ints, molecular_occupation(cfg), start, reference=ref, level_shift=level_shift,
                     follow=follow, max_cycle=max_cycle, diis_space=diis_space, diis_start=diis_start,
                     freeze_reference=freeze_f, verbose=verbose)
-    purity = f_purity(mol, ints, res, cfg)
-    point = OxidePoint(cfg, charge, r, res.e_tot, res.converged, res.s2, purity, {}, ion.e_tot,
-                       "frozen_f" if freeze_f else "free")
-    if methods and res.converged:
-        point.correlation = axial_cc(ints, res, mol.nelectron, valence_frozen_core_orbitals(mol), methods)
-    return point
+    return mol, ints, res, ion
+
+
+def lowest_omega_flip(cfg: LnConfig) -> bool:
+    """M_S = -S (alpha/beta exchanged) for the lowest Omega of a less than half-filled f
+    shell (Omega = Lambda - S), M_S = +S otherwise (Lambda + S; no first-order splitting
+    for f0, f7, f14)."""
+    return 0 < cfg.nf < 7
+
+
+def soc_increment(element: str, cfg: LnConfig, r: float, x: str = "D", *, freeze_f: bool = False,
+                  cholesky_tol: float = 1e-8, verbose: bool = False) -> dict:
+    """Delta_SO = E[X2C-1e 2c] - E[its scalar part] of the lowest Omega component, GHF and
+    GCCSD(T), from the axial UHF determinant of ``cfg`` (soc.py)."""
+    from openea_benchmark.adaptive.stage3_execution import valence_frozen_core_orbitals
+    from .soc import axial_ghf, ghf_cc, spinor_hcore, spinor_start
+    mol, ints, res, _ = oxide_scf(element, cfg, r, x, cholesky_tol=cholesky_tol, freeze_f=freeze_f)
+    if not res.converged:
+        return {"status": "SCF_NOT_CONVERGED"}
+    h2, hsf = spinor_hcore(mol, ints.transform)
+    n = hsf.shape[0]
+    hsf2 = np.block([[hsf, np.zeros((n, n))], [np.zeros((n, n)), hsf]])
+    start, _ = spinor_start(res, lowest_omega_flip(cfg))
+    nfz = 2 * valence_frozen_core_orbitals(mol)
+    out = {"status": "COMPLETED", "omega_twice": int(2 * cfg.m_l + (-1 if lowest_omega_flip(cfg) else 1) * cfg.spin)}
+    for label, h in (("sf", hsf2), ("so", h2)):
+        g = axial_ghf(ints, h, start, follow=list(range(start.shape[1])), level_shift=0.1, verbose=verbose)
+        if not g.converged:
+            return {"status": f"GHF_{label}_NOT_CONVERGED"}
+        c = ghf_cc(ints, h, g, nfz)
+        out[label] = {"hf": g.e_tot, "ccsd": g.e_tot + c["ccsd"], "ccsd(t)": g.e_tot + c["ccsd(t)"]}
+    out["delta_so_hartree"] = {k: out["so"][k] - out["sf"][k] for k in ("hf", "ccsd", "ccsd(t)")}
+    return out
 
 
 def _outer_s(atom, ion, spin: int) -> int:

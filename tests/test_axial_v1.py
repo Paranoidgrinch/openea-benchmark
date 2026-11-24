@@ -189,3 +189,35 @@ def test_ln_oxide_configurations_count_mirror_pairs_once():
     assert all(c.m_l >= 0 for c in f_configurations(3, 0))
     pro = [c for c in f_configurations(2, 1) if c.f_alpha == (3, 2)][0]
     assert molecular_occupation(pro) == {0: (15, 14), 1: (7, 7), -1: (7, 7), 2: (3, 2), -2: (2, 2), 3: (1, 0)}
+
+
+def test_two_component_hcore_is_real_and_conserves_omega():
+    from openea_benchmark.axial.soc import spinor_hcore
+    mol = gto.M(atom="Br 0 0 0; H 0 0 1.41", basis="cc-pvdz", verbose=0)
+    u, m = axial_ao_transform(mol)
+    h2, hsf = spinor_hcore(mol, u)          # raises if not real
+    n = len(m)
+    dm = m[:, None] - m[None, :]
+    assert np.abs(h2[:n, :n][dm != 0]).max() < 1e-8 and np.abs(h2[n:, n:][dm != 0]).max() < 1e-8
+    ab = h2[:n, n:]
+    assert np.abs(ab[dm != -1]).max() < 1e-8 and np.abs(ab[dm == -1]).max() > 1e-3   # alpha m <-> beta m+1
+    assert np.allclose(hsf, 0.5 * (h2[:n, :n] + h2[n:, n:]))
+
+
+def test_spin_free_ghf_gccsd_t_equals_axial_uhf_ccsd_t():
+    """Omega-blocked GHF + GCCSD(T) with a spin-free hcore reproduces the axial UHF and its
+    CCpy CCSD(T) (dense and Cholesky integrals), for M_S = +S and the flipped M_S = -S."""
+    from openea_benchmark.axial.scf import axial_uhf
+    from openea_benchmark.axial.soc import axial_ghf, ghf_cc, spinor_start
+    mol = gto.M(atom="N 0 0 0; H 0 0 1.037", basis="cc-pvdz", spin=2, symmetry="C1", verbose=0)
+    for tol in (None, 1e-8):
+        ints = axial_integrals(mol, cholesky_tol=tol)
+        u = axial_uhf(ints, X3, minao_density(mol, ints))
+        ref = axial_cc(ints, u, mol.nelectron, 1)
+        n = ints.hcore.shape[0]
+        h = np.block([[ints.hcore, np.zeros((n, n))], [np.zeros((n, n)), ints.hcore]])
+        for flip in (False, True):
+            g = axial_ghf(ints, h, spinor_start(u, flip)[0])
+            assert g.converged and g.e_tot == pytest.approx(u.e_tot, abs=1e-8)
+            c = ghf_cc(ints, h, g, 2)
+            assert c["ccsd(t)"] == pytest.approx(ref["ccsd(t)"], abs=2e-8)
