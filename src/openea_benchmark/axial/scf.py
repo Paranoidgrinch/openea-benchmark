@@ -261,14 +261,24 @@ def axial_uhf(ints: AxialIntegrals, occupation: dict[int, tuple[int, int]], dm0,
                 nk = occ.get(k, (0, 0))[spin]
                 order = list(range(len(idx)))
                 if ref is not None and ref.get(k) is not None and ref[k][spin].shape[1]:
-                    ov = ((ref[k][spin].T @ s_k @ c_k) ** 2).sum(axis=0)
-                    pick = list(np.argsort(-ov, kind="stable")[:nk])
+                    # the followed orbitals by overlap, one each; the rest of the block by energy
+                    target = ref[k][spin]
+                    pick = []
+                    for t in range(min(target.shape[1], nk)):
+                        ov = (target[:, t] @ s_k @ c_k) ** 2
+                        ov[pick] = -1.0
+                        pick.append(int(np.argmax(ov)))
+                    pick += [j for j in order if j not in pick][:nk - len(pick)]
                     order = sorted(pick) + [j for j in order if j not in pick]
                 e_k, c_k = e_k[order], c_k[:, order]
                 w = len(idx)
                 coeff[idx, col:col + w], energy[col:col + w], ms[col:col + w] = c_k, e_k, m_of[idx[0]]
                 occs[col:col + nk] = 1.0
-                new_ref.setdefault(k, [None, None])[spin] = c_k[:, :nk]
+                followed = 0 if ref is None or ref.get(k) is None else min(ref[k][spin].shape[1], nk)
+                if followed:   # keep following the same orbitals (in pick order among the occupied)
+                    new_ref.setdefault(k, [None, None])[spin] = c_k[:, [order.index(j) for j in pick[:followed]]]
+                else:
+                    new_ref.setdefault(k, [None, None])[spin] = c_k[:, :0]
                 col += w
             out.append((coeff, energy, ms, occs))
         return out, {k: tuple(v) for k, v in new_ref.items()}
@@ -334,3 +344,44 @@ def atomic_occupation(closed: dict[int, int], open_alpha: dict[int, list[int]] |
                 a, b = occ.get((l, m), (0, 0))
                 occ[(l, m)] = (a + 1, b) if spin == 0 else (a, b + 1)
     return occ
+
+
+def embed_atomic_orbitals(mol, ints: AxialIntegrals, atom_index: int, atom_mol, atom_result: AxialUHFResult,
+                          select) -> tuple[tuple[np.ndarray, np.ndarray], dict]:
+    """Molecular start from one atom's converged (l, m)-blocked UHF (``atom_mol``, same basis).
+
+    The atom's axial AOs are the molecule's axial AOs of that atom (the transform is per shell),
+    so its orbitals embed by zero padding.  Returns the atom's density (alpha, beta) in the
+    molecular axial basis and the MOM reference {m: (C_alpha, C_beta)} of the orbitals chosen
+    by ``select(spin, j, m, l_weights) -> bool`` (e.g. the open 4f and 6s)."""
+    offs = mol.aoslice_by_atom()[atom_index]
+    lo, hi = int(offs[2]), int(offs[3])
+    if hi - lo != atom_mol.nao_nr():
+        raise ValueError("atom basis differs from the molecule's basis on that atom")
+    n = ints.hcore.shape[0]
+    lval = np.concatenate([[atom_mol.bas_angular(ib)] * (2 * atom_mol.bas_angular(ib) + 1)
+                           * atom_mol.bas_nctr(ib) for ib in range(atom_mol.nbas)])
+    s_at = atom_mol.intor("int1e_ovlp")
+    dms, ref = [], {}
+    for spin in (0, 1):
+        c_at = atom_result.mo_coeff[spin][:, :atom_result.nocc[spin]]
+        c = np.zeros((n, c_at.shape[1]))
+        c[lo:hi] = c_at
+        dms.append(c @ c.T)
+    for spin in (0, 1):
+        for j in range(atom_result.nocc[spin]):
+            c_j = atom_result.mo_coeff[spin][:, j]
+            m = int(atom_result.mo_m[spin][j])
+            # Mulliken l weights in the atom's (real-valued axial) basis: overlap is the same
+            weights = {l: float(np.sum((c_j * (ints_ovlp_block(ints, lo, hi) @ c_j))[lval == l])) for l in set(lval)}
+            if select(spin, j, m, weights):
+                idx = np.flatnonzero(ints.m == m)
+                full = np.zeros(n)
+                full[lo:hi] = c_j
+                entry = ref.setdefault(m, [np.zeros((len(idx), 0)), np.zeros((len(idx), 0))])
+                entry[spin] = np.hstack([entry[spin], full[idx][:, None]])
+    return (dms[0], dms[1]), {m: tuple(v) for m, v in ref.items()}
+
+
+def ints_ovlp_block(ints: AxialIntegrals, lo: int, hi: int) -> np.ndarray:
+    return ints.ovlp[lo:hi, lo:hi]

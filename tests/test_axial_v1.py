@@ -116,3 +116,20 @@ def test_atomic_lm_blocks_keep_l_pure_orbitals():
     assert res.s2 == pytest.approx(ref.spin_square()[0], abs=1e-6)   # UHF core spin polarization
     with pytest.raises(ValueError):
         atomic_blocks(nh(), ints)
+
+
+def test_embedded_atomic_start_reaches_the_molecular_solution():
+    # NH X3Sigma- from the l-pure N atom (4S): the open 2p m = +-1 orbitals are followed
+    from openea_benchmark.axial.scf import atomic_blocks, atomic_occupation, axial_uhf, embed_atomic_orbitals
+    mol = nh()
+    ints = axial_integrals(mol)
+    n_atom = gto.M(atom="N 0 0 0", basis="aug-cc-pvdz", spin=3, verbose=0)
+    ia = axial_integrals(n_atom)
+    atom = axial_uhf(ia, atomic_occupation({0: 2}, {1: [1, 0, -1]}), minao_density(n_atom, ia),
+                     block_of_ao=atomic_blocks(n_atom, ia))
+    dm, ref = embed_atomic_orbitals(mol, ints, 0, n_atom, atom,
+                                    lambda spin, j, m, w: spin == 0 and m != 0 and w.get(1, 0) > 0.5)
+    assert {m: v[0].shape[1] for m, v in ref.items()} == {1: 1, -1: 1}
+    res = axial_uhf(ints, X3, dm, reference=ref)
+    plain = axial_uhf(ints, X3, minao_density(mol, ints))
+    assert res.converged and res.e_tot == pytest.approx(plain.e_tot, abs=1e-8)
