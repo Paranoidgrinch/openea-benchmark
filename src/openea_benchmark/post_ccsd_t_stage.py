@@ -75,9 +75,11 @@ TRIPLES_BASELINE = "SEMICANONICAL_UHF_FROM_ROHF"
 SEMICANONICAL_CONV_TOL_NORMT = 1.0e-6
 # CCSD is invariant under the semicanonical rotations, so CCpy and PySCF agree on it up to the
 # frozen-core definition: Stage 3 freezes the lowest semicanonical orbital(s) of each spin, CCpy
-# the ROHF core (CH, OH, NH- aug-cc-pVDZ: 4-6 microhartree).  A larger difference means another
-# reference or correlation space.
-CCSD_INVARIANCE_TOLERANCE_HARTREE = 1.0e-4
+# the ROHF core (CH, OH, NH- aug-cc-pVDZ: 4-6 microhartree; NH X3Sigma- 21).  Another reference
+# or correlation space differs by many millihartree; the guard leaves room for larger cores.
+# Measured on CH/CH- (axial CCpy, every term semicanonical as reference): Delta_T(EA) off by
+# -0.19 / -0.24 meV (aDZ / aTZ) with this baseline, +0.64 / +0.95 meV with CCpy's ROHF (T).
+CCSD_INVARIANCE_TOLERANCE_HARTREE = 1.0e-3
 # File tokens; "CCSD(T)" without parentheses would collide with "CCSDT".
 METHOD_TOKEN = {"CCSD(T)": "CCSD_pT", "CCSDT": "CCSDT", "CCSDTQ": "CCSDTQ"}
 

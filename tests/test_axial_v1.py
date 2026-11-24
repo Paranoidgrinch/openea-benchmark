@@ -82,3 +82,37 @@ def test_one_delta_is_a_single_axial_determinant():
     assert corr["ccsd(t)"] < corr["ccsd"] < 0.0
     with pytest.raises(ValueError):
         axial_rohf(ints, {0: (3, 3), 1: (0, 1)}, minao_density(mol, ints))   # not high spin
+
+
+def test_axial_uhf_and_its_cc_equal_pyscf_uhf():
+    from openea_benchmark.axial.scf import axial_uhf
+    mol = nh()
+    ref = scf.UHF(gto.M(atom=mol.atom, basis=mol.basis, spin=2, symmetry="C2v", verbose=0))
+    ref.irrep_nelec = {"A1": (3, 3), "B1": (1, 0), "B2": (1, 0)}
+    ref.conv_tol = 1e-11
+    ref.kernel()
+    pc = cc.UCCSD(ref)
+    pc.frozen, pc.conv_tol, pc.conv_tol_normt = 1, 1e-10, 1e-8
+    pc.kernel()
+    ints = axial_integrals(mol)
+    res = axial_uhf(ints, X3, minao_density(mol, ints))
+    assert res.converged and res.e_tot == pytest.approx(ref.e_tot, abs=1e-9)
+    corr = axial_cc(ints, res, mol.nelectron, 1, ("ccsd(t)",))
+    assert corr["ccsd"] == pytest.approx(pc.e_corr, abs=1e-8)
+    assert corr["ccsd(t)"] == pytest.approx(pc.e_corr + pc.ccsd_t(), abs=1e-8)
+
+
+def test_atomic_lm_blocks_keep_l_pure_orbitals():
+    from openea_benchmark.axial.scf import atomic_blocks, atomic_occupation, axial_uhf
+    mol = gto.M(atom="N 0 0 0", basis="aug-cc-pvtz", spin=3, verbose=0)    # 4S: p m = 1, 0, -1 (alpha)
+    ref = scf.UHF(mol)
+    ref.conv_tol = 1e-11
+    ref.kernel()
+    ints = axial_integrals(mol)
+    occ = atomic_occupation({0: 2}, {1: [1, 0, -1]})
+    assert occ[(0, 0)] == (2, 2) and occ[(1, 1)] == (1, 0)
+    res = axial_uhf(ints, occ, minao_density(mol, ints), block_of_ao=atomic_blocks(mol, ints))
+    assert res.converged and res.e_tot == pytest.approx(ref.e_tot, abs=1e-8)
+    assert res.s2 == pytest.approx(ref.spin_square()[0], abs=1e-6)   # UHF core spin polarization
+    with pytest.raises(ValueError):
+        atomic_blocks(nh(), ints)

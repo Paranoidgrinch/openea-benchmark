@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-IMAG_TOLERANCE = 1.0e-10
+IMAG_TOLERANCE = 1.0e-12  # relative to the largest integral
 
 
 @dataclass
@@ -89,9 +89,10 @@ def axial_integrals(mol, hcore_ao: np.ndarray | None = None) -> AxialIntegrals:
     eri = mol.intor("int2e", aosym="s1")
     for axis, conj in ((0, True), (1, False), (2, True), (3, False)):
         eri = _transform_index(eri, u, axis, conj)
-    imag = max(np.abs(h_ax.imag).max(), np.abs(s_ax.imag).max(), np.abs(eri.imag).max())
-    if imag > IMAG_TOLERANCE:
-        raise ValueError(f"axial integrals not real (max |Im| {imag:.1e})")
+    for name, x in (("hcore", h_ax), ("overlap", s_ax), ("eri", eri)):
+        imag, scale = np.abs(x.imag).max(), max(1.0, np.abs(x.real).max())
+        if imag > IMAG_TOLERANCE * scale:   # relative: heavy-atom core integrals reach 1e3-1e4 Eh
+            raise ValueError(f"axial {name} not real (max |Im| {imag:.1e} at max |Re| {scale:.1e})")
     return AxialIntegrals(m=m, transform=u, hcore=np.ascontiguousarray(h_ax.real),
                           ovlp=np.ascontiguousarray(s_ax.real), eri=np.ascontiguousarray(eri.real),
                           energy_nuc=float(mol.energy_nuc()))

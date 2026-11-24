@@ -16,7 +16,7 @@ import io
 import numpy as np
 
 from .basis import AxialIntegrals
-from .scf import AxialSCFResult
+from .scf import AxialSCFResult, AxialUHFResult
 
 
 def _mo_eri(eri, ca, cb=None):
@@ -54,11 +54,17 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
     from ccpy.models.integrals import Integral, build_f, build_v
     from ccpy.models.system import System, UHFSystem
 
-    n = scf.mo_coeff.shape[1]
-    na, nb = int(np.sum(scf.mo_occ > 0)), int(np.sum(scf.mo_occ > 1))
+    uhf = isinstance(scf, AxialUHFResult)
+    if uhf:
+        n = scf.mo_coeff[0].shape[1]
+        na, nb = scf.nocc
+    else:
+        n = scf.mo_coeff.shape[1]
+        na, nb = int(np.sum(scf.mo_occ > 0)), int(np.sum(scf.mo_occ > 1))
     mult = na - nb + 1
-    if semicanonical:
-        ca, cb, ea, eb = semicanonical_orbitals(scf)
+    if uhf or semicanonical:
+        # UHF: canonical per spin (occupied first); ROHF: semicanonical UHF form
+        ca, cb, ea, eb = (*scf.mo_coeff, *scf.mo_energy) if uhf else semicanonical_orbitals(scf)
         h = {"a": ca.T @ ints.hcore @ ca, "b": cb.T @ ints.hcore @ cb}
         aa = _mo_eri(ints.eri, ca).transpose(0, 2, 1, 3)
         bb = _mo_eri(ints.eri, cb).transpose(0, 2, 1, 3)
