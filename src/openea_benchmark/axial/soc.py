@@ -185,14 +185,19 @@ def axial_ghf(ints: AxialIntegrals, h2: np.ndarray, start: np.ndarray, follow: l
 
 
 def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: int,
-           with_t: bool = True, conv_tol: float = 1e-9) -> dict:
+           with_t: bool = True, conv_tol: float = 1e-9, virtual_cutoff: float | None = None) -> dict:
     """GCCSD(T) on the GHF spinors (``nfrozen`` lowest spinors frozen), PySCF GCCSD with
-    integrals built from the axial (Cholesky or dense) integrals."""
+    integrals built from the axial (Cholesky or dense) integrals.  ``virtual_cutoff``
+    (Eh): virtual spinors above it are dropped (tight primitives of an uncontracted basis;
+    the same cutoff in both Hamiltonians of an increment)."""
     from pyscf import cc, gto, scf
     from pyscf.cc import gccsd, gccsd_t
     from .cholesky import AxialCholesky, mo_block
     n = ints.hcore.shape[0]
-    c = ghf.mo_coeff[:, nfrozen:]
+    nkeep = ghf.mo_coeff.shape[1]
+    if virtual_cutoff is not None:
+        nkeep = ghf.nocc + int(np.sum(ghf.mo_energy[ghf.nocc:] < virtual_cutoff))
+    c = ghf.mo_coeff[:, nfrozen:nkeep]
     nocc = ghf.nocc - nfrozen
     nmo = c.shape[1]
     f_ao, _ = ghf_fock(ints, h2, ghf.mo_coeff[:, :ghf.nocc] @ ghf.mo_coeff[:, :ghf.nocc].T)
@@ -241,7 +246,7 @@ def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: i
     eris.ovvv = block(o, v, v, v)
     eris.vvvv = block(v, v, v, v)
     mycc.kernel(eris=eris)
-    out = {"ccsd": float(mycc.e_corr), "converged": bool(mycc.converged)}
+    out = {"ccsd": float(mycc.e_corr), "converged": bool(mycc.converged), "n_virtual": nmo - nocc}
     if with_t:
         out["ccsd(t)"] = out["ccsd"] + float(gccsd_t.kernel(mycc, eris, mycc.t1, mycc.t2, verbose=0))
     return out

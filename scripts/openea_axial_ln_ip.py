@@ -11,6 +11,8 @@ high-spin term of the cation, so the spin-free IP compares with the measured IP 
 second-order and intermediate-coupling effects.  NIST values are validation only.
 
 Usage: openea_axial_ln_ip.py OUTDIR ELEMENT X [methods] [threads]
+X = D, T, Q (e-aug-cc-pVXZ-X2C, [Kr]4d10 frozen) or CVD, CVT (e-aug-cc-pwCVXZ-X2C, the
+valence frozen core and [Ar]3d10 frozen: Delta_CV = 4s4p4d correlation).
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ H2EV = 27.211386245988
 F_COUNT = {"Pr": 3, "Nd": 4, "Sm": 6, "Eu": 7, "Tb": 9, "Dy": 10, "Ho": 11, "Er": 12, "Tm": 13, "Yb": 14}
 NIST_IP_EV = {"Pr": 5.4702, "Nd": 5.5250, "Sm": 5.6437, "Eu": 5.6704, "Tb": 5.8638, "Dy": 5.9391,
               "Ho": 6.0215, "Er": 6.1077, "Tm": 6.1843, "Yb": 6.2542}   # NIST ASD, validation only
+CV_FROZEN = 14   # [Ar]3d10: 4s 4p 4d correlated in the core-valence step
 CHOLESKY_TOL = 1.0e-8   # Pr aDZ SCF: 1e-6 -> 2.7e-5 Eh, 1e-8 -> 3e-7 Eh absolute error
 
 
@@ -58,14 +61,19 @@ def point(el: str, x: str, cation: bool, methods: tuple, cache: Path) -> dict:
     from openea_benchmark.axial.scf import atomic_blocks, axial_uhf, minao_density
     from openea_benchmark.heavy_elements import basis_name_for, resolve_named_basis
     occ, spin = occupation(F_COUNT[el], cation)
-    basis = resolve_named_basis(basis_name_for(el, f"aug-cc-pV{x}Z"), el)
+    cv = x.startswith("CV")
+    family = f"aug-cc-pwCV{x[2:]}Z" if cv else f"aug-cc-pV{x}Z"
+    basis = resolve_named_basis(basis_name_for(el, family), el)
     mol = gto.M(atom=f"{el} 0 0 0", basis={el: basis.shells}, charge=int(cation), spin=spin, verbose=0)
     t0 = time.time()
     ints = axial_integrals(mol, hcore_ao=scf.ROHF(mol).sfx2c1e().get_hcore(), cholesky_tol=CHOLESKY_TOL)
     res = axial_uhf(ints, occ, minao_density(mol, ints), block_of_ao=atomic_blocks(mol, ints))
     nfrozen = valence_frozen_core_orbitals(mol)
     corr = axial_cc(ints, res, mol.nelectron, nfrozen, methods)
-    out = {"element": el, "basis": basis_name_for(el, f"aug-cc-pV{x}Z"), "nao": mol.nao_nr(),
+    if cv:
+        corr = {**{f"val_{k}": v for k, v in corr.items()},
+                **{f"cv_{k}": v for k, v in axial_cc(ints, res, mol.nelectron, CV_FROZEN, methods).items()}}
+    out = {"element": el, "basis": basis_name_for(el, family), "nao": mol.nao_nr(),
            "charge": int(cation), "spin": spin, "scf": res.e_tot, "scf_converged": res.converged,
            "s2": res.s2, "nfrozen": nfrozen, "cholesky_tol": CHOLESKY_TOL, "cholesky_vectors": ints.eri.nvec,
            "correlation": corr, "seconds": time.time() - t0}
@@ -90,6 +98,8 @@ def main(argv):
               f"<S2> {p['s2']:.3f} nvec {p['cholesky_vectors']} " +
               " ".join(f"{k} {v:.8f}" for k, v in e[cation].items()) + f" ({p['seconds']:.0f} s)", flush=True)
     ip = {k: (e[True][k] - e[False][k]) * H2EV for k in e[False]}
+    if x.startswith("CV"):
+        ip.update({f"delta_cv_{m}": ip[f"cv_{m}"] - ip[f"val_{m}"] for m in methods})
     print(f"{el} {x}Z IP (eV): " + " ".join(f"{k} {v:.4f}" for k, v in ip.items()) +
           f"   NIST {NIST_IP_EV[el]:.4f} (validation only)", flush=True)
     (outdir / f"{el}_{x}Z_{'+'.join(methods)}.json").write_text(json.dumps({"ip_ev": ip, "nist_ev": NIST_IP_EV[el]},

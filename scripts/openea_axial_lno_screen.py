@@ -45,21 +45,27 @@ def main(argv):
         if cfg.label() in done:
             continue
         t = time.time()
-        p = oxide_point(el, cfg, r, x, max_cycle=150)
+        p = oxide_point(el, cfg, r, x, max_cycle=80)
         if not p.converged or min(p.f_purity.values(), default=1.0) < 0.8:
             # free SCF slid 4f -> 5d or did not converge: f orbitals of the free ion, frozen
             p = oxide_point(el, cfg, r, x, freeze_f=True)
         rec = {"label": cfg.label(), "config": asdict(cfg), "charge": p.charge, "r": r, "basis": x,
                "scf_model": p.scf_model,
                "e_scf": p.e_scf, "converged": p.converged, "s2": p.s2, "f_purity": p.f_purity,
-               "correlation": p.correlation, "ion_e_scf": p.ion_e_scf, "seconds": time.time() - t}
+               "correlation": p.correlation, "cc_status": p.cc_status, "cc_diagnostics": p.cc_diagnostics,
+               "ion_e_scf": p.ion_e_scf, "seconds": time.time() - t}
         with path.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
-        print(f"{el} q={charge} {cfg.label():40s} {p.scf_model} conv {p.converged} <S2> {p.s2:.3f} f {p.f_purity} "
+        print(f"{el} q={charge} {cfg.label():40s} {p.scf_model} conv {p.converged} cc {p.cc_status[:13]} "
+              f"t1 {p.cc_diagnostics.get('ccsd(t)', {}).get('max_t1', float('nan')):.3f} <S2> {p.s2:.3f} f {p.f_purity} "
               f"SCF {p.e_scf:.8f} CCSD(T) {p.e_scf + p.correlation.get('ccsd(t)', float('nan')):.8f} "
               f"({time.time() - t:.0f} s)", flush=True)
     recs = [json.loads(line) for line in path.read_text().splitlines()]
-    ok = [q for q in recs if q["converged"] and "ccsd(t)" in q["correlation"]]
+    # records without cc_status come from before the convergence check: not trusted
+    ok = [q for q in recs if q["converged"] and q.get("cc_status") == "CONVERGED" and "ccsd(t)" in q["correlation"]]
+    for q in recs:
+        if q not in ok:
+            print(f"  excluded: {q['label']} (SCF converged {q['converged']}, CC {q.get('cc_status', 'UNCHECKED')})")
     e = {q["label"]: q["e_scf"] + q["correlation"]["ccsd(t)"] for q in ok}
     e0 = min(e.values())
     es = {q["label"]: q["e_scf"] for q in ok}
