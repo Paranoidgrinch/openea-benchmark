@@ -574,7 +574,7 @@ def run_benchmark_acquisition(
         from .spin_orbit_stage import run_spin_orbit_stage
         spin_orbit = run_spin_orbit_stage(
             electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            output_dir=output_dir / "spin_orbit")
+            output_dir=output_dir / "spin_orbit", competitors=(cbs or {}).get("competitor_ranking_at_cbs") or ())
 
     post_ccsd_t = None
     if electronic_ea is not None and settings.post_cc_stage and not unbound:
@@ -740,8 +740,10 @@ def run_benchmark_acquisition(
 
 
 def anion_unbound_at_cbs(cbs: Mapping[str, Any] | None) -> bool:
-    """CBS showed the anion unbound (whole interval below zero): the final verdict is UNBOUND
-    unless an open anion MR-only candidate could bind it; later correction layers are not read."""
+    """CBS showed the anion decisively unbound (continuum anion, or the whole interval below
+    -``unbound_decision_margin_ev``): the final verdict is UNBOUND unless an open anion MR-only
+    candidate could bind it; later correction layers are not read.  A negative CBS interval
+    closer to zero is not decisive (NEED_MORE_EVIDENCE_BINDING): the layers run."""
     return bool(cbs) and cbs.get("status") == "ANION_UNBOUND_AT_CBS"
 
 

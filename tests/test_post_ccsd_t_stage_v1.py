@@ -291,3 +291,60 @@ def test_stalled_reference_scf_is_rescued_by_second_order_scf():
     assert rescue(mf, None, 1e-10) is True and mf.converged and mf.e_tot == -1.0 and mf.mo_coeff == "C"
     mf = FakeSCF(False, False)
     assert rescue(mf, None, 1e-10) is False and not mf.converged
+
+
+def _ch_point(tmp_path, monkeypatch, spin_2s):
+    """One CCSD(T) point of CH (2Pi radical or CH+ closed shell) in cc-pVDZ through _run_point."""
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.core_valence_runner import CoreValenceStateSpec
+    from openea_benchmark.post_ccsd_t_stage import _run_point, occupation_ordered
+
+    charge = 0 if spin_2s else 1
+    mol = gto.M(atom="C 0 0 0; H 0 0 1.12", basis="cc-pvdz", charge=charge, spin=spin_2s, symmetry="C1", verbose=0)
+    mf = (scf.ROHF(mol) if spin_2s else scf.RHF(mol))
+    mf.conv_tol = 1e-10
+    mf.kernel()
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_c1", lambda spec, basis, policy: occupation_ordered(mf))
+    spec = CoreValenceStateSpec(role="neutral", system="CH", atoms=("C", "H"), charge=charge, spin_2s=spin_2s,
+                                state_id="X", r_angstrom=1.12, source_root_id="X", source_checkpoint_path="none",
+                                state_identity_validated=True)
+    rec = _run_point(spec, "cc-pvdz", "CCSD(T)", PostCCSDTStagePolicy(), str(tmp_path / f"p{spin_2s}.json"))
+    return mf, rec
+
+
+def test_open_shell_ccsd_t_baseline_is_the_semicanonical_one_of_the_cbs_layer(tmp_path, monkeypatch):
+    # CBS (Stage 3) and the post-CC baseline must contain the same (T): CCSDT - CCSD(T) then
+    # removes exactly it.  CCpy's ROHF (T) differs from the semicanonical one by ~6 microhartree here.
+    from pyscf import cc
+    mf, rec = _ch_point(tmp_path, monkeypatch, 1)
+    assert rec["status"] == "COMPLETED" and rec["triples_baseline"] == "SEMICANONICAL_UHF_FROM_ROHF"
+    umf = mf.to_uhf()
+    umf.mo_energy, umf.mo_coeff = umf.canonicalize(umf.mo_coeff, umf.mo_occ)
+    ref = cc.CCSD(umf)
+    ref.frozen, ref.conv_tol, ref.conv_tol_normt = 1, 1e-10, 1e-8
+    ref.kernel()
+    stage3_total = mf.e_tot + ref.e_corr + ref.ccsd_t()
+    assert rec["total_hartree"] == pytest.approx(stage3_total, abs=1e-7)
+    assert abs(rec["total_hartree"] - (mf.e_tot + rec["ccpy_ccsd_t_correlation_hartree"])) > 1e-6
+    assert abs(rec["ccsd_invariance_difference_hartree"]) < post_ccsd_t_stage.CCSD_INVARIANCE_TOLERANCE_HARTREE
+
+
+def test_closed_shell_ccsd_t_points_keep_their_cache_signature(tmp_path, monkeypatch):
+    from openea_benchmark.adaptive.core_valence_runner import CoreValenceStateSpec
+    from openea_benchmark.post_ccsd_t_stage import _point_signature
+    _, rec = _ch_point(tmp_path, monkeypatch, 0)
+    assert rec["status"] == "COMPLETED" and "triples_baseline" not in rec
+    base = dict(role="neutral", system="CH", atoms=("C", "H"), charge=0, state_id="X", r_angstrom=1.12,
+                source_root_id="X", source_checkpoint_path="none", state_identity_validated=True)
+    closed, open_ = CoreValenceStateSpec(spin_2s=0, **base), CoreValenceStateSpec(spin_2s=1, **base)
+    policy = PostCCSDTStagePolicy()
+    # the open-shell CCSD(T) signature changed (old CCpy-(T) points are recomputed), CCSDT did not
+    assert "triples_baseline" not in str(_point_signature(closed, "cc-pvdz", "CCSD(T)", policy))
+    import hashlib, json
+    from dataclasses import asdict
+    legacy = lambda spec, method: hashlib.sha256(json.dumps(
+        {"state": asdict(spec), "basis": "cc-pvdz", "method": method, "policy": asdict(policy)},
+        sort_keys=True, default=str).encode()).hexdigest()
+    assert _point_signature(closed, "cc-pvdz", "CCSD(T)", policy) == legacy(closed, "CCSD(T)")
+    assert _point_signature(open_, "cc-pvdz", "CCSDT", policy) == legacy(open_, "CCSDT")
+    assert _point_signature(open_, "cc-pvdz", "CCSD(T)", policy) != legacy(open_, "CCSD(T)")

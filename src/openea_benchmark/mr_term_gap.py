@@ -297,6 +297,10 @@ def ground_state_offsets(gap_stage: Mapping[str, Any] | None) -> dict:
     return offsets
 
 
+# Assembly statuses that come from the EA_0 interval itself (``vibrational_stage.binding_status``).
+SIGN_DECIDED_STATUSES = ("CLEARED", "ANION_UNBOUND", "NEED_MORE_EVIDENCE_BINDING_UNDETERMINED")
+
+
 def apply_mr_term_gaps(adiabatic: Mapping[str, Any] | None, gap_stage: Mapping[str, Any] | None) -> dict | None:
     """EA0 with the ground state of each charge chosen among SR and MR states.
 
@@ -304,6 +308,7 @@ def apply_mr_term_gaps(adiabatic: Mapping[str, Any] | None, gap_stage: Mapping[s
     MR state raises it.  Unchanged (no extra width) when no MR state can be lower."""
     if adiabatic is None or adiabatic.get("ea0_ev") is None:
         return None if adiabatic is None else dict(adiabatic)
+    from .vibrational_stage import binding_status
     off = ground_state_offsets(gap_stage)
     n, a = off["neutral"], off["anion"]
     out = dict(adiabatic)
@@ -326,7 +331,8 @@ def apply_mr_term_gaps(adiabatic: Mapping[str, Any] | None, gap_stage: Mapping[s
                ea0_sr_states_ev=adiabatic["ea0_ev"])
     if blocking:
         out.update(status="NEED_MORE_EVIDENCE_MR_STATE_SPIN_ORBIT", mr_blocking=blocking)
-    elif out.get("status") == "CLEARED" and lower <= 0.0:
-        out.update(status="NEED_MORE_EVIDENCE_BINDING_UNDETERMINED" if upper >= 0.0 else "ANION_UNBOUND",
-                   binding="UNDETERMINED" if upper >= 0.0 else "UNBOUND")
+    elif out.get("status") in SIGN_DECIDED_STATUSES:
+        # the sign was decided by the SR interval: decide it again on the shifted one
+        binding, status = binding_status(lower, upper, out.get("anion_vibrational_binding"))
+        out.update(status=status, binding=binding)
     return out

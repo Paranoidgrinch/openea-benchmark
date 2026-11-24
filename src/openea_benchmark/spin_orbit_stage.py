@@ -30,6 +30,13 @@ Calibration against measured splittings (not used in the computation): OH
 pilot value covering ClO: 30 % of |Delta_SO| per state, combined linearly.
 
 Delta_EA_SO = Delta_SO(neutral) - Delta_SO(anion)  (EA = E_neutral - E_anion).
+
+Competitor states (2026-11-24): the other states of each charge that the CBS layer
+re-ranked (``competitor_ranking_at_cbs``) get the same first-order shift
+(``competitor_states``), so the adiabatic assembly can compare spin-orbit levels, not
+spin-free energies (NiO-: 2Pi competitor 0.135 eV above the selected state at CBS).
+Beyond Kr the multistate SO-XMS-CASPT2 treatment of the selected state already couples
+the low states of its spin blocks; no separate competitor shift is computed there.
 """
 from __future__ import annotations
 
@@ -233,7 +240,8 @@ def state_spin_orbit_shift(*, atoms, r_angstrom, charge, symmetry_label, irrep_n
 
 
 def run_spin_orbit_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Any], output_dir: Path,
-                         policy: SpinOrbitStagePolicy = SpinOrbitStagePolicy()) -> dict:
+                         policy: SpinOrbitStagePolicy = SpinOrbitStagePolicy(),
+                         competitors: Sequence[Mapping[str, Any]] = ()) -> dict:
     output_dir = Path(output_dir)
     record: dict[str, Any] = {"stage": "SPIN_ORBIT_FIRST_ORDER", "policy": asdict(policy),
                               "is_production_ea": False, "validation_metadata_used_in_computation": False}
@@ -271,6 +279,27 @@ def run_spin_orbit_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence
                 symmetry_label=req.symmetry_label, irrep_nelec=req.irrep_nelec, workdir=output_dir / role,
                 policy=policy)
     record["states"] = states
+    if record["stage"] == "SPIN_ORBIT_FIRST_ORDER":
+        comp_states = {}
+        for comp in competitors:
+            if comp.get("gap_cbs_ev") is None:
+                continue
+            role, job_id = comp["role"], comp["job_id"]
+            req = template.get(job_id)
+            cand = next((c for c in electronic_ea["candidates"][role] if c["job_id"] == job_id), None)
+            if req is None or cand is None:
+                comp_states[job_id] = {"role": role, "status": "NO_REQUEST_TEMPLATE", "delta_so_ev": None}
+                continue
+            print(f"[SOC] {req.system} {role} competitor {req.symmetry_label}", flush=True)
+            from .point_pool import core_slot
+            with core_slot():
+                comp_states[job_id] = {"role": role, **state_spin_orbit_shift(
+                    atoms=req.atoms, r_angstrom=float(cand["r_central_angstrom"]), charge=req.charge,
+                    symmetry_label=req.symmetry_label, irrep_nelec=req.irrep_nelec,
+                    workdir=output_dir / "competitors" / job_id, policy=policy)}
+        record["competitor_states"] = comp_states
+    else:
+        record["competitor_spin_orbit"] = "IN_MULTISTATE_TREATMENT_OF_THE_SELECTED_STATES"
     if any(s.get("delta_so_ev") is None for s in states.values()):
         return done(status="SOC_UNRESOLVED", delta_ea_so_ev=None, bound_ev=None)
     return done(status="CLEARED",

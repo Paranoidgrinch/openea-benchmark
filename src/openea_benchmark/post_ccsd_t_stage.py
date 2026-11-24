@@ -9,6 +9,16 @@ the ROHF/RHF reference is first converged in the state's symmetry block (point
 group, irrep occupation, seeded from its high-level checkpoint), then carried
 into C1 (CCpy needs C1 metadata) and must keep its energy there.
 
+(T) definition (2026-11-24): the CBS energy it corrects is semicanonical ROHF-UCCSD(T)
+(PySCF, Stage 3).  CCpy's ROHF (T) is evaluated in the non-semicanonical ROHF orbitals
+and differs from it (CH 0.5 meV, CuO 1.2 meV on the EA).  CCSD, CCSDT and CCSDTQ are
+invariant under the occupied-occupied / virtual-virtual rotations of the
+semicanonicalization, (T) is not; the open-shell CCSD(T) baseline is therefore the
+semicanonical one (``semicanonical_ccsd_t``), so Delta_T removes exactly the (T) the CBS
+energy contains.  CCpy's CCSD of the same point checks that both codes correlate the
+same space (``CCSD_INVARIANCE_TOLERANCE_HARTREE``).  The composite is then CCSDT(Q) in the
+small basis plus a basis-set increment evaluated entirely in the Stage-3 CCSD(T) definition.
+
 Central values: Delta_T(aug-cc-pVTZ), bound |Delta_T(TZ) - Delta_T(DZ)| (only the
 aDZ value when aTZ CCSDT exceeds the memory limit: bound 50 % of it);
 Delta_Q(first affordable of aug-cc-pVDZ, cc-pVDZ), bound 50 % of |Delta_Q| (pilot; DZ quadruples are basis-
@@ -60,6 +70,14 @@ from .point_pool import run_parallel
 from .scratch import sweep_dead
 
 METHODS = ("CCSD(T)", "CCSDT", "CCSDTQ")
+# Open-shell CCSD(T) baseline: semicanonical ROHF-UCCSD(T) as in the CBS layer (module docstring).
+TRIPLES_BASELINE = "SEMICANONICAL_UHF_FROM_ROHF"
+SEMICANONICAL_CONV_TOL_NORMT = 1.0e-6
+# CCSD is invariant under the semicanonical rotations, so CCpy and PySCF agree on it up to the
+# frozen-core definition: Stage 3 freezes the lowest semicanonical orbital(s) of each spin, CCpy
+# the ROHF core (CH, OH, NH- aug-cc-pVDZ: 4-6 microhartree).  A larger difference means another
+# reference or correlation space.
+CCSD_INVARIANCE_TOLERANCE_HARTREE = 1.0e-4
 # File tokens; "CCSD(T)" without parentheses would collide with "CCSDT".
 METHOD_TOKEN = {"CCSD(T)": "CCSD_pT", "CCSDT": "CCSDT", "CCSDTQ": "CCSDTQ"}
 
@@ -321,9 +339,41 @@ def cc_scratch_dir():
 
 
 def _point_signature(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy) -> str:
-    return sha256(json.dumps({"state": {k: v for k, v in asdict(spec).items()}, "basis": basis,
-                              "method": method, "policy": asdict(policy)}, sort_keys=True, default=str)
-                  .encode()).hexdigest()
+    payload = {"state": {k: v for k, v in asdict(spec).items()}, "basis": basis, "method": method,
+               "policy": asdict(policy)}
+    if method == "CCSD(T)" and spec.spin_2s > 0:
+        payload["triples_baseline"] = TRIPLES_BASELINE  # CCpy-(T) points before 2026-11-24 are recomputed
+    return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def semicanonical_ccsd_t(mf: Any, nfrozen: int, policy: PostCCSDTStagePolicy) -> tuple[float, float]:
+    """(CCSD, CCSD(T)) correlation energy of a ROHF reference exactly as Stage 3 / CBS compute
+    it: UHF form of the ROHF determinant, alpha and beta occupied and virtual blocks
+    canonicalized, UCCSD(T) with the lowest ``nfrozen`` orbitals of each spin frozen."""
+    from pyscf import cc
+    from .adaptive.stage3_execution import _ccsd_eris_within_memory
+    umf = mf.to_uhf()
+    umf.mo_energy, umf.mo_coeff = umf.canonicalize(umf.mo_coeff, umf.mo_occ)
+    mycc = cc.CCSD(umf)
+    mycc.frozen = nfrozen
+    mycc.conv_tol, mycc.conv_tol_normt = policy.cc_convergence, SEMICANONICAL_CONV_TOL_NORMT
+    mycc.max_cycle, mycc.max_memory = policy.cc_max_iterations, policy.max_memory_mb
+    eris = _ccsd_eris_within_memory(mycc)
+    mycc.kernel(eris=eris)
+    if not mycc.converged:
+        raise RuntimeError("semicanonical UCCSD not converged")
+    return float(mycc.e_corr), float(mycc.e_corr + mycc.ccsd_t(eris=eris))
+
+
+def ccsd_t_point_memory_mb(spec: Any, basis: str, policy: PostCCSDTStagePolicy) -> float:
+    """Memory of a CCSD(T) point: CCpy's estimate, and for an open shell the PySCF UCCSD
+    integrals of the semicanonical baseline (out of core above ``policy.max_memory_mb``)."""
+    need = cc_storage_mb(spec, basis, "CCSD(T)")
+    if spec.spin_2s > 0:
+        from .adaptive.stage3_execution import uccsd_incore_memory_mb
+        mol = _mol(spec, basis, False, 1000)
+        need = max(need, min(uccsd_incore_memory_mb(mol.nao_nr(), mol.nao_nr()), float(policy.max_memory_mb)))
+    return need
 
 
 def cached_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy, path: str) -> dict | None:
@@ -364,9 +414,17 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
         with cc_scratch_dir() if out_of_core else nullcontext():
             if method == "CCSD(T)":
                 driver.run_cc(method="ccsd")
-                corr = float(driver.correlation_energy)
+                ccsd_corr = float(driver.correlation_energy)
                 driver.run_ccp3(method="ccsd(t)")
-                corr += float(driver.deltap3[0]["A"])
+                corr = ccsd_corr + float(driver.deltap3[0]["A"])
+                if spec.spin_2s > 0:
+                    sc_ccsd, sc_total = semicanonical_ccsd_t(mf, nfz, policy)
+                    record.update(triples_baseline=TRIPLES_BASELINE, ccpy_ccsd_t_correlation_hartree=corr,
+                                  ccsd_invariance_difference_hartree=sc_ccsd - ccsd_corr)
+                    if abs(sc_ccsd - ccsd_corr) > CCSD_INVARIANCE_TOLERANCE_HARTREE:
+                        raise RuntimeError(f"CCpy and PySCF CCSD differ by {sc_ccsd - ccsd_corr:.2e} Eh "
+                                           "(correlation space or reference not the same)")
+                    corr = sc_total
             else:
                 driver.run_cc(method=method.lower())
                 corr = float(driver.correlation_energy)
@@ -469,7 +527,8 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
             # A completed point only reads its file: no memory reservation, so it does
             # not wait behind a running large point for the one-at-a-time slot.
             done_already = cached_point(spec, basis, method, policy, path) is not None
-            reserves.append(0.0 if done_already else cc_storage_mb(spec, basis, method))
+            reserves.append(0.0 if done_already else ccsd_t_point_memory_mb(spec, basis, policy)
+                            if method == "CCSD(T)" else cc_storage_mb(spec, basis, method))
             groups.append(None if done_already else cc_limit_group(spec, basis, method))
             print(f"[POST-CC] {spec.system} {role} {basis} {method}{' (cached)' if done_already else ''}",
                   flush=True)

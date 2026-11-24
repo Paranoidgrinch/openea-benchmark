@@ -43,7 +43,7 @@ def test_missing_zpe_bound_fails_closed():
 def test_zpe_can_move_a_near_threshold_ea_across_zero():
     rec = assemble_adiabatic_ea(cbs=cbs(ea_cbs_ev=0.01, ea_cbs_lower_ev=0.009, ea_cbs_upper_ev=0.011),
                                 nuclear=nuclear(delta_zpe_ev=-0.02, delta_zpe_half_width_ev=0.002))
-    assert rec["binding"] == "UNBOUND" and rec["status"] == "NEED_MORE_EVIDENCE_BINDING_UNBOUND"
+    assert rec["binding"] == "UNBOUND" and rec["status"] == "ANION_UNBOUND"
 
 
 def test_vibrationally_unbound_anion_is_not_bound():

@@ -57,6 +57,7 @@ from .adaptive.stage3_loop import Stage3LoopRetrySettings
 from .adaptive.stage3_refinement import Stage3RefinementSettings
 from .attachment.asymptote import DissociationChannel
 from .reference_branches import FOLLOWED_SUFFIX, SEED_SUFFIX
+from .final_resolver import cbs_open_only_in_sign
 from .electronic_ea_stage import (
     ElectronicEAStagePolicy, _save_json, anion_dissociation_channels, cached_point_runner, scan_atomic_fragments,
 )
@@ -533,6 +534,72 @@ def _run_vibrational_stage(*, electronic_ea: Mapping[str, Any], loops: Mapping[s
     return record
 
 
+def binding_status(lower: float, upper: float, anion_vibrational_binding: str | None) -> tuple[str, str]:
+    """(binding, assembly status) of a complete EA_0 interval.  Bound needs a bound
+    vibrational level of the anion; below zero it is unbound whatever its curve."""
+    if upper < 0.0:
+        return "UNBOUND", "ANION_UNBOUND"
+    if lower > 0.0 and anion_vibrational_binding == "BOUND":
+        return "BOUND", "CLEARED"
+    return "UNDETERMINED", "NEED_MORE_EVIDENCE_BINDING_UNDETERMINED"
+
+
+# Largest first-order spin-orbit lowering |A| Lambda S of a diatomic state up to Kr (the
+# first-order route): Br-centred 2Pi states have |A| ~ 1000-2700 cm-1 at Lambda S = 1/2,
+# 3d-metal states stay below ~0.1 eV.  Used only for a competitor whose shift is missing.
+FIRST_ORDER_SO_BOUND_EV = 0.25
+
+
+def competitor_state_offsets(cbs: Mapping[str, Any], spin_orbit: Mapping[str, Any] | None,
+                             transfer_ev: float) -> dict:
+    """Per charge: interval of E0(ground state) - E0(selected state) over the CBS competitors.
+
+    The CBS layer ranks the other states of each charge by their frozen-core CBS energy
+    only (``competitor_ranking_at_cbs``, gap > 0 required there).  The selected state
+    then receives CV, SR, SO, post-CCSD(T) and ZPE, the competitor does not: its gap
+    gap0 = gap_CBS + Delta_SO(competitor) - Delta_SO(selected) carries the size of those
+    corrections (``transfer_ev``, as for MR states in ``mr_term_gap``) plus both spin-orbit
+    bounds.  A competitor whose gap0 interval reaches below zero can be the ground state:
+    the offset min(0, gap0) widens the EA as in ``mr_term_gap.ground_state_offsets``.
+    ``spin_orbit`` is the CLEARED spin-orbit record or None (then no SO terms).  Beyond Kr
+    the multistate SO treatment of the selected state already couples its low states.
+    """
+    offsets = {role: {"lower_ev": 0.0, "upper_ev": 0.0, "central_ev": 0.0, "possible": [], "ground_state": None}
+               for role in ("neutral", "anion")}
+    gaps, blocking = [], []
+    first_order = bool(spin_orbit) and spin_orbit.get("stage") == "SPIN_ORBIT_FIRST_ORDER"
+    for comp in cbs.get("competitor_ranking_at_cbs") or ():
+        gap = comp.get("gap_cbs_ev")
+        if gap is None:
+            continue
+        role, job_id = comp["role"], comp["job_id"]
+        so_c = so_s = b_c = b_s = 0.0
+        if first_order:
+            sel = (spin_orbit.get("states") or {}).get(role) or {}
+            other = (spin_orbit.get("competitor_states") or {}).get(job_id) or {}
+            so_s, b_s = float(sel.get("delta_so_ev") or 0.0), float(sel.get("bound_ev") or 0.0)
+            if other.get("delta_so_ev") is None:
+                # unknown first-order shift: only a competitor that could not be lower even
+                # with the largest first-order shift may be passed over
+                if gap - FIRST_ORDER_SO_BOUND_EV - so_s - transfer_ev - b_s < 0.0:
+                    blocking.append(f"{role} competitor {job_id} ({gap:.3f} eV above at CBS): spin-orbit not "
+                                    f"computed ({other.get('status', 'NOT_COMPUTED')})")
+                continue
+            so_c, b_c = float(other["delta_so_ev"]), float(other.get("bound_ev") or 0.0)
+        gap0, half = gap + so_c - so_s, transfer_ev + b_c + b_s
+        gaps.append({"role": role, "job_id": job_id, "gap_cbs_ev": gap, "gap0_ev": gap0, "half_width_ev": half,
+                     "delta_so_competitor_ev": so_c, "delta_so_selected_ev": so_s,
+                     "can_be_ground_state": gap0 - half < 0.0})
+        if gap0 - half < 0.0:
+            o = offsets[role]
+            o["lower_ev"] = min(o["lower_ev"], gap0 - half)
+            o["upper_ev"] = min(o["upper_ev"], gap0 + half)
+            if gap0 < o["central_ev"]:
+                o["central_ev"], o["ground_state"] = gap0, job_id
+            o["possible"].append(job_id)
+    return {"offsets": offsets, "gaps": gaps, "blocking": blocking, "transfer_ev": transfer_ev}
+
+
 def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str, Any] | None,
                           core_valence: Mapping[str, Any] | None = None,
                           spin_orbit: Mapping[str, Any] | None = None,
@@ -543,6 +610,11 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
 
     Each correction enters only when its layer CLEARED; otherwise the status is
     recorded and the correction is left out (``includes_*`` false).
+
+    When the CBS layer left only the sign open (``final_resolver.cbs_open_only_in_sign``:
+    interval containing zero, or negative within the correction margin), the EA_0 interval
+    decides it: CLEARED above zero, ANION_UNBOUND below zero, else
+    NEED_MORE_EVIDENCE_BINDING_UNDETERMINED.  Any other CBS status is passed through.
     """
     cv_ok = bool(core_valence) and core_valence.get("status") == "CORE_VALENCE_CLEARED"
     so_ok = bool(spin_orbit) and spin_orbit.get("status") == "CLEARED"
@@ -589,16 +661,25 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     ea0 = float(cbs["ea_cbs_ev"]) + shift
     lower = float(cbs["ea_cbs_lower_ev"]) + shift - width
     upper = float(cbs["ea_cbs_upper_ev"]) + shift + width
-    binding = "BOUND" if lower > 0.0 else ("UNBOUND" if upper < 0.0 else "UNDETERMINED")
+    # Competitor states of either charge close enough to swap with the selected one once the
+    # corrections the competitor did not receive are counted (EA = E0(neutral) - E0(anion)).
+    competitors = competitor_state_offsets(cbs, spin_orbit if so_ok else None,
+                                           abs(dz) + abs(dcv) + abs(dsr) + abs(dpc))
+    off_n, off_a = competitors["offsets"]["neutral"], competitors["offsets"]["anion"]
+    ea0_selected = ea0
+    ea0 += off_n["central_ev"] - off_a["central_ev"]
+    lower += off_n["lower_ev"] - off_a["upper_ev"]
+    upper += off_n["upper_ev"] - off_a["lower_ev"]
+    record["cbs_competitors"] = competitors
+    if off_n["possible"] or off_a["possible"]:
+        record["ea0_selected_states_ev"] = ea0_selected
     vib = nuclear.get("anion_vibrational_binding")
-    if binding == "BOUND" and vib != "BOUND":
-        binding = "UNDETERMINED"
-    if cbs.get("status") not in ("CLEARED",):
+    binding, status = binding_status(lower, upper, vib)
+    if not cbs_open_only_in_sign(cbs):
         status = cbs.get("status")
-    elif binding != "BOUND":
-        status = f"NEED_MORE_EVIDENCE_BINDING_{binding}"
-    else:
-        status = "CLEARED"
+    elif competitors["blocking"]:
+        status = "NEED_MORE_EVIDENCE_COMPETITOR_SPIN_ORBIT"
+        record["reason"] = "; ".join(competitors["blocking"])
     return done(status=status, binding=binding, ea0_ev=ea0, ea0_lower_ev=lower, ea0_upper_ev=upper,
                 ea_cbs_electronic_ev=cbs["ea_cbs_ev"], delta_zpe_ev=dz, delta_zpe_half_width_ev=hw,
                 delta_cv_ev=dcv if cv_ok else None, delta_cv_bound_ev=cvb if cv_ok else None,

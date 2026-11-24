@@ -90,7 +90,7 @@ def test_stage_runs_only_open_candidates(tmp_path):
     assert cleared["status"] == "CLEARED" and cleared["gaps"] == []
 
 
-ADIABATIC = {"status": "CLEARED", "binding": "BOUND", "ea0_ev": 1.0, "ea0_lower_ev": 0.95, "ea0_upper_ev": 1.05,
+ADIABATIC = {"status": "CLEARED", "binding": "BOUND", "anion_vibrational_binding": "BOUND", "ea0_ev": 1.0, "ea0_lower_ev": 0.95, "ea0_upper_ev": 1.05,
              "delta_cv_ev": 0.01, "delta_sr_ev": -0.005, "delta_post_ccsd_t_ev": 0.02}
 
 

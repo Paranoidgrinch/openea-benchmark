@@ -3,8 +3,10 @@
 Collects the layer results and issues exactly one outcome:
 
 * ``EA``         - adiabatic EA_0 with an interval, when every layer cleared;
-* ``UNBOUND``    - the anion is not bound at the CBS level (continuum rule) and
-                   no state competition is open;
+* ``UNBOUND``    - the anion is not bound: either decisively at the CBS level (continuum
+                   rule, or the CBS interval below -``unbound_decision_margin_ev``, so no
+                   later correction can bind it), or by the complete EA_0 interval (all
+                   corrections included) lying below zero; no state competition is open;
 * ``NO_BOUND_MOLECULE`` - neither charge has a bound state: every scouted curve of
                    both charges (with the dispersion rescan) falls to its fragments;
 * ``NO_BOUND_NEUTRAL`` - the neutral has no bound state but the anion has one: there
@@ -52,22 +54,31 @@ CORRECTION_FLAGS = (("includes_core_valence", "core_valence_status", "core-valen
 
 # Largest half-width of a zero-straddling EA_0 interval that is still reported as a result.
 NEAR_ZERO_MAX_HALF_WIDTH_EV = 0.1
+# CBS binding reason of a negative CBS interval that later corrections could still move
+# above zero (``cbs_stage.CBSStagePolicy.unbound_decision_margin_ev``): the layers run and
+# the EA_0 interval decides the sign.
+CBS_NEGATIVE_WITHIN_CORRECTION_MARGIN = "CBS_INTERVAL_NEGATIVE_WITHIN_CORRECTION_MARGIN"
 # Reasons the binding is open that are a matter of precision only (a diffuse-basis
 # continuum warning is not: the anion description itself is in question there).
-_PRECISION_ONLY_CBS_REASONS = ("CBS_INTERVAL_CONTAINS_ZERO",)
+_PRECISION_ONLY_CBS_REASONS = ("CBS_INTERVAL_CONTAINS_ZERO", CBS_NEGATIVE_WITHIN_CORRECTION_MARGIN)
+
+
+def cbs_open_only_in_sign(cbs: Mapping[str, Any] | None) -> bool:
+    """The CBS layer cleared everything except the sign of the EA: the EA_0 interval (all
+    corrections included) then decides BOUND / UNBOUND / near zero."""
+    if not cbs:
+        return False
+    if cbs.get("status") == "CLEARED":
+        return True
+    if cbs.get("status") != "NEED_MORE_EVIDENCE_BINDING" or cbs.get("binding_reason") not in _PRECISION_ONLY_CBS_REASONS:
+        return False
+    # the binding status hides the CBS-model status: it must have cleared on its own
+    return cbs.get("cbs_model_status") == "CLEARED" or bool(cbs.get("cbs_model_bound_above_target_in_interval"))
 
 
 def _near_zero(cbs: Mapping[str, Any] | None, adiabatic: Mapping[str, Any] | None) -> bool:
     """The only open item is the sign of an otherwise complete, narrow EA_0 interval."""
-    if not cbs or not adiabatic:
-        return False
-    if cbs.get("status") == "NEED_MORE_EVIDENCE_BINDING":
-        if cbs.get("binding_reason") not in _PRECISION_ONLY_CBS_REASONS:
-            return False
-        # the binding status hides the CBS-model status: it must have cleared on its own
-        if cbs.get("cbs_model_status") != "CLEARED" and not cbs.get("cbs_model_bound_above_target_in_interval"):
-            return False
-    elif cbs.get("status") != "CLEARED":
+    if not adiabatic or not cbs_open_only_in_sign(cbs):
         return False
     if adiabatic.get("binding") != "UNDETERMINED" or adiabatic.get("anion_vibrational_binding") != "BOUND":
         return False
@@ -129,21 +140,29 @@ def resolve_final_verdict(*, electronic_ea: Mapping[str, Any] | None, cbs: Mappi
     if cbs and cbs.get("multireference_exceeded"):
         warnings.append("multireference screening above thresholds: " + ", ".join(cbs["multireference_exceeded"]))
 
-    cbs_status = None if not cbs else cbs.get("status")
-    if cbs_status == "ANION_UNBOUND_AT_CBS":
+    def unbound(reason: str | None, note: str) -> dict:
         # A lower neutral state only lowers E0(neutral) and makes the EA more negative:
         # open MR-only candidates of the neutral cannot change UNBOUND, anion ones can.
         if mr_blocking and not any(str(label).startswith("q=-1") for label in mr_only_labels):
             blocking.remove(mr_blocking)
             warnings.append(mr_blocking + " (neutral only: cannot bind the anion)")
         if blocking:
-            return {"outcome": "UNRESOLVED", "blocking": blocking, "warnings": warnings,
-                    "note": "anion unbound at CBS, but the state assignment is open"}
-        return {"outcome": "UNBOUND", "blocking": [], "warnings": warnings,
-                "reason": (cbs or {}).get("binding_reason")}
-    near_zero = _near_zero(cbs, adiabatic)
-    if cbs_status != "CLEARED" and not near_zero:
+            return {"outcome": "UNRESOLVED", "blocking": blocking, "warnings": warnings, "note": note}
+        return {"outcome": "UNBOUND", "blocking": [], "warnings": warnings, "reason": reason}
+
+    cbs_status = None if not cbs else cbs.get("status")
+    if cbs_status == "ANION_UNBOUND_AT_CBS":
+        return unbound((cbs or {}).get("binding_reason"), "anion unbound at CBS, but the state assignment is open")
+    cbs_sign_only = cbs_open_only_in_sign(cbs)
+    if not cbs_sign_only:
         blocking.append(f"CBS layer: {cbs_status}")
+    elif (adiabatic and adiabatic.get("status") == "ANION_UNBOUND" and adiabatic.get("ea0_upper_ev") is not None
+          and all(adiabatic.get(flag) for flag, _, _ in CORRECTION_FLAGS)):
+        # the complete EA_0 interval lies below zero (corrections included, e.g. a CBS EA just
+        # above zero that the zero-point term pulls below it)
+        return unbound(f"EA0_INTERVAL_NEGATIVE: EA_0 <= {adiabatic['ea0_upper_ev']:.3f} eV with all corrections",
+                       "EA_0 interval below zero, but the state assignment is open")
+    near_zero = _near_zero(cbs, adiabatic)
 
     if near_zero:
         if adiabatic.get("post_ccsd_t_triples_computed") is False:

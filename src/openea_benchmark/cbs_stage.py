@@ -30,7 +30,9 @@ Further fail-closed rules on the result (Patch 40):
   sensitivity) decides BOUND / UNBOUND / UNDETERMINED; a diffuse correction above
   ``diffuse_continuum_threshold_ev`` means the anion energy follows the basis into
   the continuum, so a negative EA is reported as UNBOUND and a positive one as
-  undetermined -- never as a CBS number;
+  undetermined -- never as a CBS number; a negative interval without that is UNBOUND
+  only below -``unbound_decision_margin_ev`` (closer to zero the corrections could
+  still bind the anion: UNDETERMINED, the EA_0 interval decides);
 * multireference screening: one CCSD point per selected state at its def2-TZVPPD
   equilibrium gives T1, D1 (closed shell) and max |T2|.  Values above the
   literature screening thresholds are reported as a warning, not as a status: on the
@@ -60,6 +62,7 @@ from .attachment.component_resolved_cbs import (
     resolve_cbs,
 )
 from .electronic_ea_stage import HARTREE_TO_EV, _save_json, cached_point_runner, same_resolved_state
+from .final_resolver import CBS_NEGATIVE_WITHIN_CORRECTION_MARGIN
 from .point_pool import run_parallel
 
 MR_DIAGNOSTIC_LABEL = "MRDIAG_STAGE3_BASIS"
@@ -97,6 +100,12 @@ class CBSStagePolicy:
     # An anion whose energy still moves this much from aug- to d-aug-cc-pV5Z is not
     # converging to a bound state: the basis is discretizing the detachment continuum.
     diffuse_continuum_threshold_ev: float = 0.05
+    # A negative CBS interval is decisive (UNBOUND, later layers skipped) only this far below
+    # zero; closer to zero the later corrections could still bind the anion, so they run and
+    # the EA_0 interval decides.  Bound on their positive sum: Delta ZPE <= ZPE(neutral)
+    # <= 0.27 eV (H2, the stiffest diatomic), CV + SR + SO + post-CCSD(T) <= 0.19 eV on
+    # verify_v1 (PbO), up to ~0.4 eV first-order SO for 6p atoms (small ZPE there).
+    unbound_decision_margin_ev: float = 0.5
     # Multireference screening (CCSD amplitudes at the def2-TZVPPD equilibrium;
     # common literature values, reported as warnings only -- see module docstring).
     t1_closed_shell_threshold: float = 0.02
@@ -238,14 +247,19 @@ def _mr_diagnostic(res: Mapping[str, Any], policy: CBSStagePolicy) -> dict:
 
 
 def _binding(ea: float, lower: float, upper: float, diffuse_ev: float, policy: CBSStagePolicy) -> tuple[str, str]:
+    """Binding at the CBS level.  UNBOUND here is final (the later layers are skipped):
+    a continuum-discretizing anion has no localized state for corrections to act on, and a
+    localized one must lie below -``unbound_decision_margin_ev``."""
     if abs(diffuse_ev) > policy.diffuse_continuum_threshold_ev:
         if upper < 0.0:
             return "UNBOUND", "NEGATIVE_EA_AND_DIFFUSE_SENSITIVE_ANION_CONTINUUM_DISCRETIZATION"
         return "UNDETERMINED", "DIFFUSE_CORRECTION_ABOVE_CONTINUUM_THRESHOLD"
     if lower > 0.0:
         return "BOUND", "CBS_INTERVAL_POSITIVE"
-    if upper < 0.0:
+    if upper < -policy.unbound_decision_margin_ev:
         return "UNBOUND", "CBS_INTERVAL_NEGATIVE"
+    if upper < 0.0:
+        return "UNDETERMINED", CBS_NEGATIVE_WITHIN_CORRECTION_MARGIN
     return "UNDETERMINED", "CBS_INTERVAL_CONTAINS_ZERO"
 
 
