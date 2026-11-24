@@ -191,7 +191,7 @@ def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: i
     (Eh): virtual spinors above it are dropped (tight primitives of an uncontracted basis;
     the same cutoff in both Hamiltonians of an increment)."""
     from pyscf import cc, gto, scf
-    from pyscf.cc import gccsd, gccsd_t
+    from pyscf.cc import gccsd
     from .cholesky import AxialCholesky, mo_block
     n = ints.hcore.shape[0]
     nkeep = ghf.mo_coeff.shape[1]
@@ -246,7 +246,41 @@ def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: i
     eris.ovvv = block(o, v, v, v)
     eris.vvvv = block(v, v, v, v)
     mycc.kernel(eris=eris)
-    out = {"ccsd": float(mycc.e_corr), "converged": bool(mycc.converged), "n_virtual": nmo - nocc}
+    if not mycc.converged:
+        from .cc import CCNotConverged
+        raise CCNotConverged(f"GCCSD: no convergence (E_corr {mycc.e_corr:.6f})")
+    out = {"ccsd": float(mycc.e_corr), "converged": True, "n_virtual": nmo - nocc}
     if with_t:
-        out["ccsd(t)"] = out["ccsd"] + float(gccsd_t.kernel(mycc, eris, mycc.t1, mycc.t2, verbose=0))
+        out["ccsd(t)"] = out["ccsd"] + gccsd_t_energy(mycc.t1, mycc.t2, eris)
     return out
+
+
+def gccsd_t_energy(t1, t2, eris) -> float:
+    """Spin-orbital (T) over occupied triples i > j > k with BLAS over the virtuals (UO
+    pilot, fast_gccsd_t.py; equals pyscf.cc.gccsd_t, whose loops ran PrO aDZ for > 1 h on
+    two cores).  Real amplitudes and integrals; canonical diagonal Fock (eris.mo_energy)."""
+    from pyscf import lib
+    nocc, nvir = t1.shape
+    e = np.asarray(eris.mo_energy)
+    eo, ev = e[:nocc], e[nocc:]
+    ovvv_r = np.asarray(eris.ovvv).reshape(nocc, nvir, nvir * nvir)
+    ooov = np.asarray(eris.ooov)
+    oovv = np.asarray(eris.oovv)
+    eabc = lib.direct_sum("a+b+c->abc", ev, ev, ev)
+
+    def x(i, j, k):
+        a = (-t2[j, k] @ ovvv_r[i]).reshape(nvir, nvir, nvir)
+        return a - np.tensordot(ooov[j, k], t2[i], axes=(0, 0))
+
+    def pabc(y):
+        return y - y.transpose(1, 0, 2) - y.transpose(2, 1, 0)
+
+    et = 0.0
+    for i in range(nocc):
+        for j in range(i):
+            for k in range(j):
+                c = pabc(x(i, j, k) - x(j, i, k) - x(k, j, i))
+                d = pabc(np.multiply.outer(t1[i], oovv[j, k]) - np.multiply.outer(t1[j], oovv[i, k])
+                         - np.multiply.outer(t1[k], oovv[j, i]))
+                et += float(np.vdot(c, (c + d) / (eo[i] + eo[j] + eo[k] - eabc)))
+    return et / 6.0
