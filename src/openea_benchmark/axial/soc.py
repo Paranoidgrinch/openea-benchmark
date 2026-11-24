@@ -185,7 +185,8 @@ def axial_ghf(ints: AxialIntegrals, h2: np.ndarray, start: np.ndarray, follow: l
 
 
 def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: int,
-           with_t: bool = True, conv_tol: float = 1e-9, virtual_cutoff: float | None = None) -> dict:
+           with_t: bool = True, conv_tol: float = 1e-9, virtual_cutoff: float | None = None,
+           max_memory_gb: float = 120.0) -> dict:
     """GCCSD(T) on the GHF spinors (``nfrozen`` lowest spinors frozen), PySCF GCCSD with
     integrals built from the axial (Cholesky or dense) integrals.  ``virtual_cutoff``
     (Eh): virtual spinors above it are dropped (tight primitives of an uncontracted basis;
@@ -200,6 +201,10 @@ def ghf_cc(ints: AxialIntegrals, h2: np.ndarray, ghf: AxialGHFResult, nfrozen: i
     c = ghf.mo_coeff[:, nfrozen:nkeep]
     nocc = ghf.nocc - nfrozen
     nmo = c.shape[1]
+    need_gb = 8.0 * ((nmo - nocc) ** 4 + 2 * nocc * (nmo - nocc) ** 3) / 1e9
+    if need_gb > max_memory_gb:
+        raise MemoryError(f"GCCSD integrals need {need_gb:.0f} GB (> {max_memory_gb:.0f}): "
+                          f"{nmo - nocc} virtual spinors; lower virtual_cutoff")
     f_ao, _ = ghf_fock(ints, h2, ghf.mo_coeff[:, :ghf.nocc] @ ghf.mo_coeff[:, :ghf.nocc].T)
     fock = c.T @ f_ao @ c
     ca, cb = c[:n], c[n:]

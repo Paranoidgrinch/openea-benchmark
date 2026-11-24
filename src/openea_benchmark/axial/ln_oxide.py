@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 CLOSED_PER_M = {0: 14, 1: 7, -1: 7, 2: 2, -2: 2}   # Ln [Xe] + O2-
+CV_FROZEN_LN = 14                                     # [Ar]3d10 of Ln; O 1s correlated
 XE_CORE = 54
 Z = {"La": 57, "Ce": 58, "Pr": 59, "Nd": 60, "Pm": 61, "Sm": 62, "Eu": 63, "Gd": 64, "Tb": 65, "Dy": 66,
      "Ho": 67, "Er": 68, "Tm": 69, "Yb": 70, "Lu": 71}
@@ -104,10 +105,11 @@ class OxidePoint:
     cc_diagnostics: dict = field(default_factory=dict)
 
 
-def _ln_basis(element, x, uncontract: bool = False):
+def _ln_basis(element, x, uncontract: bool = False, cv: bool = False):
     from pyscf import gto
     from openea_benchmark.heavy_elements import basis_name_for, resolve_named_basis
-    shells = resolve_named_basis(basis_name_for(element, f"aug-cc-pV{x}Z"), element).shells
+    family = f"aug-cc-pwCV{x}Z" if cv else f"aug-cc-pV{x}Z"
+    shells = resolve_named_basis(basis_name_for(element, family), element).shells
     return gto.uncontract(shells) if uncontract else shells
 
 
@@ -133,7 +135,7 @@ def ion_orbitals(element: str, cfg: LnConfig, ln_basis, cholesky_tol=1e-8):
 def oxide_point(element: str, cfg: LnConfig, r: float, x: str = "D", methods=("ccsd(t)",),
                 cholesky_tol: float = 1e-8, level_shift: float = 0.1, follow: str = "update",
                 max_cycle: int = 300, diis_space: int = 12, diis_start: int = 2, freeze_f: bool = False,
-                verbose: bool = False) -> OxidePoint:
+                cv: bool = False, verbose: bool = False) -> OxidePoint:
     """SCF (+ CC) of one LnO^q determinant at bond length r (Angstrom).
 
     ``freeze_f``: the open 4f orbitals stay those of the free ion (``axial_uhf``
@@ -143,15 +145,19 @@ def oxide_point(element: str, cfg: LnConfig, r: float, x: str = "D", methods=("c
     from .cc import axial_cc
     mol, ints, res, ion = oxide_scf(element, cfg, r, x, cholesky_tol=cholesky_tol, level_shift=level_shift,
                                     follow=follow, max_cycle=max_cycle, diis_space=diis_space,
-                                    diis_start=diis_start, freeze_f=freeze_f, verbose=verbose)
+                                    diis_start=diis_start, freeze_f=freeze_f, cv=cv, verbose=verbose)
     purity = f_purity(mol, ints, res, cfg)
     point = OxidePoint(cfg, mol.charge, r, res.e_tot, res.converged, res.s2, purity, {}, ion.e_tot,
                        "frozen_f" if freeze_f else "free")
     if methods and res.converged:
         from .cc import CCNotConverged
         try:
-            point.correlation = axial_cc(ints, res, mol.nelectron, valence_frozen_core_orbitals(mol), methods,
-                                         diagnostics=point.cc_diagnostics)
+            nfz = valence_frozen_core_orbitals(mol)
+            point.correlation = axial_cc(ints, res, mol.nelectron, nfz, methods, diagnostics=point.cc_diagnostics)
+            if cv:   # Delta_CV: Ln [Ar]3d10 frozen (4s4p4d correlated), O 1s correlated
+                point.correlation = {**{f"val_{k}": v for k, v in point.correlation.items()},
+                                     **{f"cv_{k}": v for k, v in axial_cc(ints, res, mol.nelectron, CV_FROZEN_LN,
+                                                                          methods).items()}}
             point.cc_status = "CONVERGED"
         except CCNotConverged as exc:
             point.cc_status = f"NOT_CONVERGED: {exc}"
@@ -161,7 +167,7 @@ def oxide_point(element: str, cfg: LnConfig, r: float, x: str = "D", methods=("c
 def oxide_scf(element: str, cfg: LnConfig, r: float, x: str = "D", *, cholesky_tol: float = 1e-8,
               level_shift: float = 0.1, follow: str = "update", max_cycle: int = 300, diis_space: int = 12,
               diis_start: int = 2, freeze_f: bool = False, uncontract_ln: bool = False,
-              verbose: bool = False):
+              cv: bool = False, verbose: bool = False):
     """(mol, ints, axial UHF result, ion result) of one LnO^q determinant;
     ``uncontract_ln``: Ln basis decontracted (spin-orbit needs it: iodine EA increment
     -0.277 eV in contracted cc-pVTZ-DK, -0.310 eV in uncontracted dyall-v2z, -0.314
@@ -169,11 +175,12 @@ def oxide_scf(element: str, cfg: LnConfig, r: float, x: str = "D", *, cholesky_t
     from pyscf import gto, scf
     from .basis import axial_integrals
     from .scf import axial_uhf, embed_atomic_orbitals, minao_density
-    ln_basis = _ln_basis(element, x, uncontract_ln)
+    ln_basis = _ln_basis(element, x, uncontract_ln, cv)
+    o_basis = f"aug-cc-pwcv{x.lower()}z" if cv else f"aug-cc-pv{x.lower()}z"
     atom, ion = ion_orbitals(element, cfg, ln_basis, cholesky_tol)
     charge = ion_charge(element, cfg) - 2
-    mol = gto.M(atom=f"{element} 0 0 0; O 0 0 {r}", basis={element: ln_basis, "O": f"aug-cc-pv{x.lower()}z"},
-                charge=charge, spin=cfg.spin, verbose=0)
+    mol = gto.M(atom=f"{element} 0 0 0; O 0 0 {r}", basis={element: ln_basis, "O": o_basis},
+                charge=charge, spin=cfg.spin, verbose=0, max_memory=400000)
     ints = axial_integrals(mol, hcore_ao=scf.UHF(mol).sfx2c1e().get_hcore(), cholesky_tol=cholesky_tol)
     s_index = {spin: (_outer_s(atom, ion, spin) if (cfg.s_alpha, cfg.s_beta)[spin] else None) for spin in (0, 1)}
 
