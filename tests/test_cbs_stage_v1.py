@@ -3,7 +3,8 @@ from dataclasses import replace
 
 from openea_benchmark.adaptive.stage3_execution import PointExecutionStatus, Stage3ExecutionSettings, _empty_result
 from openea_benchmark.attachment.component_resolved_cbs import PRIMARY_EXPONENTS
-from openea_benchmark.cbs_stage import CBSStagePolicy, _even_tempered_extra_diffuse, element_basis, run_cbs_stage
+from openea_benchmark.cbs_stage import (CBSStagePolicy, PROJECTED_RETRY_SUFFIX, _even_tempered_extra_diffuse,
+                                        element_basis, run_cbs_stage)
 
 H = 1.0 / 27.211386245988
 CBS = {"N": (-75.0, -0.40, -0.010), "A": (-75.02, -0.45, -0.012), "C": (-74.99, -0.41, -0.011)}
@@ -18,8 +19,8 @@ def request(job, charge, two_s):
 def backend(req, settings):
     assert settings.frozen_core and settings.checkpoint_project
     assert req.reference_branch == "SEED_CONTINUOUS"
-    assert req.source_checkpoint_path.startswith("/hl/") or req.request_id.endswith(("__RESEED", "__PROJECTED_SOSCF"))
-    assert (settings.scf_start == "PROJECTED_SOSCF") == req.request_id.endswith("__PROJECTED_SOSCF")
+    assert req.source_checkpoint_path.startswith("/hl/") or req.request_id.endswith(("__RESEED", PROJECTED_RETRY_SUFFIX))
+    assert (settings.scf_start == "PROJECTED_SOSCF") == req.request_id.endswith(PROJECTED_RETRY_SUFFIX)
     daug_anion = req.job_id == "A" and req.basis.startswith("d-")
     if daug_anion and (FAIL_DAUG_FROM_TZ and "__" not in req.request_id.split("__CBS__")[1]
                        or DAUG_FAILS_ALWAYS):
@@ -296,6 +297,53 @@ def test_projected_soscf_starts_at_the_subset_basis_energy(tmp_path):
     _projected_soscf(mf, big, ref.chkfile, Stage3ExecutionSettings())
     assert mf.converged
     assert ref.e_tot - 1e-3 < mf.e_tot <= ref.e_tot + 1e-8
+
+
+def _projected_vs_direct(tmp_path, atoms, r, charge, spin, irrep_nelec, small_basis, big_basis):
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.stage3_execution import _projected_soscf
+
+    def molecule(basis):
+        return gto.M(atom=[(atoms[0], (0, 0, 0)), (atoms[1], (0, 0, r))], basis=basis, charge=charge, spin=spin,
+                     symmetry="C2v", verbose=0)
+
+    def solver(mol):
+        mf = scf.ROHF(mol) if spin else scf.RHF(mol)
+        mf.irrep_nelec = irrep_nelec
+        mf.conv_tol = 1e-11
+        return mf
+
+    ref = solver(molecule(small_basis))
+    ref.chkfile = str(tmp_path / "small.chk")
+    ref.kernel()
+    big = molecule(big_basis)
+    direct = solver(big)
+    direct.kernel()
+    projected = solver(big)
+    _projected_soscf(projected, big, ref.chkfile, Stage3ExecutionSettings(scf_conv_tol=1e-11))
+    return ref, direct, projected
+
+
+def test_projected_soscf_uses_the_whole_larger_basis(tmp_path):
+    # OH- (closed shell): d-aug-cc-pVDZ lowers the aug-cc-pVDZ SCF energy by ~0.1 mEh.  The
+    # projected start must reach the direct d-aug solution, not stay in the aug span (the
+    # verify_v1/v2 d-aug anion points were identical to aug to 1e-12 Eh).
+    ref, direct, projected = _projected_vs_direct(
+        tmp_path, ("O", "H"), 0.97, -1, 0, {"A1": 6, "B1": 2, "B2": 2}, "aug-cc-pvdz", "d-aug-cc-pvdz")
+    assert projected.converged and direct.converged
+    assert direct.e_tot < ref.e_tot - 1e-6
+    assert abs(projected.e_tot - direct.e_tot) < 1e-8
+    assert projected.mo_coeff.shape[1] == direct.mo_coeff.shape[1]
+
+
+def test_projected_soscf_open_shell_keeps_the_irrep_occupation(tmp_path):
+    # OH 2Pi (ROHF, pi_x^2 pi_y^1): same check for an open-shell symmetry block.
+    occ = {"A1": (3, 3), "B1": (1, 1), "B2": (1, 0)}
+    ref, direct, projected = _projected_vs_direct(
+        tmp_path, ("O", "H"), 0.97, 0, 1, occ, "aug-cc-pvdz", "d-aug-cc-pvdz")
+    assert projected.converged and direct.converged
+    assert abs(projected.e_tot - direct.e_tot) < 1e-8
+    assert projected.e_tot < ref.e_tot - 1e-7
 
 
 def test_equivalent_seed_does_not_invalidate_a_cached_fixed_geometry_point(tmp_path):

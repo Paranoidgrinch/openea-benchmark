@@ -525,21 +525,49 @@ def _scf_kernel_with_rescue(mf: Any, dm0: Any, settings: Stage3ExecutionSettings
     return True
 
 
+# Level shift (Eh, per electron of the occupation) that keeps the projected occupied orbitals
+# below every other orbital when the orbital set of the larger basis is completed.
+PROJECTED_OCCUPIED_SHIFT_HARTREE = 100.0
+
+
+def complete_projected_orbitals(mf: Any, mo: Any, mo_occ: Any) -> tuple[Any, Any]:
+    """Full orbital set of ``mf``'s basis whose occupied orbitals span the projected ones.
+
+    Orbitals projected from a smaller basis span only that basis.  Second-order SCF rotates
+    within the orbitals it is given, so started from them alone it never uses the functions
+    the larger basis adds: every d-aug point rescued this way (verify_v1/v2, 13 anions) came
+    out identical to its aug point to 1e-12 Eh, and the diffuse correction lost the anion
+    part.  Here the projected occupied orbitals are kept (pinned by a level shift per
+    occupation) and the virtual space is the rest of the new basis, taken from the Fock
+    matrix of the projected density; ``mf.eig`` keeps the orbitals symmetry-adapted and
+    ``mf.get_occ`` applies the irrep occupation of ``mf``."""
+    import numpy as np
+    occ = np.asarray(mo_occ, dtype=float)
+    s = mf.get_ovlp()
+    fock = np.asarray(mf.get_fock(dm=mf.make_rdm1(mo, occ)))
+    for value in sorted({float(x) for x in occ if x > 0.0}):
+        sc = s @ mo[:, occ == value]
+        fock = fock - PROJECTED_OCCUPIED_SHIFT_HARTREE * value * (sc @ sc.T)
+    energy, coeff = mf.eig(fock, s)
+    return coeff, mf.get_occ(energy, coeff)
+
+
 def _projected_soscf(mf: Any, mol: Any, checkpoint: str, settings: Stage3ExecutionSettings) -> None:
-    """Second-order SCF from the checkpoint's orbitals projected into ``mol``'s basis."""
+    """Second-order SCF from the checkpoint's orbitals projected into ``mol``'s basis, in the
+    complete orbital space of that basis (``complete_projected_orbitals``)."""
     from pyscf import scf
     from pyscf.lib import chkfile
     mol0 = chkfile.load_mol(checkpoint)
     seed = chkfile.load(checkpoint, "scf")
     mo = seed["mo_coeff"]
-    project = (scf.addons.project_mo_nr2nr if getattr(mo, "ndim", 2) == 2
-               else lambda m0, c, m1: [scf.addons.project_mo_nr2nr(m0, x, m1) for x in c])
-    mo = project(mol0, mo, mol)
+    if getattr(mo, "ndim", 2) != 2:  # Stage-3 references are RHF/ROHF
+        raise ValueError("projected SOSCF start needs a restricted (RHF/ROHF) seed checkpoint")
+    mo, occ = complete_projected_orbitals(mf, scf.addons.project_mo_nr2nr(mol0, mo, mol), seed["mo_occ"])
     soscf = mf.newton()
     soscf.max_cycle = settings.scf_max_cycle
     soscf.conv_tol = settings.scf_conv_tol
     soscf.conv_tol_grad = max(settings.scf_conv_tol_grad, SCF_RESCUE_CONV_TOL_GRAD)
-    soscf.kernel(mo, seed["mo_occ"])
+    soscf.kernel(mo, occ)
     mf.mo_coeff, mf.mo_occ, mf.mo_energy = soscf.mo_coeff, soscf.mo_occ, soscf.mo_energy
     mf.e_tot, mf.converged = soscf.e_tot, bool(soscf.converged)
 

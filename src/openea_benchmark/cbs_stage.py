@@ -67,6 +67,10 @@ CARDINAL_LETTER = {2: "d", 3: "t", 4: "q", 5: "5", 6: "6"}
 TIGHT_D_ELEMENTS = frozenset({"Al", "Si", "P", "S", "Cl", "Ar"})
 # Superset-basis variational check (d-aug vs aug at one cardinal): projection noise is ~1e-8 Eh.
 SUBSET_BASIS_SCF_TOLERANCE_HARTREE = 1.0e-6
+# Request-id suffix of the projected-orbital retry.  V2: complete orbital space of the larger
+# basis (``complete_projected_orbitals``); the V1 points (suffix without version) had stayed
+# in the smaller basis's span and must not be reused from the point cache.
+PROJECTED_RETRY_SUFFIX = "__PROJECTED_SOSCF_V2"
 # The CBS model-sensitivity bound is part of the interval half-width; above the 5 meV
 # target it widens the interval instead of blocking, up to this cap.
 CBS_MODEL_BOUND_CAP_EV = 0.02
@@ -272,7 +276,7 @@ def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]
             first = {"first_status": result.status.value, "first_scf_energy_hartree": result.scf_energy_hartree}
             if superset_ref is not None:
                 seed = superset_ref.high_level_checkpoint_path
-                retry = replace(req, request_id=req.request_id + "__PROJECTED_SOSCF", source_checkpoint_path=str(seed),
+                retry = replace(req, request_id=req.request_id + PROJECTED_RETRY_SUFFIX, source_checkpoint_path=str(seed),
                                 source_link_status="CBS_SUBSET_BASIS_ORBITALS_PROJECTED")
                 retry_settings = replace(settings, scf_start="PROJECTED_SOSCF",
                                          cc_max_cycle=2 * settings.cc_max_cycle)
