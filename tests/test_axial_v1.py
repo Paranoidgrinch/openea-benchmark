@@ -133,3 +133,31 @@ def test_embedded_atomic_start_reaches_the_molecular_solution():
     res = axial_uhf(ints, X3, dm, reference=ref)
     plain = axial_uhf(ints, X3, minao_density(mol, ints))
     assert res.converged and res.e_tot == pytest.approx(plain.e_tot, abs=1e-8)
+
+
+def test_cholesky_integrals_reproduce_dense_scf_and_cc():
+    """Cholesky vectors (R - I form, cholesky.py): SCF, J/K and CCSD(T)/CCSDT equal the dense
+    integrals to the decomposition threshold, for ROHF (semicanonical) and UHF references."""
+    from openea_benchmark.axial.cholesky import ao_cholesky
+    from openea_benchmark.axial.scf import axial_uhf, coulomb_exchange
+    mol = gto.M(atom="N 0 0 0; H 0 0 1.037", basis="cc-pvdz", spin=2, symmetry="C1", verbose=0)
+    b = ao_cholesky(mol, tol=1e-8)
+    assert np.abs(np.einsum("Ppq,Prs->pqrs", b, b) - mol.intor("int2e")).max() < 1e-8
+    dense, chol = axial_integrals(mol), axial_integrals(mol, cholesky_tol=1e-8)
+    assert np.abs(chol.eri.dense() - dense.eri).max() < 1e-8
+    d = np.random.default_rng(0).normal(size=dense.hcore.shape)
+    for x, y in zip(coulomb_exchange(dense.eri, d + d.T), coulomb_exchange(chol.eri, d + d.T)):
+        assert np.abs(x - y).max() < 1e-6
+    for occ in (X3, A1):
+        r_d = axial_rohf(dense, occ, minao_density(mol, dense))
+        r_c = axial_rohf(chol, occ, minao_density(mol, chol))
+        assert r_c.e_tot == pytest.approx(r_d.e_tot, abs=1e-7)
+        e_d = axial_cc(dense, r_d, mol.nelectron, 1, ("ccsd(t)", "ccsdt"))
+        e_c = axial_cc(chol, r_c, mol.nelectron, 1, ("ccsd(t)", "ccsdt"))
+        for k in e_d:
+            assert r_c.e_tot + e_c[k] == pytest.approx(r_d.e_tot + e_d[k], abs=1e-7)
+    u_d, u_c = (axial_uhf(i, X3, minao_density(mol, i)) for i in (dense, chol))
+    e_d, e_c = (axial_cc(i, u, mol.nelectron, 1) for i, u in ((dense, u_d), (chol, u_c)))
+    assert u_c.e_tot + e_c["ccsd(t)"] == pytest.approx(u_d.e_tot + e_d["ccsd(t)"], abs=1e-7)
+    with pytest.raises(NotImplementedError):
+        axial_cc(chol, r_c, mol.nelectron, 1, semicanonical=False)

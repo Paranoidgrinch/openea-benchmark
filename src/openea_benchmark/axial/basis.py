@@ -15,7 +15,8 @@ class AxialIntegrals:
     transform: np.ndarray    # AO -> axial (nao x nao complex, unitary in coefficient space)
     hcore: np.ndarray
     ovlp: np.ndarray
-    eri: np.ndarray          # chemists' (pq|rs) = int chi_p* chi_q (1/r12) chi_r* chi_s
+    eri: object              # chemists' (pq|rs) = int chi_p* chi_q (1/r12) chi_r* chi_s: dense
+                             # array or AxialCholesky (cholesky.py)
     energy_nuc: float
 
 
@@ -75,10 +76,11 @@ def _transform_index(a: np.ndarray, u: np.ndarray, axis: int, conj: bool) -> np.
     return np.moveaxis(out, -1, axis)
 
 
-def axial_integrals(mol, hcore_ao: np.ndarray | None = None) -> AxialIntegrals:
+def axial_integrals(mol, hcore_ao: np.ndarray | None = None, cholesky_tol: float | None = None) -> AxialIntegrals:
     """Integrals in the axial AO basis; their imaginary parts must vanish (checked).
 
-    ``hcore_ao`` lets a scalar-relativistic one-electron operator (sfX2C1e) in."""
+    ``hcore_ao`` lets a scalar-relativistic one-electron operator (sfX2C1e) in;
+    ``cholesky_tol``: two-electron integrals as Cholesky vectors (no N^4 array)."""
     u, m = axial_ao_transform(mol)
     if hcore_ao is None:
         h = mol.intor("int1e_kin") + mol.intor("int1e_nuc") + (mol.intor("ECPscalar") if mol.has_ecp() else 0.0)
@@ -86,13 +88,20 @@ def axial_integrals(mol, hcore_ao: np.ndarray | None = None) -> AxialIntegrals:
         h = hcore_ao
     h_ax = u.conj().T @ h @ u
     s_ax = u.conj().T @ mol.intor("int1e_ovlp") @ u
-    eri = mol.intor("int2e", aosym="s1")
-    for axis, conj in ((0, True), (1, False), (2, True), (3, False)):
-        eri = _transform_index(eri, u, axis, conj)
-    for name, x in (("hcore", h_ax), ("overlap", s_ax), ("eri", eri)):
+    if cholesky_tol is None:
+        eri = mol.intor("int2e", aosym="s1")
+        for axis, conj in ((0, True), (1, False), (2, True), (3, False)):
+            eri = _transform_index(eri, u, axis, conj)
+        checked = (("hcore", h_ax), ("overlap", s_ax), ("eri", eri))
+    else:
+        from .cholesky import axial_cholesky
+        eri = axial_cholesky(mol, u, tol=cholesky_tol)
+        checked = (("hcore", h_ax), ("overlap", s_ax))
+    for name, x in checked:
         imag, scale = np.abs(x.imag).max(), max(1.0, np.abs(x.real).max())
         if imag > IMAG_TOLERANCE * scale:   # relative: heavy-atom core integrals reach 1e3-1e4 Eh
             raise ValueError(f"axial {name} not real (max |Im| {imag:.1e} at max |Re| {scale:.1e})")
     return AxialIntegrals(m=m, transform=u, hcore=np.ascontiguousarray(h_ax.real),
-                          ovlp=np.ascontiguousarray(s_ax.real), eri=np.ascontiguousarray(eri.real),
+                          ovlp=np.ascontiguousarray(s_ax.real),
+                          eri=np.ascontiguousarray(eri.real) if cholesky_tol is None else eri,
                           energy_nuc=float(mol.energy_nuc()))

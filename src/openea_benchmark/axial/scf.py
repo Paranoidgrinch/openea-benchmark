@@ -39,6 +39,8 @@ class AxialSCFResult:
 
 def coulomb_exchange(eri: np.ndarray, dm: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """J_pq = sum_rs (pq|sr) D_rs, K_pq = sum_rs (pr|sq) D_rs  (D_rs = sum_i c_ri c_si*)."""
+    if hasattr(eri, "jk"):   # AxialCholesky
+        return eri.jk(dm)
     n = dm.shape[0]
     vj = (eri.reshape(n * n, n * n) @ dm.T.reshape(n * n)).reshape(n, n)
     vk = np.einsum("prsq,rs->pq", eri, dm, optimize=True)
