@@ -85,6 +85,13 @@ SCF_RESCUE_POLICY = "SOSCF_V3"
 SCF_RESCUE_CONV_TOL_GRAD = 1.0e-5
 
 
+# DIIS subspace of PySCF CCSD (default 6).  45 % of all CCSD iterations of verify_v1/v2 were in
+# runs with > 50 iterations (transition-metal oxides); NiO def2-TZVPPD UCCSD: 49 -> 36 cycles
+# with 12 vectors, E_corr within 3e-8 Eh (the conv_tol).  The vectors are T1+T2 sized, small
+# against the integrals.  Not a settings field: point fingerprints stay as they are.
+CCSD_DIIS_SPACE = 12
+
+
 @dataclass(frozen=True)
 class Stage3ExecutionSettings:
     scf_conv_tol: float = 1.0e-10
@@ -802,6 +809,7 @@ def _run_stage3_point_pyscf_body(
     mycc.conv_tol_normt = settings.cc_conv_tol_normt
     mycc.max_cycle = settings.cc_max_cycle
     mycc.max_memory = settings.max_memory_mb
+    mycc.diis_space = CCSD_DIIS_SPACE
 
     # Reuse the same transformed integrals for CCSD and (T).
     eris = _ccsd_eris_within_memory(mycc)

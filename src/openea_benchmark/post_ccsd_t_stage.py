@@ -414,6 +414,8 @@ def semicanonical_ccsd_t(mf: Any, nfrozen: int, policy: PostCCSDTStagePolicy) ->
     mycc = cc.CCSD(umf)
     mycc.frozen = nfrozen
     mycc.conv_tol, mycc.conv_tol_normt = policy.cc_convergence, SEMICANONICAL_CONV_TOL_NORMT
+    from .adaptive.stage3_execution import CCSD_DIIS_SPACE
+    mycc.diis_space = CCSD_DIIS_SPACE
     mycc.max_cycle, mycc.max_memory = policy.cc_max_iterations, policy.max_memory_mb
     eris = _ccsd_eris_within_memory(mycc)
     mycc.kernel(eris=eris)
