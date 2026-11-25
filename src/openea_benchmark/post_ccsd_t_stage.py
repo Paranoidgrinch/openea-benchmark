@@ -429,9 +429,13 @@ def ccsd_t_point_memory_mb(spec: Any, basis: str, policy: PostCCSDTStagePolicy) 
     integrals of the semicanonical baseline (out of core above ``policy.max_memory_mb``)."""
     need = cc_storage_mb(spec, basis, "CCSD(T)")
     if spec.spin_2s > 0:
-        from .adaptive.stage3_execution import uccsd_incore_memory_mb
+        from .adaptive.stage3_execution import valence_frozen_core_orbitals
+        from .uccsd_eris import blockwise_peak_mb
         mol = _mol(spec, basis, False, 1000)
-        need = max(need, min(uccsd_incore_memory_mb(mol.nao_nr(), mol.nao_nr()), float(policy.max_memory_mb)))
+        nao, nfz = mol.nao_nr(), valence_frozen_core_orbitals(mol)
+        oa, ob = mol.nelec[0] - nfz, mol.nelec[1] - nfz
+        peak = blockwise_peak_mb(nao, oa, ob, nao - nfz - oa, nao - nfz - ob)
+        need = max(need, min(peak, float(policy.max_memory_mb)))
     return need
 
 

@@ -53,13 +53,25 @@ def test_point_budget_exceeds_the_cap_only_with_gate_headroom(monkeypatch):
     from openea_benchmark import point_pool
     from openea_benchmark.adaptive import stage3_execution as s3
     settings = s3.Stage3ExecutionSettings(max_memory_mb=48000)
-    big = _request(("C", "C"), "aug-cc-pv5z", 2)  # needs more than 48 GB
+    big = _request(("C", "C"), "aug-cc-pv5z", 2)  # needs more than the 16 GB cap
     monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 300000.0)
-    assert s3.point_memory_budget_mb(big, settings) == 48000  # the stage limit, not the 16 GB cap
-    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 100000.0)  # 60 GB > half of it
+    need = s3.point_memory_budget_mb(big, settings)
+    assert s3.DEFAULT_POINT_MEMORY_CAP_MB < need <= 48000  # its own need, not the cap
+    monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: need * 1.25 * 2 - 1000.0)  # just short
     assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
     monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: None)  # no memory gate
     assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
     monkeypatch.setattr(point_pool, "memory_headroom_mb", lambda: 300000.0)
     monkeypatch.setenv(s3.POINT_MEMORY_ADAPTIVE_ENV, "0")
     assert s3.point_memory_budget_mb(big, settings) == s3.DEFAULT_POINT_MEMORY_CAP_MB
+
+
+def test_blockwise_integrals_are_used_when_they_fit():
+    mol = gto.M(atom="O 0 0 0; H 0 0 0.97", basis="cc-pvdz", spin=1, verbose=0)
+    mf = scf.ROHF(mol).run().to_uhf()
+    mycc = uccsd.UCCSD(mf)
+    mycc.max_memory = 100000
+    eris = _ccsd_eris_within_memory(mycc)
+    ref = uccsd._make_eris_incore(mycc)
+    assert not hasattr(eris, "feri") and not mycc.direct
+    assert abs(eris.vvVV - ref.vvVV).max() < 1e-10 and abs(eris.ovvv - ref.ovvv).max() < 1e-10

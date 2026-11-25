@@ -921,9 +921,13 @@ def cc_point_memory_need_mb(nao: int, ncorr_occ: int, open_shell: bool) -> float
     """In-core peak of a PySCF SCF + CCSD(T) point (nmo = nao): the larger of the SCF's
     8-fold AO integrals and the CC integrals, plus amplitude copies (t2, residual,
     intermediates) and the interpreter baseline."""
+    from ..uccsd_eris import blockwise_peak_mb
     nao_pair = nao * (nao + 1) // 2
     scf_mb = nao_pair * (nao_pair + 1) / 2 * 8 / 1e6
-    cc_mb = uccsd_incore_memory_mb(nao, nao) if open_shell else (nao ** 4 / 4 + nao_pair ** 2) * 8 / 1e6
+    # open shell: blockwise UCCSD integrals (``_ccsd_eris_within_memory``), occupied counts
+    # of both spins bounded by ncorr_occ
+    cc_mb = (blockwise_peak_mb(nao, ncorr_occ, ncorr_occ, nao - ncorr_occ, nao - ncorr_occ) if open_shell
+             else (nao ** 4 / 4 + nao_pair ** 2) * 8 / 1e6)
     nvir = max(0, nao - ncorr_occ)
     amp_mb = 8 * (3 if open_shell else 1) * (ncorr_occ * nvir) ** 2 * 8 / 1e6
     return max(scf_mb, cc_mb) + amp_mb + POINT_MEMORY_FLOOR_MB
@@ -967,9 +971,17 @@ def _ccsd_eris_within_memory(mycc: Any) -> Any:
     from pyscf.cc import uccsd
 
     if isinstance(mycc, uccsd.UCCSD):
+        from ..uccsd_eris import blockwise_peak_mb, make_eris_blockwise
         nmo = max(mycc.get_nmo())
         nao = mycc.mo_coeff[0].shape[0]
-        if uccsd_incore_memory_mb(nmo, nao) + lib.current_memory()[0] >= mycc.max_memory:
+        (nocca, noccb), (nmoa, nmob) = mycc.nocc, mycc.nmo
+        current = lib.current_memory()[0]
+        # Same arrays as PySCF's in-core path, built block by block (uccsd_eris.py):
+        # PO aug-cc-pVQZ peak 5.6 GB instead of 30 GB, so aug-cc-pV5Z points stay in core.
+        if (getattr(mycc._scf, "_eri", None) is not None
+                and blockwise_peak_mb(nao, nocca, noccb, nmoa - nocca, nmob - noccb) + current < mycc.max_memory):
+            return make_eris_blockwise(mycc)
+        if uccsd_incore_memory_mb(nmo, nao) + current >= mycc.max_memory:
             mycc.direct = True
             return uccsd._make_eris_outcore(mycc, mycc.mo_coeff)
     return mycc.ao2mo()
