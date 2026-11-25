@@ -221,3 +221,20 @@ def test_spin_free_ghf_gccsd_t_equals_axial_uhf_ccsd_t():
             assert g.converged and g.e_tot == pytest.approx(u.e_tot, abs=1e-8)
             c = ghf_cc(ints, h, g, 2)
             assert c["ccsd(t)"] == pytest.approx(ref["ccsd(t)"], abs=2e-8)
+
+
+def test_axial_ccsdt_as_m_conserving_ccp_equals_dense():
+    """CCSDT over the M_L-conserving triples (CC(P), cc_pspace with m summed) equals CCpy's
+    dense CCSDT for the NH 1Delta pi+^2 determinant and the X 3Sigma- UHF."""
+    from openea_benchmark.axial.scf import axial_uhf
+    mol = gto.M(atom="N 0 0 0; H 0 0 1.037", basis="cc-pvdz", spin=0, symmetry="C1", verbose=0)
+    ints = axial_integrals(mol, cholesky_tol=1e-8)
+    a1 = axial_rohf(ints, A1, minao_density(mol, ints))
+    e_p = axial_cc(ints, a1, mol.nelectron, 1, ("ccsdt",))
+    e_d = axial_cc(ints, a1, mol.nelectron, 1, ("ccsdt",), ccsdt="dense")
+    assert e_p["ccsdt"] == pytest.approx(e_d["ccsdt"], abs=1e-8)
+    mol3 = gto.M(atom="N 0 0 0; H 0 0 1.037", basis="cc-pvdz", spin=2, symmetry="C1", verbose=0)
+    ints3 = axial_integrals(mol3)
+    u = axial_uhf(ints3, X3, minao_density(mol3, ints3))
+    assert axial_cc(ints3, u, mol3.nelectron, 1, ("ccsdt",))["ccsdt"] == pytest.approx(
+        axial_cc(ints3, u, mol3.nelectron, 1, ("ccsdt",), ccsdt="dense")["ccsdt"], abs=1e-8)

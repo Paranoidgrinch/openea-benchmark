@@ -48,9 +48,11 @@ def semicanonical_orbitals(scf: AxialSCFResult) -> tuple[np.ndarray, np.ndarray,
 
 def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen: int,
              methods=("ccsd(t)",), *, semicanonical: bool = True, convergence: float = 1e-9,
-             max_iterations: int = 200, diagnostics: dict | None = None) -> dict:
+             max_iterations: int = 200, diagnostics: dict | None = None, ccsdt: str = "symmetric") -> dict:
     """Correlation energies {method: E_corr}; methods: ccsd, ccsd(t), ccsdt, ccsdtq.
-    Raises CCNotConverged; ``diagnostics`` (a dict) receives max |t1|, |t2| per method."""
+    Raises CCNotConverged; ``diagnostics`` (a dict) receives max |t1|, |t2| per method.
+    ``ccsdt="symmetric"``: CCSDT as CC(P) over every triple that conserves M_L
+    (cc_pspace, m summed), the same equations as CCpy's dense ccsdt ("dense")."""
     from ccpy.models.integrals import Integral, build_f
     from ccpy.models.system import System, UHFSystem
 
@@ -71,9 +73,11 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
                            mo_occupation={"a": (np.arange(n) < na).astype(float),
                                           "b": (np.arange(n) < nb).astype(float)},
                            nuclear_repulsion=ints.energy_nuc, reference_energy=scf.e_tot)
+        m_labels = (_m_of(ints, ca)[nfrozen:], _m_of(ints, cb)[nfrozen:], na - nfrozen, nb - nfrozen) \
+            if ccsdt == "symmetric" else None
         if hasattr(ints.eri, "mo"):
             hamiltonian = _cholesky_hamiltonian(ints, system, ca, cb, na, nb, nfrozen)
-            return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics)
+            return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics, m_labels)
         h = {"a": ca.T @ ints.hcore @ ca, "b": cb.T @ ints.hcore @ cb}
         aa = _mo_eri(ints.eri, ca).transpose(0, 2, 1, 3)
         bb = _mo_eri(ints.eri, cb).transpose(0, 2, 1, 3)
@@ -96,7 +100,13 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
         system.reference_energy = scf.e_tot
         system.frozen_energy = calc_hf_frozen_core_energy(e1, e2, system)
         hamiltonian = getHamiltonian(e1, e2, system, True, True)
-    return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics)
+    return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics,
+                m_labels if (uhf or semicanonical) else None)
+
+
+def _m_of(ints: AxialIntegrals, c: np.ndarray) -> np.ndarray:
+    """m of each axial orbital (its coefficients lie in one m block)."""
+    return ints.m[np.argmax(np.abs(c), axis=0)]
 
 
 def _cholesky_hamiltonian(ints: AxialIntegrals, system, ca, cb, na, nb, nfrozen):
@@ -137,7 +147,7 @@ class CCNotConverged(RuntimeError):
 CONVERGED_MESSAGE = "successfully converged"
 
 
-def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=None) -> dict:
+def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=None, m_labels=None) -> dict:
     from ccpy.drivers.driver import Driver
     out = {}
     for method in methods:
@@ -146,7 +156,12 @@ def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=
         driver.options["maximum_iterations"] = max_iterations
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
-            driver.run_cc(method="ccsd" if method == "ccsd(t)" else method)
+            if method == "ccsdt" and m_labels is not None:
+                from ..cc_pspace import run_symmetric_ccsdt
+                la, lb, noa, nob = m_labels
+                run_symmetric_ccsdt(driver, la, lb, noa, nob, "sum")
+            else:
+                driver.run_cc(method="ccsd" if method == "ccsd(t)" else method)
         if CONVERGED_MESSAGE not in log.getvalue():
             raise CCNotConverged(f"{method}: no convergence in {max_iterations} iterations "
                                  f"(last E_corr {float(driver.correlation_energy):.6f})")
@@ -154,6 +169,8 @@ def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=
             t = driver.T
             diagnostics[method] = {"max_t1": float(max(np.abs(t.a).max(), np.abs(t.b).max())),
                                    "max_t2": float(max(np.abs(t.aa).max(), np.abs(t.ab).max(), np.abs(t.bb).max()))}
+            if method == "ccsdt" and m_labels is not None:
+                diagnostics[method]["triples"] = "CCP_M_CONSERVING"
         if method == "ccsd(t)":
             out["ccsd"] = float(driver.correlation_energy)
             with contextlib.redirect_stdout(io.StringIO()):
