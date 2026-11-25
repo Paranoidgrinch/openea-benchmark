@@ -625,7 +625,8 @@ def _slot_runs() -> tuple[dict[str, int], set[str]]:
 
 
 def _acquire_fair_slot():
-    """Lock a free core slot once this run is below its fair share; returns the slot handle."""
+    """Lock a free core slot once this run is below its fair share, or beyond it while no other
+    run waits below its share; returns the slot handle."""
     run = _run_id()
     wait_path = os.path.join(_SLOT_DIR, f"wait_{run}_{os.getpid()}.lock")
     waiter = open(wait_path, "a+")
@@ -637,7 +638,12 @@ def _acquire_fair_slot():
                 fcntl.flock(gate, fcntl.LOCK_EX)  # no two workers of one run pass on the same count
                 held, waiting = _slot_runs()
                 share = fair_share(_N_SLOTS, len(set(held) | waiting | {run}))
-                if held.get(run, 0) < share:
+                # Work conserving: beyond its share a run may take a free slot while no other
+                # run waits below its own share (verify 11-25: load 26 of 80 with tasks queued
+                # behind their run's share).  A run that starts waiting below its share gets
+                # the next free slot, since runs at or above theirs then stop taking slots.
+                starved = any(held.get(other, 0) < share for other in waiting if other != run)
+                if held.get(run, 0) < share or not starved:
                     for index in range(_N_SLOTS):
                         fh = open(os.path.join(_SLOT_DIR, f"slot{index:03d}.lock"), "a+")
                         try:

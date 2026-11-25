@@ -482,3 +482,25 @@ def test_core_slot_marks_held_reservations(tmp_path):
         point_pool.shutdown_point_pool()
         point_pool.configure_point_pool(workers=1, threads=1)
     assert line[3:] == ["HOLD"] and len(plain) == 3
+
+
+def test_run_beyond_its_share_borrows_a_free_slot_when_nobody_starves(tmp_path, monkeypatch):
+    import fcntl
+    slots = tmp_path / "slots"
+    point_pool.configure_point_pool(workers=1, threads=1, slot_dir=slots, n_slots=5)
+    monkeypatch.setenv(point_pool.RUN_ID_ENV, "111")
+    held = []
+    for index, run in ((0, "111"), (1, "111"), (2, "111"), (3, "222")):   # share ceil(5/2) = 3
+        fh = open(slots / f"slot{index:03d}.lock", "a+")
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        (slots / f"slot{index:03d}.run").write_text(run + "\n")
+        held.append(fh)
+    monkeypatch.setattr(point_pool.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("waited")))
+    try:
+        with point_pool.core_slot():   # 222 holds one slot but does not wait: nobody starves
+            assert (slots / "slot004.run").read_text().strip() == "111"
+    finally:
+        for fh in held:
+            fh.close()
+        point_pool.shutdown_point_pool()
+        point_pool.configure_point_pool(workers=1, threads=1)
