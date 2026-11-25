@@ -46,6 +46,43 @@ def semicanonical_orbitals(scf: AxialSCFResult) -> tuple[np.ndarray, np.ndarray,
     return ca, cb, ea, eb
 
 
+def ccpy_hamiltonian(ints: AxialIntegrals, scf, nelectron: int, nfrozen: int):
+    """(CCpy UHFSystem, sorted normal-ordered Integral over the correlated orbitals, m labels):
+    UHF orbitals canonical per spin, or the ROHF determinant in semicanonical UHF form.  The
+    labels are (m of correlated alpha orbitals, of beta orbitals, n_occ alpha, n_occ beta), for
+    symmetry-restricted triples (cc_pspace) or symmetry-blocked tensors (symcc)."""
+    from ccpy.models.integrals import Integral, build_f
+    from ccpy.models.system import UHFSystem
+    uhf = isinstance(scf, AxialUHFResult)
+    if uhf:
+        n = scf.mo_coeff[0].shape[1]
+        na, nb = scf.nocc
+        ca, cb, ea, eb = (*scf.mo_coeff, *scf.mo_energy)
+    else:
+        n = scf.mo_coeff.shape[1]
+        na, nb = int(np.sum(scf.mo_occ > 0)), int(np.sum(scf.mo_occ > 1))
+        ca, cb, ea, eb = semicanonical_orbitals(scf)
+    system = UHFSystem(nelectron, n, na - nb + 1, nfrozen, point_group="C1",
+                       orbital_symmetries={"a": ["A"] * n, "b": ["A"] * n},
+                       mo_energies={"a": ea, "b": eb},
+                       mo_occupation={"a": (np.arange(n) < na).astype(float),
+                                      "b": (np.arange(n) < nb).astype(float)},
+                       nuclear_repulsion=ints.energy_nuc, reference_energy=scf.e_tot)
+    m_labels = (_m_of(ints, ca)[nfrozen:], _m_of(ints, cb)[nfrozen:], na - nfrozen, nb - nfrozen)
+    if hasattr(ints.eri, "mo"):
+        return system, _cholesky_hamiltonian(ints, system, ca, cb, na, nb, nfrozen), m_labels
+    h = {"a": ca.T @ ints.hcore @ ca, "b": cb.T @ ints.hcore @ cb}
+    aa = _mo_eri(ints.eri, ca).transpose(0, 2, 1, 3)
+    bb = _mo_eri(ints.eri, cb).transpose(0, 2, 1, 3)
+    ab = _mo_eri(ints.eri, ca, cb).transpose(0, 2, 1, 3)   # <p q~|r s~> = (pr|qs~)
+    v = {"aa": aa - aa.transpose(0, 1, 3, 2), "ab": ab, "bb": bb - bb.transpose(0, 1, 3, 2)}
+    fock = build_f(h, v, system)
+    corr = slice(nfrozen, n)
+    hamiltonian = Integral(system, 2, {"a": fock["a"][corr, corr], "b": fock["b"][corr, corr],
+                                       **{k: x[corr, corr, corr, corr] for k, x in v.items()}}, sorted=True)
+    return system, hamiltonian, m_labels
+
+
 def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen: int,
              methods=("ccsd(t)",), *, semicanonical: bool = True, convergence: float = 1e-9,
              max_iterations: int = 200, diagnostics: dict | None = None, ccsdt: str = "symmetric") -> dict:
@@ -53,8 +90,7 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
     Raises CCNotConverged; ``diagnostics`` (a dict) receives max |t1|, |t2| per method.
     ``ccsdt="symmetric"``: CCSDT as CC(P) over every triple that conserves M_L
     (cc_pspace, m summed), the same equations as CCpy's dense ccsdt ("dense")."""
-    from ccpy.models.integrals import Integral, build_f
-    from ccpy.models.system import System, UHFSystem
+    from ccpy.models.system import System
 
     uhf = isinstance(scf, AxialUHFResult)
     if uhf:
@@ -65,28 +101,9 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
         na, nb = int(np.sum(scf.mo_occ > 0)), int(np.sum(scf.mo_occ > 1))
     mult = na - nb + 1
     if uhf or semicanonical:
-        # UHF: canonical per spin (occupied first); ROHF: semicanonical UHF form
-        ca, cb, ea, eb = (*scf.mo_coeff, *scf.mo_energy) if uhf else semicanonical_orbitals(scf)
-        system = UHFSystem(nelectron, n, mult, nfrozen, point_group="C1",
-                           orbital_symmetries={"a": ["A"] * n, "b": ["A"] * n},
-                           mo_energies={"a": ea, "b": eb},
-                           mo_occupation={"a": (np.arange(n) < na).astype(float),
-                                          "b": (np.arange(n) < nb).astype(float)},
-                           nuclear_repulsion=ints.energy_nuc, reference_energy=scf.e_tot)
-        m_labels = (_m_of(ints, ca)[nfrozen:], _m_of(ints, cb)[nfrozen:], na - nfrozen, nb - nfrozen) \
-            if ccsdt == "symmetric" else None
-        if hasattr(ints.eri, "mo"):
-            hamiltonian = _cholesky_hamiltonian(ints, system, ca, cb, na, nb, nfrozen)
-            return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics, m_labels)
-        h = {"a": ca.T @ ints.hcore @ ca, "b": cb.T @ ints.hcore @ cb}
-        aa = _mo_eri(ints.eri, ca).transpose(0, 2, 1, 3)
-        bb = _mo_eri(ints.eri, cb).transpose(0, 2, 1, 3)
-        ab = _mo_eri(ints.eri, ca, cb).transpose(0, 2, 1, 3)   # <p q~|r s~> = (pr|qs~)
-        v = {"aa": aa - aa.transpose(0, 1, 3, 2), "ab": ab, "bb": bb - bb.transpose(0, 1, 3, 2)}
-        fock = build_f(h, v, system)
-        corr = slice(nfrozen, n)
-        hamiltonian = Integral(system, 2, {"a": fock["a"][corr, corr], "b": fock["b"][corr, corr],
-                                           **{k: x[corr, corr, corr, corr] for k, x in v.items()}}, sorted=True)
+        system, hamiltonian, m_all = ccpy_hamiltonian(ints, scf, nelectron, nfrozen)
+        return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics,
+                    m_all if ccsdt == "symmetric" else None)
     else:
         if hasattr(ints.eri, "mo"):
             raise NotImplementedError("Cholesky integrals: semicanonical or UHF orbitals only")
@@ -100,8 +117,7 @@ def axial_cc(ints: AxialIntegrals, scf: AxialSCFResult, nelectron: int, nfrozen:
         system.reference_energy = scf.e_tot
         system.frozen_energy = calc_hf_frozen_core_energy(e1, e2, system)
         hamiltonian = getHamiltonian(e1, e2, system, True, True)
-    return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics,
-                m_labels if (uhf or semicanonical) else None)
+    return _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics, None)
 
 
 def _m_of(ints: AxialIntegrals, c: np.ndarray) -> np.ndarray:
