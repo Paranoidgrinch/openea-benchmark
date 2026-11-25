@@ -747,7 +747,10 @@ def run_parallel(fn: Callable[..., Any], arg_tuples: Iterable[tuple], *,
     reserves = list(reserve_mb) if reserve_mb is not None else [None] * len(items)
     groups = list(limit_groups) if limit_groups is not None else [None] * len(items)
     results: list[Any] = [None] * len(items)
-    if _POOL is None or len(items) < 2:
+    # One task runs in this process, except from a stage thread (benchmark_auto.run_stages):
+    # there process-wide state that point code sets (stdout capture, tempfile.tempdir, the
+    # CCpy DIIS class) would reach the stages running beside it, so it goes to a worker.
+    if _POOL is None or (len(items) < 2 and threading.current_thread() is threading.main_thread()):
         for index, args in enumerate(items):
             results[index] = _slotted_call(fn, args, reserves[index], groups[index], hold_reservations)
             if on_result is not None:

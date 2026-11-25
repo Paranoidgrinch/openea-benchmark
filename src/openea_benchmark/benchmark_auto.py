@@ -549,79 +549,99 @@ def run_benchmark_acquisition(
     if unbound:
         print(f"[CBS] {system}: anion unbound at CBS -> CV, SR, SOC, post-CCSD(T), ZPE skipped; "
               "MR only for anion candidates", flush=True)
-    core_valence = None
-    if electronic_ea is not None and settings.cv_stage and not unbound:
+    live = [r for r in requests if r.job_id not in superseded]
+
+    def stage_cv():
+        if electronic_ea is None or not settings.cv_stage or unbound:
+            return None
         from .core_valence_stage import CoreValenceStagePolicy, run_core_valence_stage
-        core_valence = run_core_valence_stage(
-            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            point_records=point_result_records,
+        return run_core_valence_stage(
+            electronic_ea=electronic_ea, requests=live, point_records=point_result_records,
             refinement_dir=output_dir / "electronic_ea" / "refinement_points",
             stage3_settings=stage3_settings, output_dir=output_dir / "core_valence",
             policy=CoreValenceStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
-    scalar_relativity = None
-    if electronic_ea is not None and settings.sr_stage and not unbound:
+    def stage_sr():
+        if electronic_ea is None or not settings.sr_stage or unbound:
+            return None
         from .scalar_relativity_stage import ScalarRelativityStagePolicy, run_scalar_relativity_stage
-        scalar_relativity = run_scalar_relativity_stage(
-            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            point_records=point_result_records,
+        return run_scalar_relativity_stage(
+            electronic_ea=electronic_ea, requests=live, point_records=point_result_records,
             refinement_dir=output_dir / "electronic_ea" / "refinement_points",
             stage3_settings=stage3_settings, output_dir=output_dir / "scalar_relativity",
             policy=ScalarRelativityStagePolicy(max_memory_mb=settings.cbs_memory_mb), point_backend=point_runner)
 
-    spin_orbit = None
-    if electronic_ea is not None and settings.soc_stage and not unbound:
+    def stage_soc():
+        if electronic_ea is None or not settings.soc_stage or unbound:
+            return None
         from .spin_orbit_stage import run_spin_orbit_stage
-        spin_orbit = run_spin_orbit_stage(
-            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
+        return run_spin_orbit_stage(
+            electronic_ea=electronic_ea, requests=live,
             output_dir=output_dir / "spin_orbit", competitors=(cbs or {}).get("competitor_ranking_at_cbs") or ())
 
-    post_ccsd_t = None
-    if electronic_ea is not None and settings.post_cc_stage and not unbound:
+    def stage_post_cc():
+        if electronic_ea is None or not settings.post_cc_stage or unbound:
+            return None
         from .post_ccsd_t_stage import PostCCSDTStagePolicy, run_post_ccsd_t_stage
-        post_ccsd_t = run_post_ccsd_t_stage(
-            electronic_ea=electronic_ea, requests=[r for r in requests if r.job_id not in superseded],
-            point_records=point_result_records,
+        return run_post_ccsd_t_stage(
+            electronic_ea=electronic_ea, requests=live, point_records=point_result_records,
             refinement_dir=output_dir / "electronic_ea" / "refinement_points", output_dir=output_dir / "post_ccsd_t",
             policy=PostCCSDTStagePolicy(max_memory_mb=settings.cbs_memory_mb))
 
-    mr_competitors = None
     mr_labels = [f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())]
     pending_labels, pending_r = pending_mr_competitor_labels(electronic_ea, requests)
     mr_labels += [label for label in pending_labels if label not in mr_labels]
     mr_run_labels = mr_labels_to_run(mr_labels, unbound)
-    cc_competitors = None
-    if electronic_ea is not None and settings.mr_competitor_stage and mr_run_labels:
-        # CC route first (CCSD / EOM-CCSD block energies); the NEVPT2 layer runs only for
-        # what it leaves open, and a block counts as excluded when either layer excludes it.
-        from .cc_competitors import merge_competitor_records, run_cc_competitor_stage
-        live = [r for r in requests if r.job_id not in superseded]
-        cc_competitors = run_cc_competitor_stage(
-            electronic_ea=electronic_ea, requests=live, mr_only_labels=mr_run_labels,
-            output_dir=output_dir / "cc_competitors", candidate_r_angstrom=pending_r)
-        if cc_competitors.get("status") == "CLEARED":
-            mr_competitors = cc_competitors
-        else:
-            from .mr_competitors import run_mr_competitor_stage
-            mr_only = run_mr_competitor_stage(
-                electronic_ea=electronic_ea, requests=live,
-                mr_only_labels=mr_run_labels, output_dir=output_dir / "mr_competitors", candidate_r_angstrom=pending_r)
-            mr_competitors = merge_competitor_records(cc_competitors, mr_only)
 
-    # Patch 54: MR-only candidates the lower bound could not exclude are computed
-    # relative to the SR state of their charge (term gap); the EA uses the lower one.
-    mr_term_gap = None
-    if mr_competitors is not None and mr_competitors.get("status") == "UNRESOLVED_MR_COMPETITOR":
-        from .mr_term_gap import run_mr_term_gap_stage
-        mr_term_gap = run_mr_term_gap_stage(mr_competitors=mr_competitors, output_dir=output_dir / "mr_term_gap",
-                                            competitor_blocks_dir=output_dir / "mr_competitors" / "blocks")
+    def stage_competitors():
+        cc_comp = mr_comp = gap = None
+        if electronic_ea is not None and settings.mr_competitor_stage and mr_run_labels:
+            # CC route first (CCSD / EOM-CCSD block energies); the NEVPT2 layer runs only for
+            # what it leaves open, and a block counts as excluded when either layer excludes it.
+            from .cc_competitors import merge_competitor_records, run_cc_competitor_stage
+            cc_comp = run_cc_competitor_stage(
+                electronic_ea=electronic_ea, requests=live, mr_only_labels=mr_run_labels,
+                output_dir=output_dir / "cc_competitors", candidate_r_angstrom=pending_r)
+            if cc_comp.get("status") == "CLEARED":
+                mr_comp = cc_comp
+            else:
+                from .mr_competitors import run_mr_competitor_stage
+                mr_only = run_mr_competitor_stage(
+                    electronic_ea=electronic_ea, requests=live,
+                    mr_only_labels=mr_run_labels, output_dir=output_dir / "mr_competitors",
+                    candidate_r_angstrom=pending_r)
+                mr_comp = merge_competitor_records(cc_comp, mr_only)
+        # Patch 54: MR-only candidates the lower bound could not exclude are computed
+        # relative to the SR state of their charge (term gap); the EA uses the lower one.
+        if mr_comp is not None and mr_comp.get("status") == "UNRESOLVED_MR_COMPETITOR":
+            from .mr_term_gap import run_mr_term_gap_stage
+            gap = run_mr_term_gap_stage(mr_competitors=mr_comp, output_dir=output_dir / "mr_term_gap",
+                                        competitor_blocks_dir=output_dir / "mr_competitors" / "blocks")
+        return cc_comp, mr_comp, gap
 
-    nuclear = adiabatic = None
-    if electronic_ea is not None and settings.zpe_stage and not unbound:
-        from .vibrational_stage import assemble_adiabatic_ea, run_vibrational_stage
-        nuclear = run_vibrational_stage(
+    def stage_nuclear():
+        if electronic_ea is None or not settings.zpe_stage or unbound:
+            return None
+        from .vibrational_stage import run_vibrational_stage
+        return run_vibrational_stage(
             electronic_ea=electronic_ea, loops=ea_loops, atoms=tuple(manifest_system["atoms"]),
             stage3_settings=stage3_settings, output_dir=output_dir / "nuclear_motion", point_backend=point_runner)
+
+    # The layers after CBS read only the electronic-EA record (SOC also CBS's competitor
+    # ranking), not each other: they run side by side, each submitting its points to the
+    # shared pool and its gates, so a molecule's wall time is its longest layer instead of
+    # the sum (BO verify_v1: CV 2.1 h, ZPE 8.2 h and post-CC 42.6 h had run one after the
+    # other).  OPENEA_CONCURRENT_STAGES=0 restores the sequential order.
+    stages = {"cv": stage_cv, "sr": stage_sr, "soc": stage_soc, "post_cc": stage_post_cc,
+              "competitors": stage_competitors, "nuclear": stage_nuclear}
+    outcomes = run_stages(stages, concurrent=os.environ.get(CONCURRENT_STAGES_ENV, "1") != "0")
+    core_valence, scalar_relativity, spin_orbit = outcomes["cv"], outcomes["sr"], outcomes["soc"]
+    post_ccsd_t, nuclear = outcomes["post_cc"], outcomes["nuclear"]
+    cc_competitors, mr_competitors, mr_term_gap = outcomes["competitors"]
+
+    adiabatic = None
+    if nuclear is not None:
+        from .vibrational_stage import assemble_adiabatic_ea
         adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, core_valence=core_valence,
                                           spin_orbit=spin_orbit, scalar_relativity=scalar_relativity,
                                           post_ccsd_t=post_ccsd_t, output_dir=output_dir)
@@ -737,6 +757,28 @@ def run_benchmark_acquisition(
     }
     _save(state_path, state)
     return state
+
+
+CONCURRENT_STAGES_ENV = "OPENEA_CONCURRENT_STAGES"
+
+
+def run_stages(stages: Mapping[str, Callable[[], Any]], *, concurrent: bool) -> dict:
+    """Results of independent stage functions, side by side in threads (or in order).
+    Every stage finishes; the first exception is re-raised afterwards."""
+    if not concurrent:
+        return {name: fn() for name, fn in stages.items()}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(stages), thread_name_prefix="stage") as pool:
+        futures = {name: pool.submit(fn) for name, fn in stages.items()}
+        results, error = {}, None
+        for name, future in futures.items():
+            try:
+                results[name] = future.result()
+            except BaseException as exc:  # noqa: BLE001 - re-raised after all stages ended
+                error = error or exc
+    if error is not None:
+        raise error
+    return results
 
 
 def anion_unbound_at_cbs(cbs: Mapping[str, Any] | None) -> bool:
