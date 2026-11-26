@@ -579,16 +579,49 @@ def _projected_soscf(mf: Any, mol: Any, checkpoint: str, settings: Stage3Executi
     mf.e_tot, mf.converged = soscf.e_tot, bool(soscf.converged)
 
 
+# Threads of a small point.  PySCF CCSD(T) does not get faster beyond ~4 threads for
+# ~100 basis functions (PO aug-cc-pVTZ, 96 functions: 34 s at 4 threads, 39 s at 10; with TBLIS
+# 10 s / 9 s for CCSD) and still gains up to 10 at aug-cc-pVQZ (164: CCSD 95 -> 66 s with TBLIS),
+# while 20 threads make (T) 3-4x slower (hyperthreads).  Small points therefore take fewer
+# threads and leave the cores to further points (the CPU gate measures the cores really busy).
+SMALL_POINT_NAO_ENV, SMALL_POINT_THREADS_ENV = "OPENEA_SMALL_POINT_NAO", "OPENEA_SMALL_POINT_THREADS"
+SMALL_POINT_NAO, SMALL_POINT_THREADS = 120, 4
+
+
+def point_threads(nao: int, default: int) -> int:
+    limit = int(os.environ.get(SMALL_POINT_NAO_ENV, SMALL_POINT_NAO))
+    small = int(os.environ.get(SMALL_POINT_THREADS_ENV, SMALL_POINT_THREADS))
+    return min(default, small) if nao <= limit else default
+
+
 def _run_stage3_point_pyscf(
     request: Stage3ExecutionRequest,
     settings: Stage3ExecutionSettings,
 ) -> Stage3PointResult:
     """Execute one authorized request with PySCF under its own memory budget
-    (``point_memory_budget_mb``), reserved at the memory gate while it runs."""
+    (``point_memory_budget_mb``), reserved at the memory gate while it runs; a small point
+    runs with ``point_threads`` threads."""
+    from pyscf import gto, lib
+    from ..compute_threads import set_compute_threads
     from ..point_pool import core_slot
     budget = point_memory_budget_mb(request, settings)
-    with core_slot(reserve_mb=budget * GATE_OVERSHOOT):
-        return _run_stage3_point_pyscf_body(request, replace(settings, max_memory_mb=budget))
+    default = lib.num_threads()
+    try:
+        probe = gto.M(atom=[(request.atoms[0], (0.0, 0.0, 0.0)), (request.atoms[1], (0.0, 0.0, 1.0))],
+                      **mole_basis_kwargs(request.atoms, dict(request.basis_by_element)
+                                          if request.basis_by_element is not None else request.basis),
+                      charge=request.charge, spin=request.spin_2s, verbose=0, dump_input=False)
+        threads = point_threads(probe.nao_nr(), default)
+    except Exception:  # noqa: BLE001 - the point itself reports the problem
+        threads = default
+    if threads != default:
+        set_compute_threads(threads)
+    try:
+        with core_slot(reserve_mb=budget * GATE_OVERSHOOT):
+            return _run_stage3_point_pyscf_body(request, replace(settings, max_memory_mb=budget))
+    finally:
+        if threads != default:
+            set_compute_threads(default)
 
 
 def _run_stage3_point_pyscf_body(

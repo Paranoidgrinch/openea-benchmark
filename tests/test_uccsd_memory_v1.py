@@ -75,3 +75,12 @@ def test_blockwise_integrals_are_used_when_they_fit():
     ref = uccsd._make_eris_incore(mycc)
     assert not hasattr(eris, "feri") and not mycc.direct
     assert abs(eris.vvVV - ref.vvVV).max() < 1e-10 and abs(eris.ovvv - ref.ovvv).max() < 1e-10
+
+
+def test_small_points_take_fewer_threads(monkeypatch):
+    from openea_benchmark.adaptive import stage3_execution as s3
+    assert s3.point_threads(96, 10) == 4
+    assert s3.point_threads(164, 10) == 10
+    assert s3.point_threads(96, 2) == 2          # never more than the run's threads
+    monkeypatch.setenv(s3.SMALL_POINT_NAO_ENV, "200")
+    assert s3.point_threads(164, 10) == 4
