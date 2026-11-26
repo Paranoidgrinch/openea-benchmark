@@ -404,3 +404,33 @@ def _ch_point_policy(tmp_path, monkeypatch, policy):
                                 state_id="X", r_angstrom=1.12, source_root_id="X", source_checkpoint_path="none",
                                 state_identity_validated=True)
     return mf, _run_point(spec, "cc-pvdz", "CCSDT", policy, str(tmp_path / "unconv.json"))
+
+
+def test_symcc_ccsdtq_point_equals_the_dense_point(tmp_path, monkeypatch):
+    """CCSDTQ through _run_point on symmetry-blocked tensors (symcc) equals CCpy's dense ccsdtq."""
+    pytest.importorskip("symcc.cc")
+    import dataclasses
+    from pyscf import gto, scf
+    from openea_benchmark.adaptive.core_valence_runner import CoreValenceStateSpec
+    from openea_benchmark.post_ccsd_t_stage import _run_point, occupation_ordered
+
+    def ref(symmetry):
+        mol = gto.M(atom="O 0 0 0; H 0 0 0.97", basis="6-31g", spin=1, symmetry=symmetry, verbose=0)
+        mf = scf.ROHF(mol)
+        mf.conv_tol = 1e-11
+        mf.kernel()
+        return occupation_ordered(mf)
+    sym, c1 = ref("C2v"), ref("C1")
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_c1", lambda spec, basis, policy: c1)
+    monkeypatch.setattr(post_ccsd_t_stage, "reference_symmetric", lambda spec, basis, policy: sym)
+    spec = CoreValenceStateSpec(role="neutral", system="OH", atoms=("O", "H"), charge=0, spin_2s=1,
+                                state_id="X", r_angstrom=0.97, source_root_id="X", source_checkpoint_path="none",
+                                state_identity_validated=True)
+    spec = dataclasses.replace(spec, point_group="C2v")
+    assert post_ccsd_t_stage.symcc_applies(spec, "CCSDTQ")
+    blocked = _run_point(spec, "6-31g", "CCSDTQ", PostCCSDTStagePolicy(), str(tmp_path / "symcc.json"))
+    monkeypatch.setattr(post_ccsd_t_stage, "CCSDTQ_ALGORITHM", "dense")
+    dense = _run_point(spec, "6-31g", "CCSDTQ", PostCCSDTStagePolicy(), str(tmp_path / "dense.json"))
+    assert blocked["status"] == dense["status"] == "COMPLETED", (blocked, dense)
+    assert blocked["quadruples_algorithm"] == "SYMCC_SYMMETRY_BLOCKED"
+    assert blocked["total_hartree"] == pytest.approx(dense["total_hartree"], abs=1e-8)

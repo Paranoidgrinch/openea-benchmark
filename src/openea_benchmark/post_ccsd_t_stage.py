@@ -257,6 +257,28 @@ def _amplitude_mb(spec: Any, basis: str, method: str) -> float:
     return 8 * sum(x ** (rank - k) * y ** k for k in range(rank + 1)) / 1.0e6
 
 
+# CCSDTQ on symmetry-blocked tensors (symcc: CCpy's CCSDTQ equations, blocks of the reference
+# point group only).  OH aug-cc-pVDZ (axial m blocks): 2103 s vs 10106 s CCpy dense, E equal to
+# 3e-11 Eh; C2v keeps ~1/4 of every tensor.  Used when symcc is importable and the state has a
+# point group; OPENEA_CCSDTQ_ALGORITHM=dense keeps CCpy.  Not in the point signature (same energy).
+CCSDTQ_ALGORITHM = os.environ.get("OPENEA_CCSDTQ_ALGORITHM", "symcc")
+SYMCC_COPIES = 18          # T, residual, 2 x 6 DIIS vectors, intermediates of the T4 update
+
+
+def symcc_available() -> bool:
+    try:
+        import symcc.cc  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def symcc_applies(spec: Any, method: str) -> bool:
+    group = str(getattr(spec, "point_group", None) or "C1").upper()
+    return (method == "CCSDTQ" and CCSDTQ_ALGORITHM == "symcc" and group in GROUP_ORDER and group != "C1"
+            and symcc_available())
+
+
 def symmetric_ccp_applies(spec: Any, method: str) -> bool:
     group = str(getattr(spec, "point_group", None) or "C1").upper()
     return method == "CCSDT" and CCSDT_ALGORITHM == "symmetric_ccp" and group in GROUP_ORDER and group != "C1"
@@ -301,7 +323,7 @@ def diis_out_of_core(amplitude_mb: float) -> bool:
 
 def cc_limit_group(spec: Any, basis: str, method: str):
     """Machine-wide concurrency group of an out-of-core point (None for in-core points)."""
-    if symmetric_ccp_applies(spec, method):
+    if symmetric_ccp_applies(spec, method) or symcc_applies(spec, method):
         return None
     return OUT_OF_CORE_LIMIT_GROUP if diis_out_of_core(_amplitude_mb(spec, basis, method)) else None
 
@@ -312,7 +334,7 @@ def q_memory_limit_mb(policy: "PostCCSDTStagePolicy") -> int:
 
 def cc_scratch_need_mb(spec: Any, basis: str, method: str) -> float:
     """Scratch for the DIIS file of an out-of-core point (amplitude and residual vectors)."""
-    if symmetric_ccp_applies(spec, method):
+    if symmetric_ccp_applies(spec, method) or symcc_applies(spec, method):
         return 0.0
     one = _amplitude_mb(spec, basis, method)
     return DIIS_COPIES * one if diis_out_of_core(one) else 0.0
@@ -329,6 +351,8 @@ def cc_storage_mb(spec: Any, basis: str, method: str) -> float:
     """Memory (RAM) estimate of a CCpy point; DIIS copies count only when kept in core."""
     if symmetric_ccp_applies(spec, method):
         return ccp_storage_mb(spec, basis)
+    if symcc_applies(spec, method):   # dense amplitudes / group order, all copies in core
+        return SYMCC_COPIES * _amplitude_mb(spec, basis, method) / GROUP_ORDER[str(spec.point_group).upper()]
     one = _amplitude_mb(spec, basis, method)
     out_of_core, size = cc_mode(one)
     return (OUT_OF_CORE_COPIES if out_of_core else in_core_copies(size)) * one
@@ -459,14 +483,17 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
     record: dict[str, Any] = {"signature": signature, "role": spec.role, "basis": basis, "method": method}
     try:
         symmetric = symmetric_ccp_applies(spec, method)
-        mf = reference_symmetric(spec, basis, policy) if symmetric else reference_c1(spec, basis, policy)
+        blocked = symcc_applies(spec, method)
+        mf = (reference_symmetric(spec, basis, policy) if (symmetric or blocked)
+              else reference_c1(spec, basis, policy))
         record["scf_soscf_rescue"] = bool(getattr(mf, "openea_soscf_rescue", False))
         nfz = valence_frozen_core_orbitals(mf.mol)
         driver = Driver.from_pyscf(mf, nfrozen=nfz)
         driver.options["energy_convergence"] = policy.cc_convergence
         driver.options["amp_convergence"] = policy.cc_convergence
         driver.options["maximum_iterations"] = policy.cc_max_iterations
-        out_of_core, diis_size = (False, DIIS_SIZE) if symmetric else cc_mode(_amplitude_mb(spec, basis, method))
+        out_of_core, diis_size = ((False, DIIS_SIZE) if (symmetric or blocked)
+                                  else cc_mode(_amplitude_mb(spec, basis, method)))
         driver.options["diis_size"] = diis_size
         driver.options["diis_out_of_core"] = out_of_core
         record["diis_out_of_core"] = out_of_core
@@ -490,6 +517,20 @@ def _run_point(spec: Any, basis: str, method: str, policy: PostCCSDTStagePolicy,
                         raise RuntimeError(f"CCpy and PySCF CCSD differ by {sc_ccsd - ccsd_corr:.2e} Eh "
                                            "(correlation space or reference not the same)")
                     corr = sc_total
+            elif blocked:
+                from symcc.cc import blocked_hamiltonian, solve
+                system = driver.system
+                labels = [system.point_group_irrep_to_number[x] for x in system.orbital_symmetries]
+                hb = blocked_hamiltonian(driver.hamiltonian, labels, labels, system.noccupied_alpha,
+                                         system.noccupied_beta, "xor")
+                driver.hamiltonian = None   # the dense blocks are not needed any more
+                result = solve(hb, "ccsdtq", conv=policy.cc_convergence, max_iter=policy.cc_max_iterations,
+                               diis_size=DIIS_SIZE)
+                if not result["converged"]:
+                    raise RuntimeError(f"symcc CCSDTQ: no convergence in {result['iterations']} iterations")
+                print(f"   {CC_CONVERGED_MESSAGE} (symcc, {result['iterations']} iterations)", flush=True)
+                corr = float(result["correlation"])
+                record.update(quadruples_algorithm="SYMCC_SYMMETRY_BLOCKED", point_group=str(spec.point_group))
             elif symmetric:
                 from .cc_pspace import run_symmetric_ccsdt
                 system = driver.system
