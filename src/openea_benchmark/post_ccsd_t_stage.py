@@ -259,10 +259,13 @@ def _amplitude_mb(spec: Any, basis: str, method: str) -> float:
 
 # CCSDTQ on symmetry-blocked tensors (symcc: CCpy's CCSDTQ equations, blocks of the reference
 # point group only).  OH aug-cc-pVDZ (axial m blocks): 2103 s vs 10106 s CCpy dense, E equal to
-# 3e-11 Eh; C2v keeps ~1/4 of every tensor.  Used when symcc is importable and the state has a
+# 3e-11 Eh (1489-1639 s depending on load); C2v keeps ~1/4 of every tensor.  Used when symcc is importable and the state has a
 # point group; OPENEA_CCSDTQ_ALGORITHM=dense keeps CCpy.  Not in the point signature (same energy).
 CCSDTQ_ALGORITHM = os.environ.get("OPENEA_CCSDTQ_ALGORITHM", "symcc")
-SYMCC_COPIES = 18          # T, residual, 2 x 6 DIIS vectors, intermediates of the T4 update
+# T, residual and the T4-update intermediates in full blocks; DIIS keeps only the unique
+# amplitudes (symcc >= 99919c3).  OH aug-cc-pVDZ CCSDTQ, m blocks: peak 3.8 GB = ~3 blocked
+# copies (CCpy dense: 12 GB); 5 leaves room for the integral blocks.
+SYMCC_COPIES = 5
 
 
 def symcc_available() -> bool:
