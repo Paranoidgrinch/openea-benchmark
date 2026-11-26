@@ -69,7 +69,11 @@ def point(el: str, x: str, cation: bool, methods: tuple, cache: Path) -> dict:
     ints = axial_integrals(mol, hcore_ao=scf.ROHF(mol).sfx2c1e().get_hcore(), cholesky_tol=CHOLESKY_TOL)
     res = axial_uhf(ints, occ, minao_density(mol, ints), block_of_ao=atomic_blocks(mol, ints))
     nfrozen = valence_frozen_core_orbitals(mol)
-    corr = axial_cc(ints, res, mol.nelectron, nfrozen, methods)
+    from openea_benchmark.axial.cc import CCNotConverged
+    try:
+        corr = axial_cc(ints, res, mol.nelectron, nfrozen, methods)
+    except CCNotConverged:   # Sm+, Ho, Tm aDZ and Dy aQZ: slow CCSD tails; more DIIS vectors and iterations
+        corr = axial_cc(ints, res, mol.nelectron, nfrozen, methods, diis_size=12, max_iterations=600)
     if cv:
         corr = {**{f"val_{k}": v for k, v in corr.items()},
                 **{f"cv_{k}": v for k, v in axial_cc(ints, res, mol.nelectron, CV_FROZEN, methods).items()}}
