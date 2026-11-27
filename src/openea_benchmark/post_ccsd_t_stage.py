@@ -98,7 +98,7 @@ class PostCCSDTStagePolicy:
     quadruples_bases: tuple[str, ...] = ("aug-cc-pvdz", "cc-pvdz")
     quadruples_relative_bound: float = 0.5
     # Per-point memory limit; every point reserves its estimate in the point-pool
-    # memory gate, and points above point_pool.BIG_TASK_MB (100 GB) run one at a
+    # memory gate, and points above point_pool.BIG_TASK_MB (150 GB) run one at a
     # time machine-wide (user decision 2026-10-13: NO, O2, ClO CCSDTQ/cc-pVDZ need
     # 130-200 GB; run them one after the other).
     q_memory_limit_mb: int = 210000

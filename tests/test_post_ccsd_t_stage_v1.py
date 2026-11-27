@@ -123,7 +123,7 @@ def test_large_tasks_run_one_at_a_time(tmp_path, monkeypatch):
     active, peak = [0], [0]
 
     def task():
-        with point_pool.core_slot(reserve_mb=150000):
+        with point_pool.core_slot(reserve_mb=point_pool.BIG_TASK_MB + 1):
             active[0] += 1
             peak[0] = max(peak[0], active[0])
             time.sleep(0.2)

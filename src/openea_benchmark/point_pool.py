@@ -59,8 +59,10 @@ _MEM_LIMIT_FRAC = 0.0
 _MEM_RESERVE_MB = 0
 # Tasks reserving more than this run one at a time machine-wide (bigmem.lock in the
 # slot directory): the memory gate alone would admit two 150-200 GB points side by
-# side, which leaves the shared server no headroom.
-BIG_TASK_MB = 100000
+# side, which leaves the shared server no headroom.  100 GB until 2026-11-27; raised to
+# 150 GB (user decision) so two 100-150 GB points (CrO/MoO aTZ CCSDT, TiO CCSDTQ) run side
+# by side on the 564 GB server (2 x 150 GB stays below the 70 % gate).  OPENEA_BIG_TASK_MB overrides.
+BIG_TASK_MB = int(os.environ.get("OPENEA_BIG_TASK_MB", 150000))
 # Fair share of the core slots: a run (one workflow process and its workers) takes a free
 # slot only while it holds fewer than ceil(n_slots / active runs), active = holding a slot or
 # waiting for one.  Running tasks are never stopped; a run above its share just gets no new
