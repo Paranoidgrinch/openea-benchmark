@@ -162,17 +162,25 @@ class CCNotConverged(RuntimeError):
 
 
 CONVERGED_MESSAGE = "successfully converged"
+# Second attempt of a method that did not converge: denominators shifted (t += R / (D - shift),
+# the solution is unchanged) and twice the iterations.  TbO 4f9 b(3,2) frozen-f aDZ, DIIS 12:
+# unshifted the residual stalls at 1.2e-6 after 300 iterations (energy stable to 1e-9 Eh),
+# shift 0.3 Eh converges to 1e-8 in 291 iterations, E_corr equal to 5e-8 Eh.
+RETRY_ENERGY_SHIFT = 0.3
+RETRY_ITERATION_FACTOR = 2
 
 
 def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=None, m_labels=None,
          diis_size: int = 6) -> dict:
     from ccpy.drivers.driver import Driver
     out = {}
-    for method in methods:
+
+    def attempt(method, shift, iterations):
         driver = Driver(system, hamiltonian)
         driver.options["energy_convergence"] = driver.options["amp_convergence"] = convergence
-        driver.options["maximum_iterations"] = max_iterations
-        driver.options["diis_size"] = diis_size
+        driver.options["maximum_iterations"] = iterations
+        driver.options["diis_size"] = max(diis_size, 12) if shift else diis_size
+        driver.options["energy_shift"] = shift
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
             if method == "ccsdt" and m_labels is not None:
@@ -181,9 +189,21 @@ def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=
                 run_symmetric_ccsdt(driver, la, lb, noa, nob, "sum")
             else:
                 driver.run_cc(method="ccsd" if method == "ccsd(t)" else method)
-        if CONVERGED_MESSAGE not in log.getvalue():
-            raise CCNotConverged(f"{method}: no convergence in {max_iterations} iterations "
-                                 f"(last E_corr {float(driver.correlation_energy):.6f})")
+        return driver, CONVERGED_MESSAGE in log.getvalue()
+
+    for method in methods:
+        driver, ok = attempt(method, 0.0, max_iterations)
+        retried = False
+        if not ok:
+            last = float(driver.correlation_energy)
+            driver, ok = attempt(method, RETRY_ENERGY_SHIFT, RETRY_ITERATION_FACTOR * max_iterations)
+            retried = True
+        if not ok:
+            raise CCNotConverged(f"{method}: no convergence in {max_iterations} iterations nor in "
+                                 f"{RETRY_ITERATION_FACTOR * max_iterations} with shift {RETRY_ENERGY_SHIFT} "
+                                 f"(last E_corr {last:.6f} / {float(driver.correlation_energy):.6f})")
+        if retried and diagnostics is not None:
+            diagnostics.setdefault("retried_with_shift", []).append(method)
         if diagnostics is not None:
             t = driver.T
             diagnostics[method] = {"max_t1": float(max(np.abs(t.a).max(), np.abs(t.b).max())),
