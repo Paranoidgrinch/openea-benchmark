@@ -1,4 +1,5 @@
 """Patch 39: automated frozen-core CBS layer (fake CCSD(T) backend)."""
+import pytest
 from dataclasses import replace
 
 from openea_benchmark.adaptive.stage3_execution import PointExecutionStatus, Stage3ExecutionSettings, _empty_result
@@ -36,7 +37,9 @@ def backend(req, settings):
                              max_abs_t2_amplitude=0.05, reference_warnings=())
     scf, corr, trip = CBS[key]
     x = 4 if "pvqz" in req.basis else 5
-    shift = -DAUG_SHIFT if req.basis.startswith("d-") else 0.0  # diffuse lowers the anion only
+    # diffuse lowers the anion only; t-aug adds TAUG_EXTRA to the d-aug shift
+    shift = (-DAUG_SHIFT if req.basis.startswith("d-") else -(DAUG_SHIFT + TAUG_EXTRA)
+             if req.basis.startswith("t-") else 0.0)
     shift = shift if key == "A" else 0.0
     return _empty_result(req, PointExecutionStatus.COMPLETED,
                          scf_energy_hartree=scf + 0.01 * x ** -PRIMARY_EXPONENTS["scf"] + shift,
@@ -53,6 +56,7 @@ DAUG_FAILS_ALWAYS = False
 DAUG_WRONG_SOLUTION_BY_DIIS = False
 MR_T1: dict = {}
 DAUG_SHIFT = 0.0005
+TAUG_EXTRA = 0.0
 
 
 def ea_record(competitor_gap_ev, sensitivity=0.0):
@@ -403,3 +407,39 @@ def test_cbs_model_bound_above_target_widens_instead_of_blocking(tmp_path, monke
     res = run(tmp_path, 10.0)
     assert res["cbs"]["status"] == "NEED_MORE_EVIDENCE"
     assert res["status"] == "CLEARED" and res["cbs_model_bound_above_target_in_interval"]
+
+
+def test_diffuse_tail_rules():
+    from openea_benchmark.cbs_stage import diffuse_tail_ev
+    assert diffuse_tail_ev(0.004, None) == (pytest.approx(0.002), "ONE_STEP_ASSUMED_RATIO")
+    tail, status = diffuse_tail_ev(0.02, 0.004)          # r = 0.2: tail 0.2 / 0.8 * 0.004
+    assert status == "SECOND_STEP_GEOMETRIC" and tail == pytest.approx(0.001)
+    assert diffuse_tail_ev(0.02, 0.03) == (pytest.approx(0.05), "NOT_CONVERGING")
+
+
+def test_t_aug_adds_one_diffuse_shell_per_angular_momentum():
+    from pyscf import gto
+    from openea_benchmark.cbs_stage import _diffuse_superset
+    d = gto.basis.load("d-aug-cc-pvqz", "O")
+    t, prov = element_basis("O", 4, taug=True)
+    assert len(t) == len(d) + len({int(sh[0]) for sh in d}) and prov.startswith("t-aug-cc-pvqz")
+    assert _diffuse_superset("d-aug-cc-pvqz", "aug-cc-pvqz") and _diffuse_superset("t-aug-cc-pvqz", "d-aug-cc-pvqz")
+    assert not _diffuse_superset("t-aug-cc-pvqz", "aug-cc-pvqz")
+
+
+def test_small_diffuse_step_gets_a_tail_bound_without_a_second_step(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "DAUG_SHIFT", 0.0001)     # 2.7 meV < trigger
+    res = run(tmp_path, gap=2.0)
+    dc = res["diffuse_check"]
+    assert dc["status"] == "ONE_STEP_ASSUMED_RATIO" and dc["second_step"] is None
+    assert dc["residual_estimate_ev"] == pytest.approx(0.5 * 0.0001 / H)
+
+
+def test_large_diffuse_step_computes_the_t_aug_step(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "TAUG_EXTRA", 0.0001)     # Delta_2 = Delta_1 / 5
+    res = run(tmp_path, gap=2.0)
+    dc = res["diffuse_check"]
+    assert dc["status"] == "SECOND_STEP_GEOMETRIC"
+    assert dc["delta1_ev"] == pytest.approx(0.0005 / H) and dc["delta2_ev"] == pytest.approx(0.0001 / H)
+    assert dc["residual_estimate_ev"] == pytest.approx(0.25 * 0.0001 / H)
+    assert res["cbs"]["diffuse_correction_ev"] == pytest.approx(0.0006 / H)

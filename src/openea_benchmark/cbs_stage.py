@@ -121,9 +121,35 @@ class CBSStagePolicy:
     geometry_relaxation: bool = True
 
 
-def family_label(cardinal: int, *, daug: bool = False) -> str:
+def family_label(cardinal: int, *, daug: bool = False, taug: bool = False) -> str:
     """Series label used by component_resolved_cbs (element mapping kept separately)."""
-    return f"{'d-' if daug else ''}aug-cc-pv{CARDINAL_LETTER[cardinal]}z"
+    return f"{'t-' if taug else 'd-' if daug else ''}aug-cc-pv{CARDINAL_LETTER[cardinal]}z"
+
+
+# Diffuse convergence (2026-11-27).  The d-aug - aug change Delta_1 at the high cardinal
+# was added without a bound.  Each further diffuse shell changes a valence anion's EA by a
+# fraction r of the previous one (OH-: aug -> d-aug -> t-aug ~0.006 -> ~0.0005 eV); with
+# r <= 1/3 the remaining tail is at most |Delta_1| r / (1 - r) = 0.5 |Delta_1|, added to
+# the interval.  Above DIFFUSE_SECOND_STEP_TRIGGER_EV the next step is computed instead:
+# Delta_2 = EA(t-aug) - EA(d-aug) at the low cardinal (even-tempered third diffuse shell),
+# added to the correction, its geometric tail r / (1 - r) |Delta_2| (r = |Delta_2 / Delta_1|)
+# to the interval; r >= 1 (not converging) adds |Delta_1| + |Delta_2|.
+DIFFUSE_SECOND_STEP_TRIGGER_EV = 0.005
+DIFFUSE_ASSUMED_RATIO = 1.0 / 3.0
+
+
+def diffuse_tail_ev(delta1: float, delta2: float | None) -> tuple[float, str]:
+    """(bound on the diffuse increments not computed, convergence status)."""
+    if delta2 is None:
+        r = DIFFUSE_ASSUMED_RATIO
+        return abs(delta1) * r / (1.0 - r), "ONE_STEP_ASSUMED_RATIO"
+    if abs(delta1) == 0.0:
+        return abs(delta2), "SECOND_STEP"
+    r = abs(delta2) / abs(delta1)
+    if r >= 1.0:
+        return abs(delta1) + abs(delta2), "NOT_CONVERGING"
+    r_tail = max(r, 0.1)
+    return abs(delta2) * r_tail / (1.0 - r_tail), "SECOND_STEP_GEOMETRIC"
 
 
 def _element_basis_name(element: str, cardinal: int) -> str:
@@ -159,14 +185,27 @@ def _has_cardinal(element: str, cardinal: int) -> bool:
     return True
 
 
-def element_basis(element: str, cardinal: int, *, daug: bool = False) -> tuple[Any, str]:
+def element_basis(element: str, cardinal: int, *, daug: bool = False, taug: bool = False) -> tuple[Any, str]:
     """(PySCF basis spec, provenance) for one element.
 
     PP-route elements (beyond Kr) get the basis *name* aug-cc-pVXZ-PP (d-aug: its
     even-tempered extension), resolved together with its ECP when the molecule is built.
+    ``taug``: the d-aug set plus one more even-tempered diffuse shell (all-electron route
+    only; ValueError otherwise).
     """
     from pyscf import gto
     from .heavy_elements import ROUTE_PSEUDOPOTENTIAL, ROUTE_X2C, basis_name_for, element_route, resolve_named_basis
+    if taug:
+        if element_route(element)["route"] in (ROUTE_X2C, ROUTE_PSEUDOPOTENTIAL):
+            raise ValueError(f"no t-aug construction for the {element_route(element)['route']} route")
+        name = _element_basis_name(element, cardinal)
+        try:
+            shells = gto.basis.load("d-" + name, element)
+            base = "d-" + name
+        except Exception:
+            shells = _even_tempered_extra_diffuse(gto.basis.load(name, element))
+            base = f"d-{name}(EVEN_TEMPERED_CONSTRUCTED)"
+        return _even_tempered_extra_diffuse(shells), f"t-{name}(EVEN_TEMPERED_FROM_{base})"
     if element_route(element)["route"] == ROUTE_X2C:
         name = basis_name_for(element, f"{'d-' if daug else ''}aug-cc-pV{CARDINAL_LETTER[cardinal].upper()}Z")
         loaded = resolve_named_basis(name, element)
@@ -188,6 +227,52 @@ def element_basis(element: str, cardinal: int, *, daug: bool = False) -> tuple[A
     except Exception:
         shells = gto.basis.load(name, element)
         return _even_tempered_extra_diffuse(shells), f"d-{name}(EVEN_TEMPERED_CONSTRUCTED)"
+
+
+def _second_diffuse_step(selected: Mapping[str, dict], template: Mapping[str, Any], policy: "CBSStagePolicy",
+                         runner, settings, low_label: str) -> dict:
+    """EA(t-aug) - EA(d-aug) at the low cardinal for the selected states (each state's chain:
+    aug (cached) -> d-aug -> t-aug, so every step is checked against its subset basis)."""
+    cardinal = policy.low_cardinal
+    labels = (low_label, family_label(cardinal, daug=True), family_label(cardinal, taug=True))
+    chains, roles = [], []
+    for role, state in selected.items():
+        src = template[state["job_id"]]
+        reqs = []
+        for label, daug, taug in zip(labels, (False, True, False), (False, False, True)):
+            mapping, prov = {}, {}
+            try:
+                for el in src.atoms:
+                    mapping[el], prov[el] = element_basis(el, cardinal, daug=daug, taug=taug)
+            except ValueError as exc:
+                return {"status": "NOT_CONSTRUCTIBLE", "reason": str(exc), "delta2_ev": None}
+            reqs.append(replace(src, request_id=f"{src.job_id}__CBS__{label}", job_id=src.job_id,
+                                r_angstrom=float(state["r"]), basis=label, basis_by_element=mapping,
+                                source_checkpoint_path=str(state.get("seed_checkpoint") or src.source_checkpoint_path),
+                                source_link_status="CBS_BASIS_CONTINUATION_FROM_HIGH_LEVEL_REFERENCE",
+                                reference_branch=SEED_CONTINUOUS_BRANCH))
+            if label != low_label:
+                print(f"[CBS] {src.system} {state['job_id']} {label} R={state['r']:.5f} (second diffuse step)",
+                      flush=True)
+        chains.append((runner, reqs, settings))
+        roles.append(role)
+    outcomes = dict(zip(roles, run_parallel(_run_state_chain, chains)))
+    energies, out = {}, {"status": "COMPLETED", "labels": list(labels[1:]), "points": {}}
+    for role, outcome in outcomes.items():
+        for label, (result, reseed) in zip(labels, outcome):
+            res = result.to_dict()
+            status = (reseed or {}).get("rejected") or res["status"]
+            out["points"][f"{role}:{label}"] = {"status": status, "ccsd_t_total_hartree": res["ccsd_t_total_hartree"],
+                                               "reseeded": reseed}
+            if status == "COMPLETED":
+                energies[(role, label)] = res["ccsd_t_total_hartree"]
+    need = [(r, l) for r in roles for l in labels[1:]]
+    if any(k not in energies for k in need):
+        return {**out, "status": "FAILED", "delta2_ev": None}
+
+    def ea(label):
+        return (energies[("neutral", label)] - energies[("anion", label)]) * HARTREE_TO_EV
+    return {**out, "delta2_ev": ea(labels[2]) - ea(labels[1])}
 
 
 def _job_point_records(job_id: str, point_records: Mapping[str, Mapping[str, Any]],
@@ -263,6 +348,11 @@ def _binding(ea: float, lower: float, upper: float, diffuse_ev: float, policy: C
     return "UNDETERMINED", "CBS_INTERVAL_CONTAINS_ZERO"
 
 
+def _diffuse_superset(label: str, previous: str) -> bool:
+    """``label`` adds one diffuse shell to ``previous`` (aug -> d-aug -> t-aug)."""
+    return label == "d-" + previous or (previous.startswith("d-") and label == "t-" + previous[2:])
+
+
 def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]]:
     """One state's basis series in order.  A point that fails from the projected TZ
     reference is retried once, seeded from the last completed larger-basis reference of
@@ -283,7 +373,7 @@ def _run_state_chain(runner, requests, settings) -> list[tuple[Any, dict | None]
                 and result.scf_energy_hartree > ref.scf_energy_hartree + SUBSET_BASIS_SCF_TOLERANCE_HARTREE)
 
     for req in requests:
-        superset_ref = (previous[1] if previous is not None and str(req.basis) == "d-" + previous[0]
+        superset_ref = (previous[1] if previous is not None and _diffuse_superset(str(req.basis), previous[0])
                         and previous[1].high_level_checkpoint_path else None)
         result, reseed = runner(req, settings), None
         if result.status is not PointExecutionStatus.COMPLETED or above(result, superset_ref):
@@ -461,6 +551,7 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
         # Two initializations at the same R tie; the request id decides, not the record order.
         seed = min(recs, key=lambda r: (abs(float(r["r_angstrom"]) - state["r"]), str(r.get("request_id"))))
         state["seed_r_angstrom"] = seed["r_angstrom"]
+        state["seed_checkpoint"] = str(seed["high_level_checkpoint_path"])
         state["points"] = {}
         if state["selected"]:
             jobs.append((state, MR_DIAGNOSTIC_LABEL, {},
@@ -570,6 +661,18 @@ def run_cbs_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Stage3
     if diffuse_missing:
         residual = max(abs(fixed_ea(high) - fixed_ea(low)), policy.missing_diffuse_floor_ev)
         record["diffuse_check"]["residual_estimate_ev"] = residual
+    elif policy.diffuse_correction:
+        delta1 = daug_ea - fixed_ea(high)
+        delta2, second = None, None
+        if DIFFUSE_SECOND_STEP_TRIGGER_EV < abs(delta1) <= policy.diffuse_continuum_threshold_ev:
+            second = _second_diffuse_step(selected, template, policy, runner, settings, low)
+            delta2 = second.get("delta2_ev")
+        residual, convergence = diffuse_tail_ev(delta1, delta2)
+        if delta2 is None and second is not None:   # second step failed: the full first step as tail
+            residual, convergence = abs(delta1), "SECOND_STEP_FAILED"
+        daug_ea += delta2 or 0.0
+        record["diffuse_check"] = {"status": convergence, "delta1_ev": delta1, "delta2_ev": delta2,
+                                   "residual_estimate_ev": residual, "second_step": second}
     cbs = resolve_cbs(points=points, daug_fixed_ea_ev=daug_ea, full_pec_aug5_ea_ev=None,
                       diffuse_residual_estimate_ev=residual,
                       model_spread_target_ev=policy.model_spread_target_ev,
