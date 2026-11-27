@@ -605,8 +605,10 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
                           spin_orbit: Mapping[str, Any] | None = None,
                           scalar_relativity: Mapping[str, Any] | None = None,
                           post_ccsd_t: Mapping[str, Any] | None = None,
+                          rotation: Mapping[str, Any] | None = None,
                           output_dir: Path | None = None) -> dict:
-    """EA_0 = EA_e(CBS) + Delta_ZPE [+ CV] [+ SR] [+ SO] [+ post-CCSD(T)], worst-case intervals.
+    """EA_0 = EA_e(CBS) + Delta_ZPE [+ CV] [+ SR] [+ SO] [+ post-CCSD(T)] [+ rotation of the
+    lowest rovibronic levels, ``rotation_stage``], worst-case intervals.
 
     Each correction enters only when its layer CLEARED; otherwise the status is
     recorded and the correction is left out (``includes_*`` false).
@@ -657,7 +659,10 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
     dsr, srb = ((float(scalar_relativity["delta_sr_ev"]), float(scalar_relativity["delta_sr_bound_ev"] or 0.0))
                 if sr_ok else (0.0, 0.0))
     dpc, pcb = ((float(post_ccsd_t["delta_post_ev"]), float(post_ccsd_t["bound_ev"])) if pc_ok else (0.0, 0.0))
-    shift, width = dz + dcv + dso + dsr + dpc, hw + cvb + sob + srb + pcb
+    rot_ok = bool(rotation) and rotation.get("status") == "CLEARED"
+    drot, rotb = (float(rotation["delta_rot_ev"]), float(rotation["bound_ev"])) if rot_ok else (0.0, 0.0)
+    record["includes_rotation"] = rot_ok
+    shift, width = dz + dcv + dso + dsr + dpc + drot, hw + cvb + sob + srb + pcb + rotb
     ea0 = float(cbs["ea_cbs_ev"]) + shift
     lower = float(cbs["ea_cbs_lower_ev"]) + shift - width
     upper = float(cbs["ea_cbs_upper_ev"]) + shift + width
@@ -686,6 +691,7 @@ def assemble_adiabatic_ea(*, cbs: Mapping[str, Any] | None, nuclear: Mapping[str
                 delta_so_ev=dso if so_ok else None, delta_so_bound_ev=sob if so_ok else None,
                 delta_sr_ev=dsr if sr_ok else None, delta_sr_bound_ev=srb if sr_ok else None,
                 delta_post_ccsd_t_ev=dpc if pc_ok else None, delta_post_ccsd_t_bound_ev=pcb if pc_ok else None,
+                delta_rot_ev=drot if rot_ok else None, delta_rot_bound_ev=rotb if rot_ok else None,
                 post_ccsd_t_quadruples_allowance_ev=(post_ccsd_t.get("quadruples_allowance_ev")
                                                      if pc_ok else None),
                 post_ccsd_t_allowance_ev=post_ccsd_t.get("post_cc_allowance_ev") if pc_ok else None,

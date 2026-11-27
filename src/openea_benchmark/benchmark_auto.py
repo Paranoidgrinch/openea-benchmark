@@ -649,9 +649,17 @@ def run_benchmark_acquisition(
     adiabatic = None
     if nuclear is not None:
         from .vibrational_stage import assemble_adiabatic_ea
+        from .rotation_stage import run_rotation_stage
+        # Rotational energy of the lowest rovibronic levels (a few meV for hydride Pi states).
+        try:
+            rotation = run_rotation_stage(electronic_ea=electronic_ea, requests=live, nuclear=nuclear,
+                                          spin_orbit=spin_orbit)
+        except Exception as exc:  # noqa: BLE001 - recorded, EA_0 then reports includes_rotation false
+            rotation = {"stage": "LOWEST_ROVIBRONIC_LEVEL", "status": "FAILED", "reason": repr(exc)}
+        _save(output_dir / "rotation.json", rotation)
         adiabatic = assemble_adiabatic_ea(cbs=cbs, nuclear=nuclear, core_valence=core_valence,
                                           spin_orbit=spin_orbit, scalar_relativity=scalar_relativity,
-                                          post_ccsd_t=post_ccsd_t, output_dir=output_dir)
+                                          post_ccsd_t=post_ccsd_t, rotation=rotation, output_dir=output_dir)
         if mr_term_gap is not None and mr_term_gap.get("status") == "CLEARED":
             from .mr_term_gap import apply_mr_term_gaps
             adiabatic = apply_mr_term_gaps(adiabatic, mr_term_gap)
