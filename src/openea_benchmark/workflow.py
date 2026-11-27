@@ -383,6 +383,14 @@ def _run_symmetry_auto(args) -> int:
         _write_json(args.output / f"{atom_a}{atom_b}" / "final_verdict.json", verdict)
         print("[SYMMETRY AUTO] " + json.dumps(verdict), flush=True)
         return 2
+    from .ln_oxide_route import route_b_element, route_b_unavailable
+    gap = route_b_unavailable(atom_a, atom_b)
+    if gap:  # open f shell outside the lanthanide-monoxide model: fail closed before computing
+        verdict = {"system": f"{atom_a}{atom_b}",
+                   "final_verdict": {"outcome": "UNRESOLVED", "warnings": [], "blocking": [gap]}}
+        _write_json(args.output / f"{atom_a}{atom_b}" / "final_verdict.json", verdict)
+        print("[SYMMETRY AUTO] " + json.dumps(verdict), flush=True)
+        return 0
     from .heavy_elements import set_model_hamiltonian
     print(f"[SYMMETRY AUTO] model Hamiltonian {set_model_hamiltonian((atom_a, atom_b))}", flush=True)
     from .compute_threads import set_compute_threads
@@ -397,6 +405,18 @@ def _run_symmetry_auto(args) -> int:
                          mem_reserve_mb=(DEFAULT_TASK_RESERVE_MB if args.mem_reserve_mb is None
                                          else args.mem_reserve_mb))
     system_dir = args.output / f"{atom_a}{atom_b}"
+    ln = route_b_element(atom_a, atom_b)
+    if ln is not None and not args.auto_dry_run and not args.no_electronic_ea:
+        # Route B: lanthanide monoxide with an open 4f shell, axial determinants (ln_oxide_route).
+        from .ln_oxide_route import final_verdict as route_b_verdict, run_route_b
+        print(f"[SYMMETRY AUTO] route B (axial determinants) for {atom_a}{atom_b}", flush=True)
+        route = run_route_b(element=ln, output_dir=system_dir / "route_b")
+        verdict = route_b_verdict(route)
+        _write_json(system_dir / "final_verdict.json", {"system": f"{atom_a}{atom_b}", "route": "B_AXIAL_LN_OXIDE",
+                                                        "outcome": verdict["outcome"], "final_verdict": verdict})
+        print("[SYMMETRY AUTO] " + json.dumps({"system": f"{atom_a}{atom_b}", "route": "B_AXIAL_LN_OXIDE",
+                                               "final_verdict": verdict}, default=str), flush=True)
+        return 0
     print(f"[SYMMETRY AUTO] symmetry scout {atom_a}{atom_b}", flush=True)
     record = run_symmetry_scout(atom_a, atom_b, output_dir=system_dir / "symmetry_scout")
     preliminary = to_legacy_summary(record)
