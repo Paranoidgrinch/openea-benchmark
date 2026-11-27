@@ -22,7 +22,8 @@ small basis plus a basis-set increment evaluated entirely in the Stage-3 CCSD(T)
 Central values: Delta_T(aug-cc-pVTZ), bound |Delta_T(TZ) - Delta_T(DZ)| (only the
 aDZ value when aTZ CCSDT exceeds the memory limit: bound 50 % of it);
 Delta_Q(first affordable of aug-cc-pVDZ, cc-pVDZ), bound 50 % of |Delta_Q| (pilot; DZ quadruples are basis-
-incomplete).  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
+incomplete), plus Q_NO_DIFFUSE_ALLOWANCE_EV when only cc-pVDZ fits (user decision 2026-11-27: aug-cc-pVDZ
+wherever it fits; with symcc it does for most diatomics).  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
 showed its DZ->TZ transfer disagreeing with exact CCSDTQ by 0.1 eV.
 
 Exact CCSDTQ amplitudes grow as (o v)^4 and CCpy keeps them in RAM (only the DIIS
@@ -224,6 +225,20 @@ OUT_OF_CORE_LIMIT_GROUP = ("cc_out_of_core", MAX_OUT_OF_CORE_POINTS)
 Q_MEMORY_LIMIT_ENV = "OPENEA_Q_MEMORY_LIMIT_MB"
 SCRATCH_SHARE = 0.5
 Q_ALLOWANCE_MIN_EV = 0.02
+# Delta_Q without diffuse functions underestimates the anion's quadruples: symcc 2026-11-27,
+# vertical EA at one bond length, Delta_Q(aug-cc-pVDZ) - Delta_Q(cc-pVDZ) = OH +0.0071, NH +0.0066,
+# CH +0.0037, SH +0.0038, SiH +0.0023 eV (cc-pVDZ gives 1/4 - 1/2 of the aug value), so a bound
+# relative to Delta_Q(cc-pVDZ) is not conservative.  A cc-pVDZ Delta_Q (exact or FNO) adds the
+# largest measured difference to its bound.  Not a policy field (point signature).
+Q_NO_DIFFUSE_ALLOWANCE_EV = 0.0075
+
+
+def has_diffuse(basis: str) -> bool:
+    return str(basis).lower().startswith(("aug-", "d-aug-", "t-aug-"))
+
+
+def q_diffuse_allowance_ev(basis: str) -> float:
+    return 0.0 if has_diffuse(basis) else Q_NO_DIFFUSE_ALLOWANCE_EV
 # No triples basis fits either: no post-CCSD(T) correction, this allowance instead
 # (verify_v1 |Delta_T| + |Delta_Q| <= 0.042 eV: IO 0.041, BrO 0.032, CuO aDZ 0.027).
 POST_CC_ALLOWANCE_EV = 0.05
@@ -699,9 +714,11 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
         record["fno_ccsdtq"] = fno
         if fno["status"] == "COMPLETED":
             q_basis_used = policy.quadruples_bases[-1]
-            q_bound = fno["half_width_ev"] + policy.quadruples_relative_bound * abs(fno["delta_ev"])
+            diffuse = q_diffuse_allowance_ev(q_basis_used)
+            q_bound = fno["half_width_ev"] + policy.quadruples_relative_bound * abs(fno["delta_ev"]) + diffuse
             return done(status="CLEARED_FNO_CCSDTQ", quadruples_computed=False, beyond_triples_computed=True,
                         quadruples_basis=q_basis_used, delta_q_ev=fno["delta_ev"], delta_q_bound_ev=q_bound,
+                        quadruples_diffuse_allowance_ev=diffuse,
                         delta_post_ev=t_central + fno["delta_ev"], bound_ev=t_bound + q_bound,
                         reason=f"CCSDTQ storage {estimates} MB exceeds {limit_mb} MB; beyond-CCSDT increment "
                                f"E(CCSDTQ) - E(CCSDT) in frozen-natural-orbital spaces ({q_basis_used})")
@@ -713,6 +730,8 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
                     reason=f"CCSDTQ storage {estimates} MB exceeds {limit_mb} MB RAM or the scratch share; "
                            f"Delta_T applied, quadruples allowance {allowance:.4f} eV added to the bound")
     delta_q = ea(q_basis, "CCSDTQ") - ea(q_basis, "CCSDT")
-    q_bound = policy.quadruples_relative_bound * abs(delta_q)
+    diffuse = q_diffuse_allowance_ev(q_basis)
+    q_bound = policy.quadruples_relative_bound * abs(delta_q) + diffuse
     return done(status="CLEARED", quadruples_computed=True, delta_q_ev=delta_q, delta_q_bound_ev=q_bound,
+                quadruples_diffuse_allowance_ev=diffuse,
                 delta_post_ev=t_central + delta_q, bound_ev=t_bound + q_bound)

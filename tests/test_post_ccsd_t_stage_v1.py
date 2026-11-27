@@ -53,8 +53,21 @@ def test_triples_tz_central_and_quadruples_in_first_affordable_basis(tmp_path, m
     assert res["status"] == "CLEARED" and res["quadruples_basis"] == "aug-cc-pvdz"
     assert abs(res["delta_t_ev"] + 0.006) < 1e-9 and abs(res["delta_t_bound_ev"] - 0.002) < 1e-9
     assert abs(res["delta_q_ev"] - 0.010) < 1e-9 and abs(res["delta_post_ev"] - 0.004) < 1e-9
+    assert res["quadruples_diffuse_allowance_ev"] == 0.0
+    assert abs(res["delta_q_bound_ev"] - 0.005) < 1e-9
     res = run(tmp_path, monkeypatch, limit=20000)  # aug-cc-pVDZ too large: cc-pVDZ
     assert res["quadruples_basis"] == "cc-pvdz" and abs(res["delta_q_ev"] - 0.008) < 1e-9
+    # no diffuse functions: the bound gains the measured aug-cc-pVDZ - cc-pVDZ difference
+    allowance = post_ccsd_t_stage.Q_NO_DIFFUSE_ALLOWANCE_EV
+    assert res["quadruples_diffuse_allowance_ev"] == allowance
+    assert abs(res["delta_q_bound_ev"] - (0.004 + allowance)) < 1e-9
+    assert abs(res["bound_ev"] - (0.002 + 0.004 + allowance)) < 1e-9
+
+
+def test_diffuse_basis_names():
+    assert post_ccsd_t_stage.has_diffuse("aug-cc-pvdz") and post_ccsd_t_stage.has_diffuse("AUG-cc-pVDZ-PP")
+    assert post_ccsd_t_stage.has_diffuse("d-aug-cc-pvdz")
+    assert not post_ccsd_t_stage.has_diffuse("cc-pvdz") and not post_ccsd_t_stage.has_diffuse("cc-pvdz-pp")
 
 
 def test_unaffordable_quadruples_apply_triples_with_a_quadruples_allowance(tmp_path, monkeypatch):
@@ -211,7 +224,7 @@ def test_unaffordable_quadruples_use_fno_ccsdtq_increment(tmp_path, monkeypatch)
     res = run(tmp_path, monkeypatch, limit=5000)
     assert res["status"] == "CLEARED_FNO_CCSDTQ" and res["beyond_triples_computed"]
     assert abs(res["delta_post_ev"] - (-0.006 - 0.008)) < 1e-9
-    assert abs(res["bound_ev"] - (0.002 + 0.001 + 0.5 * 0.008)) < 1e-9
+    assert abs(res["bound_ev"] - (0.002 + 0.001 + 0.5 * 0.008 + post_ccsd_t_stage.Q_NO_DIFFUSE_ALLOWANCE_EV)) < 1e-9
     cbs = {"binding_at_cbs": "BOUND", "status": "CLEARED", "ea_cbs_ev": 1.0, "ea_cbs_lower_ev": 0.99,
            "ea_cbs_upper_ev": 1.01}
     nuc = {"status": "CLEARED", "delta_zpe_ev": 0.0, "delta_zpe_half_width_ev": 0.0, "anion_vibrational_binding": "BOUND"}
