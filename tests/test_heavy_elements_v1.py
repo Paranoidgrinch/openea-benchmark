@@ -132,7 +132,8 @@ def test_closed_d_shell_promotion():
 def test_unsupported_element_fails_before_computing(tmp_path):
     import json
     from openea_benchmark.workflow import main
-    assert main(["--mode", "symmetry-auto", "--atoms", "Rf", "O", "--output", str(tmp_path)]) == 2
+    assert main(["--mode", "symmetry-auto", "--atoms", "Rf", "O", "--output", str(tmp_path),
+                 "--quadruples-basis", "cc-pvdz"]) == 2
     verdict = json.loads((tmp_path / "RfO" / "final_verdict.json").read_text())
     assert verdict["final_verdict"] == "ELEMENT_NOT_SUPPORTED"
 

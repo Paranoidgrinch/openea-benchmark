@@ -349,6 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
              f"(default {DEFAULT_POINT_MEMORY_CAP_MB})",
     )
     parser.add_argument(
+        "--quadruples-basis", choices=("cc-pvdz", "aug-cc-pvdz"), default=None,
+        help="basis of the post-CC quadruples correction Delta_Q: cc-pvdz (small, bound + 0.0075 eV) or "
+             "aug-cc-pvdz (where it fits, else cc-pvdz); required when the post-CC layer runs",
+    )
+    parser.add_argument(
         "--no-open-pec-extension", action="store_true",
         help="Skip the D09 EXTEND_OPEN_PEC continuation scans and DFT fragment asymptotes",
     )
@@ -434,6 +439,7 @@ def _run_symmetry_auto(args) -> int:
             soc_stage=not args.no_soc and not args.no_electronic_ea,
             sr_stage=not args.no_sr and not args.no_electronic_ea,
             post_cc_stage=not args.no_post_cc and not args.no_electronic_ea,
+            quadruples_basis=args.quadruples_basis or "aug-cc-pvdz",
             mr_competitor_stage=not args.no_mr_competitors and not args.no_electronic_ea,
         ),
     )
@@ -458,7 +464,15 @@ def _run_symmetry_auto(args) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    return _run_symmetry_auto(build_parser().parse_args(argv))
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    # The Delta_Q basis is chosen per run at the start (user decision 2026-11-27), never by default.
+    if (args.quadruples_basis is None and not args.no_post_cc and not args.no_electronic_ea
+            and not args.auto_dry_run):
+        parser.error("--quadruples-basis cc-pvdz|aug-cc-pvdz is required when the post-CC layer runs")
+    if args.quadruples_basis is not None:
+        print(f"[POST-CC] quadruples basis option: {args.quadruples_basis}", flush=True)
+    return _run_symmetry_auto(args)
 
 
 if __name__ == "__main__":

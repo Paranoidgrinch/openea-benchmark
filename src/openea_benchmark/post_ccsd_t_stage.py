@@ -21,9 +21,10 @@ small basis plus a basis-set increment evaluated entirely in the Stage-3 CCSD(T)
 
 Central values: Delta_T(aug-cc-pVTZ), bound |Delta_T(TZ) - Delta_T(DZ)| (only the
 aDZ value when aTZ CCSDT exceeds the memory limit: bound 50 % of it);
-Delta_Q(first affordable of aug-cc-pVDZ, cc-pVDZ), bound 50 % of |Delta_Q| (pilot; DZ quadruples are basis-
-incomplete), plus Q_NO_DIFFUSE_ALLOWANCE_EV when only cc-pVDZ fits (user decision 2026-11-27: aug-cc-pVDZ
-wherever it fits; with symcc it does for most diatomics).  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
+Delta_Q in the basis chosen at the start of the run (``quadruples_basis``, user decision 2026-11-27:
+both options kept): "aug-cc-pvdz" = first affordable of aug-cc-pVDZ, cc-pVDZ; "cc-pvdz" = cc-pVDZ only
+(aug-cc-pVDZ changes Delta_Q by meV only, at ~10x the memory and days of CCSDTQ).  Bound 50 % of |Delta_Q|
+(pilot; DZ quadruples are basis-incomplete), plus Q_NO_DIFFUSE_ALLOWANCE_EV for a cc-pVDZ Delta_Q.  CR-CC(2,4) is not used: the OH study (runs/oh_crcc24_transfer_*)
 showed its DZ->TZ transfer disagreeing with exact CCSDTQ by 0.1 eV.
 
 Exact CCSDTQ amplitudes grow as (o v)^4 and CCpy keeps them in RAM (only the DIIS
@@ -239,6 +240,20 @@ def has_diffuse(basis: str) -> bool:
 
 def q_diffuse_allowance_ev(basis: str) -> float:
     return 0.0 if has_diffuse(basis) else Q_NO_DIFFUSE_ALLOWANCE_EV
+
+
+# Quadruples basis option, chosen per run at the start (workflow --quadruples-basis, Q_BASIS in
+# scripts/run_one.sh).  Not a policy field: the policy is part of every post-CC point signature,
+# and the choice only selects among the policy's bases (cached points of either basis stay valid).
+QUADRUPLES_BASIS_CHOICES = ("cc-pvdz", "aug-cc-pvdz")
+
+
+def quadruples_candidates(policy: "PostCCSDTStagePolicy", choice: str) -> tuple[str, ...]:
+    if choice not in QUADRUPLES_BASIS_CHOICES:
+        raise ValueError(f"quadruples basis {choice!r}: choose one of {QUADRUPLES_BASIS_CHOICES}")
+    if choice == "aug-cc-pvdz":
+        return tuple(policy.quadruples_bases)
+    return tuple(b for b in policy.quadruples_bases if not has_diffuse(b))
 # No triples basis fits either: no post-CCSD(T) correction, this allowance instead
 # (verify_v1 |Delta_T| + |Delta_Q| <= 0.042 eV: IO 0.041, BrO 0.032, CuO aDZ 0.027).
 POST_CC_ALLOWANCE_EV = 0.05
@@ -627,7 +642,8 @@ def _fno_increment(states: Mapping[str, Any], policy: PostCCSDTStagePolicy, outp
 
 def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequence[Any],
                           point_records: Mapping[str, Mapping[str, Any]], refinement_dir: Path, output_dir: Path,
-                          policy: PostCCSDTStagePolicy = PostCCSDTStagePolicy(), point_fn=None) -> dict:
+                          policy: PostCCSDTStagePolicy = PostCCSDTStagePolicy(), point_fn=None,
+                          quadruples_basis: str = "aug-cc-pvdz") -> dict:
     output_dir = Path(output_dir)
     record: dict[str, Any] = {"stage": "POST_CCSD_T", "policy": asdict(policy), "is_production_ea": False,
                               "validation_metadata_used_in_computation": False}
@@ -656,11 +672,13 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
         return (need(basis, method) <= limit_mb
                 and sum(cc_scratch_need_mb(s, basis, method) for s in states.values()) <= SCRATCH_SHARE * free_mb)
 
-    estimates = {b: need(b, "CCSDTQ") for b in policy.quadruples_bases}
+    q_candidates = quadruples_candidates(policy, quadruples_basis)
+    record["quadruples_basis_choice"] = quadruples_basis
+    estimates = {b: need(b, "CCSDTQ") for b in q_candidates}
     record["quadruples_storage_estimate_mb"] = estimates
     record["resource_limits"] = {"ram_limit_mb": limit_mb, "scratch_free_mb": free_mb,
                                  "scratch_share": SCRATCH_SHARE}
-    q_basis = next((b for b in policy.quadruples_bases if affordable(b, "CCSDTQ")), None)
+    q_basis = next((b for b in q_candidates if affordable(b, "CCSDTQ")), None)
     run_q = q_basis is not None
     record["quadruples_basis"] = q_basis
     t_bases = tuple(b for b in policy.triples_bases if affordable(b, "CCSDT"))
@@ -713,7 +731,7 @@ def run_post_ccsd_t_stage(*, electronic_ea: Mapping[str, Any], requests: Sequenc
         fno = _fno_increment(states, policy, output_dir)
         record["fno_ccsdtq"] = fno
         if fno["status"] == "COMPLETED":
-            q_basis_used = policy.quadruples_bases[-1]
+            q_basis_used = q_candidates[-1]
             diffuse = q_diffuse_allowance_ev(q_basis_used)
             q_bound = fno["half_width_ev"] + policy.quadruples_relative_bound * abs(fno["delta_ev"]) + diffuse
             return done(status="CLEARED_FNO_CCSDTQ", quadruples_computed=False, beyond_triples_computed=True,

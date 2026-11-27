@@ -3,12 +3,21 @@
 OpenEA computes the adiabatic electron affinity EA₀ of a diatomic molecule from nothing but
 its two element symbols. It finds the electronic states of the neutral molecule and the
 anion, decides which methods and corrections are needed, runs them, and returns an
-interval with a status, or `UNBOUND` if the anion is not bound. There are no manual choices
-and no reference data: experimental values are used only afterwards, to check the result.
+interval with a status, or `UNBOUND` if the anion is not bound. There is one manual choice,
+the basis of the quadruples correction (below), and no reference data: experimental values
+are used only afterwards, to check the result.
 
 ```bash
-python -m openea_benchmark.workflow --atoms O H --output results/OH
+python -m openea_benchmark.workflow --atoms O H --output results/OH --quadruples-basis cc-pvdz
 ```
+
+`--quadruples-basis` sets the basis of ΔQ = EA(CCSDTQ) − EA(CCSDT) and must be given for a
+full run:
+
+- `cc-pvdz`: small and fast. The bound gains 0.0075 eV, the largest measured change from
+  adding diffuse functions (OH, NH, CH, SH, SiH: +0.002 to +0.007 eV).
+- `aug-cc-pvdz`: diffuse functions, used where CCSDTQ fits in memory (otherwise
+  cc-pVDZ). About 10× the memory and days of CCSDTQ per molecule.
 
 ```json
 {"outcome": "EA", "ea_ev": 1.8284, "ea_lower_ev": 1.8057, "ea_upper_ev": 1.8511,
@@ -123,13 +132,14 @@ Python ≥ 3.11, PySCF 2.14. Optional but needed for heavier systems:
 ## Running many molecules
 
 ```bash
-scripts/start_detached.sh verify_v1 O:H Ti:O Ag:Ag
+Q_BASIS=cc-pvdz scripts/start_detached.sh verify_v1 O:H Ti:O Ag:Ag
 ```
 
 starts a detached batch: logs in `runs/verify_v1/<AB>.log`, results in
 `../openea_results/verify_v1/<AB>/` (`OPENEA_OUTPUT` changes the root). All runs on the
 machine share a core-slot budget and a memory gate (a calculation starts only while used
 plus reserved memory stays below 70 % of RAM); a watchdog pauses at 70 % and stops at 80 %.
+`Q_BASIS` (`cc-pvdz` or `aug-cc-pvdz`) is required; the batch does not start without it.
 `THREADS`, `CORE_SLOTS`, `CBS_MEMORY_MB` and `MEM_LIMIT_FRAC` are environment overrides.
 Stop a batch with `kill -TERM -- -<pid>` (the pid is printed and stored in `runs/<run>/`).
 

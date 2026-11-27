@@ -447,3 +447,35 @@ def test_symcc_ccsdtq_point_equals_the_dense_point(tmp_path, monkeypatch):
     assert blocked["status"] == dense["status"] == "COMPLETED", (blocked, dense)
     assert blocked["quadruples_algorithm"] == "SYMCC_SYMMETRY_BLOCKED"
     assert blocked["total_hartree"] == pytest.approx(dense["total_hartree"], abs=1e-8)
+
+
+def test_quadruples_basis_option_cc_pvdz_skips_the_aug_basis(tmp_path, monkeypatch):
+    policy = PostCCSDTStagePolicy()
+    assert post_ccsd_t_stage.quadruples_candidates(policy, "aug-cc-pvdz") == ("aug-cc-pvdz", "cc-pvdz")
+    assert post_ccsd_t_stage.quadruples_candidates(policy, "cc-pvdz") == ("cc-pvdz",)
+    with pytest.raises(ValueError):
+        post_ccsd_t_stage.quadruples_candidates(policy, "cc-pvtz")
+    monkeypatch.setattr(post_ccsd_t_stage, "cc_storage_mb",
+                        lambda spec, basis, method: (50000.0 if basis == "aug-cc-pvdz" else 10000.0)
+                        if method == "CCSDTQ" else 1000.0)
+    monkeypatch.setattr(post_ccsd_t_stage, "cc_scratch_need_mb", lambda spec, basis, method: 0.0)
+    reqs = [request("N", 0, 1), request("A", -1, 0)]
+    recs = {f"{j}-{i}": {"job_id": j, "request_id": f"{j}-{i}", "status": "COMPLETED", "r_angstrom": r,
+                         "high_level_checkpoint_path": f"/hl/{j}{r}"} for j in "NA" for i, r in enumerate((0.9, 1.0))}
+    res = run_post_ccsd_t_stage(electronic_ea=ea_record(2.0), requests=reqs, point_records=recs,
+                                refinement_dir=tmp_path / "none", output_dir=tmp_path / "pc",
+                                policy=PostCCSDTStagePolicy(q_memory_limit_mb=60000), point_fn=fake_point,
+                                quadruples_basis="cc-pvdz")
+    # aug-cc-pVDZ would fit (50 GB < 60 GB) but the run chose cc-pVDZ
+    assert res["status"] == "CLEARED" and res["quadruples_basis"] == "cc-pvdz"
+    assert res["quadruples_basis_choice"] == "cc-pvdz" and list(res["quadruples_storage_estimate_mb"]) == ["cc-pvdz"]
+    assert abs(res["delta_q_ev"] - 0.008) < 1e-9
+
+
+def test_workflow_requires_the_quadruples_basis_for_full_runs(capsys):
+    from openea_benchmark import workflow
+    with pytest.raises(SystemExit):
+        workflow.main(["--atoms", "O", "H", "--output", "/nonexistent/x"])
+    assert "--quadruples-basis" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        workflow.main(["--atoms", "O", "H", "--quadruples-basis", "cc-pvtz"])

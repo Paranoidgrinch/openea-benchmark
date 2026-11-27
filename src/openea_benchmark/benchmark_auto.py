@@ -193,6 +193,9 @@ class AcquisitionSettings:
     soc_stage: bool = False
     sr_stage: bool = False
     post_cc_stage: bool = False
+    # Delta_Q basis option of the post-CC layer, chosen per run ("cc-pvdz" | "aug-cc-pvdz";
+    # post_ccsd_t_stage.quadruples_candidates).
+    quadruples_basis: str = "aug-cc-pvdz"
     mr_competitor_stage: bool = False
 
     def __post_init__(self) -> None:
@@ -202,6 +205,9 @@ class AcquisitionSettings:
             raise ValueError("stability_following_max_steps must be non-negative")
         if self.scalar_relativistic not in ("NONE", "SFX2C1E"):
             raise ValueError("Unsupported scalar Hamiltonian")
+        from .post_ccsd_t_stage import QUADRUPLES_BASIS_CHOICES
+        if self.quadruples_basis not in QUADRUPLES_BASIS_CHOICES:
+            raise ValueError(f"quadruples_basis must be one of {QUADRUPLES_BASIS_CHOICES}")
 
 
 def _unchanged_since(source: str | None, record: Path) -> bool:
@@ -586,7 +592,8 @@ def run_benchmark_acquisition(
         return run_post_ccsd_t_stage(
             electronic_ea=electronic_ea, requests=live, point_records=point_result_records,
             refinement_dir=output_dir / "electronic_ea" / "refinement_points", output_dir=output_dir / "post_ccsd_t",
-            policy=PostCCSDTStagePolicy(max_memory_mb=settings.cbs_memory_mb))
+            policy=PostCCSDTStagePolicy(max_memory_mb=settings.cbs_memory_mb),
+            quadruples_basis=settings.quadruples_basis)
 
     mr_labels = [f"q={m.get('charge')} {m.get('label')}" for m in summary.get("mr_only_candidates", ())]
     pending_labels, pending_r = pending_mr_competitor_labels(electronic_ea, requests)
