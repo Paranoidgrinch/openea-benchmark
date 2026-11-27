@@ -504,3 +504,30 @@ def test_run_beyond_its_share_borrows_a_free_slot_when_nobody_starves(tmp_path, 
             fh.close()
         point_pool.shutdown_point_pool()
         point_pool.configure_point_pool(workers=1, threads=1)
+
+
+def test_big_task_waits_for_its_turn_before_taking_a_group_slot(tmp_path, monkeypatch):
+    """A large task queued behind another large task must leave the group slots free."""
+    import fcntl, threading
+    from openea_benchmark import point_pool
+    monkeypatch.setattr(point_pool, "_SLOT_DIR", str(tmp_path))
+    big = open(tmp_path / "bigmem.lock", "a+")
+    fcntl.flock(big, fcntl.LOCK_EX)          # another large task runs
+    inside = threading.Event()
+
+    def large_task():
+        with point_pool.big_task_slot(point_pool.BIG_TASK_MB + 1), point_pool.limit_group(("g", 1)):
+            inside.set()
+    t = threading.Thread(target=large_task)
+    t.start()
+    time.sleep(0.5)
+    with open(tmp_path / "group_g_0.lock", "a+") as fh:   # the group slot is still free
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fh, fcntl.LOCK_UN)
+    assert not inside.is_set()
+    fcntl.flock(big, fcntl.LOCK_UN)
+    big.close()
+    t.join(timeout=30)
+    assert inside.is_set() and not t.is_alive()
+    with point_pool.big_task_slot(10.0):   # small task: no bigmem lock taken
+        assert getattr(point_pool._LOCAL, "big", None) is None

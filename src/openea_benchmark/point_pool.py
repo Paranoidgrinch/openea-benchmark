@@ -564,12 +564,11 @@ def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = Non
         finally:
             _record(handle, previous)
         return
-    big = None
+    big, own_big = None, False
     if reserve_mb is not None and float(reserve_mb) > BIG_TASK_MB:
-        big = open(os.path.join(_SLOT_DIR, "bigmem.lock"), "a+")
-        print(f"[MEMORY GATE] pid {os.getpid()} large task ({float(reserve_mb) / 1024:.0f} GB): "
-              f"waiting for the one-at-a-time slot", flush=True)
-        fcntl.flock(big, fcntl.LOCK_EX)
+        big = getattr(_LOCAL, "big", None)   # taken already by big_task_slot (before the limit group)
+        if big is None:
+            big, own_big = _lock_big_slot(reserve_mb), True
     handle = _acquire_fair_slot()
     _LOCAL.held, _LOCAL.handle, _LOCAL.hold = True, handle, bool(hold)
     try:
@@ -583,13 +582,45 @@ def core_slot(reserve_mb: float | None = None, *, default_mb: float | None = Non
         handle.truncate()
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()
-        if big is not None:
-            big.seek(0)
-            big.truncate()
-            fcntl.flock(big, fcntl.LOCK_UN)
-            big.close()
+        if own_big:
+            _release_big_slot(big)
         if _IN_WORKER:
             prune_process_scratch()  # the task is over: its scratch files are garbage
+
+
+def _lock_big_slot(reserve_mb: float):
+    big = open(os.path.join(_SLOT_DIR, "bigmem.lock"), "a+")
+    print(f"[MEMORY GATE] pid {os.getpid()} large task ({float(reserve_mb) / 1024:.0f} GB): "
+          f"waiting for the one-at-a-time slot", flush=True)
+    fcntl.flock(big, fcntl.LOCK_EX)
+    return big
+
+
+def _release_big_slot(big) -> None:
+    big.seek(0)
+    big.truncate()
+    fcntl.flock(big, fcntl.LOCK_UN)
+    big.close()
+
+
+@contextmanager
+def big_task_slot(reserve_mb: float | None):
+    """The one-at-a-time slot (bigmem.lock) of a task above BIG_TASK_MB, taken before its
+    limit group and core slot (``core_slot`` then uses it).  A large task waiting for its
+    turn must not hold a group slot meanwhile: 2026-11-24..27 the MoO aug-cc-pVTZ CCSDT point
+    held cc_out_of_core slot 1 for three days behind the FeO point in bigmem.lock, and the
+    ClCl and CrO out-of-core points behind it did not start."""
+    if (not _SLOT_DIR or reserve_mb is None or float(reserve_mb) <= BIG_TASK_MB
+            or getattr(_LOCAL, "held", False) or getattr(_LOCAL, "big", None) is not None):
+        yield
+        return
+    big = _lock_big_slot(reserve_mb)
+    _LOCAL.big = big
+    try:
+        yield
+    finally:
+        _LOCAL.big = None
+        _release_big_slot(big)
 
 
 def _run_id() -> str:
@@ -691,7 +722,8 @@ def stage3_task_estimate_mb(args: tuple) -> float | None:
 def limit_group(group: tuple[str, int] | None):
     """At most ``n`` tasks of group ``(name, n)`` run at a time machine-wide (no-op without
     a slot directory or group).  Taken before the core slot, so a waiting task holds
-    neither a slot nor memory."""
+    neither a slot nor memory; a large task takes its one-at-a-time slot first
+    (``big_task_slot``), so it never holds a group slot while waiting for its turn."""
     if group is None or not _SLOT_DIR:
         yield
         return
@@ -730,7 +762,7 @@ def _slotted_call(fn: Callable[..., Any], args: tuple, reserve_mb: float | None 
         estimate = stage3_task_estimate_mb(args)
         if estimate is not None and estimate < _MEM_RESERVE_MB:
             default_mb = estimate
-    with limit_group(group), core_slot(reserve_mb, default_mb=default_mb, hold=hold):
+    with big_task_slot(reserve_mb), limit_group(group), core_slot(reserve_mb, default_mb=default_mb, hold=hold):
         return fn(*args)
 
 
