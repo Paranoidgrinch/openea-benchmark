@@ -128,7 +128,8 @@ def family_label(cardinal: int, *, daug: bool = False, taug: bool = False) -> st
 
 # Diffuse convergence (2026-11-27).  The d-aug - aug change Delta_1 at the high cardinal
 # was added without a bound.  Each further diffuse shell changes a valence anion's EA by a
-# fraction r of the previous one (OH-: aug -> d-aug -> t-aug ~0.006 -> ~0.0005 eV); with
+# fraction r of the previous one (OH CCSD(T)/QZ at 0.97 A, 2026-11-27: Delta_1 = +0.01146,
+# Delta_2 = +0.00010 eV, r = 0.009; t-aug overlap eigenvalue 1.3e-5, SCF stable); with
 # r <= 1/3 the remaining tail is at most |Delta_1| r / (1 - r) = 0.5 |Delta_1|, added to
 # the interval.  Above DIFFUSE_SECOND_STEP_TRIGGER_EV the next step is computed instead:
 # Delta_2 = EA(t-aug) - EA(d-aug) at the low cardinal (even-tempered third diffuse shell),
