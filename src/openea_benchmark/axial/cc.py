@@ -168,6 +168,32 @@ CONVERGED_MESSAGE = "successfully converged"
 # shift 0.3 Eh converges to 1e-8 in 291 iterations, E_corr equal to 5e-8 Eh.
 RETRY_ENERGY_SHIFT = 0.3
 RETRY_ITERATION_FACTOR = 2
+# Accepted without the amplitude threshold when the energy is stable: over the last
+# ENERGY_STABLE_WINDOW iterations E_corr stays within ENERGY_STABLE_TOLERANCE of its last value
+# and the residual is below ENERGY_STABLE_MAX_RESIDUAL.  TbO 4f9 b(3,2): unshifted the residual
+# stalls at 1.2e-6 with E_corr stable to 1e-9; the converged (shifted) E_corr differs by 5e-8 Eh.
+ENERGY_STABLE_WINDOW = 20
+ENERGY_STABLE_TOLERANCE = 1.0e-8
+ENERGY_STABLE_MAX_RESIDUAL = 1.0e-5
+_ITERATION_LINE = __import__("re").compile(r"^\s*(\d+)\s+([0-9.Ee+-]+)\s+([-0-9.Ee+]+)\s+([-0-9.Ee+]+)\s")
+
+
+def energy_stable(log: str) -> bool:
+    """CCpy iteration table (iteration, residual, delta E, E_corr): energy stable, residual small."""
+    rows = []
+    for line in log.splitlines():
+        m = _ITERATION_LINE.match(line)
+        if m:
+            try:
+                rows.append((float(m.group(2)), float(m.group(4))))
+            except ValueError:
+                continue
+    if len(rows) < ENERGY_STABLE_WINDOW:
+        return False
+    tail = rows[-ENERGY_STABLE_WINDOW:]
+    last = tail[-1][1]
+    return (max(abs(e - last) for _, e in tail) <= ENERGY_STABLE_TOLERANCE
+            and tail[-1][0] <= ENERGY_STABLE_MAX_RESIDUAL)
 
 
 def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=None, m_labels=None,
@@ -189,21 +215,27 @@ def _run(system, hamiltonian, methods, convergence, max_iterations, diagnostics=
                 run_symmetric_ccsdt(driver, la, lb, noa, nob, "sum")
             else:
                 driver.run_cc(method="ccsd" if method == "ccsd(t)" else method)
-        return driver, CONVERGED_MESSAGE in log.getvalue()
+        text = log.getvalue()
+        if CONVERGED_MESSAGE in text:
+            return driver, "CONVERGED"
+        return driver, ("ENERGY_STABLE" if energy_stable(text) else None)
 
     for method in methods:
-        driver, ok = attempt(method, 0.0, max_iterations)
+        driver, how = attempt(method, 0.0, max_iterations)
         retried = False
-        if not ok:
+        if how is None:
             last = float(driver.correlation_energy)
-            driver, ok = attempt(method, RETRY_ENERGY_SHIFT, RETRY_ITERATION_FACTOR * max_iterations)
+            driver, how = attempt(method, RETRY_ENERGY_SHIFT, RETRY_ITERATION_FACTOR * max_iterations)
             retried = True
-        if not ok:
+        if how is None:
             raise CCNotConverged(f"{method}: no convergence in {max_iterations} iterations nor in "
                                  f"{RETRY_ITERATION_FACTOR * max_iterations} with shift {RETRY_ENERGY_SHIFT} "
                                  f"(last E_corr {last:.6f} / {float(driver.correlation_energy):.6f})")
-        if retried and diagnostics is not None:
-            diagnostics.setdefault("retried_with_shift", []).append(method)
+        if diagnostics is not None:
+            if retried:
+                diagnostics.setdefault("retried_with_shift", []).append(method)
+            if how == "ENERGY_STABLE":
+                diagnostics.setdefault("energy_stable_acceptance", []).append(method)
         if diagnostics is not None:
             t = driver.T
             diagnostics[method] = {"max_t1": float(max(np.abs(t.a).max(), np.abs(t.b).max())),

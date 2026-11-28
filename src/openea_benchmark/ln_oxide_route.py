@@ -66,8 +66,14 @@ WALK_STEP_ANGSTROM = 0.02
 WALK_MAX_STEPS = 30
 SO_VIRTUAL_CUTOFF_HARTREE = 5.0
 Q_ALLOWANCE_MIN_EV = 0.02
-# Memory reserved per point at the gate (measured RSS: TbO aTZ 9 GB, Nd awCVTZ 46 GB).
-RESERVE_MB = {"D": 15000, "T": 30000, "Q": 100000, "CV": 60000, "SO": 40000}
+# Memory of one axial point (``point_memory_mb``): CCpy keeps three dense n^4 integral arrays
+# (aa, ab, bb) over the n correlated orbitals, plus the Cholesky vectors (R and I, AO and MO).
+# TbO aQZ (n = 290): 3 n^4 x 8 B = 170 GB, killed by the OOM killer at 238 GB RSS (2026-11-27),
+# so the arrays count 1.4 times.  GCCSD (SO increment) is capped by its own guard (soc.ghf_cc).
+INTEGRAL_OVERHEAD = 1.4
+CHOLESKY_VECTORS_PER_AO = 10
+SO_GUARD_GB = 120.0
+POINT_LIMIT_MB = 210000          # same per-point limit as the post-CC layer
 
 
 def route_b_element(atom_a: str, atom_b: str) -> str | None:
@@ -121,7 +127,37 @@ class PointSpec:
                 f"{'+'.join(self.methods)}{'_frozenf' if self.freeze_f else ''}")
 
     def reserve_mb(self) -> float:
-        return RESERVE_MB["SO" if self.so else "CV" if self.cv else self.basis]
+        return point_memory_mb(self.element, self.basis, self.cv, self.so)
+
+
+def _basis_sizes(element: str, basis: str, cv: bool, so: bool) -> tuple[int, int, int]:
+    """(AOs, frozen orbitals, electrons of the neutral) of LnO in this basis."""
+    from pyscf import gto
+    from .adaptive.stage3_execution import valence_frozen_core_orbitals
+    from .axial.ln_oxide import CV_FROZEN_LN, _ln_basis
+    o_basis = f"aug-cc-pwcv{basis.lower()}z" if cv else f"aug-cc-pv{basis.lower()}z"
+    mol = gto.M(atom=f"{element} 0 0 0; O 0 0 {R_SCREEN_ANGSTROM}", verbose=0,
+                basis={element: _ln_basis(element, basis, uncontract=so, cv=cv), "O": o_basis},
+                spin=gto.charge(element) % 2)
+    nfz = CV_FROZEN_LN if cv else valence_frozen_core_orbitals(mol)
+    return mol.nao_nr(), nfz, mol.nelectron
+
+
+_SIZES: dict = {}
+
+
+def point_memory_mb(element: str, basis: str, cv: bool = False, so: bool = False) -> float:
+    key = (element, basis, cv, so)
+    if key not in _SIZES:
+        _SIZES[key] = _basis_sizes(element, basis, cv, so)
+    nao, nfz, nel = _SIZES[key]
+    cholesky = 6 * CHOLESKY_VECTORS_PER_AO * nao ** 3 * 8 / 1e6
+    if so:
+        nocc, nvir = nel + 1 - 2 * nfz, 2 * nao - nel - 1
+        gccsd = min(SO_GUARD_GB * 1e3, 8 * (nvir ** 4 + 2 * nocc * nvir ** 3) / 1e6)
+        return INTEGRAL_OVERHEAD * gccsd + cholesky
+    n = nao - nfz
+    return INTEGRAL_OVERHEAD * 3 * n ** 4 * 8 / 1e6 + cholesky
 
 
 def _config(spec: PointSpec):
@@ -259,20 +295,37 @@ def so_spec(element: str, row: Mapping[str, Any], r: float) -> PointSpec:
 def state_energies(element: str, row: Mapping[str, Any], r_e: float, cache: Path, fn) -> dict:
     """Step 5 at R_e for one selected configuration."""
     r = round(r_e, 4)
-    specs = [PointSpec(element, row["config"], r, "T", freeze_f=row["freeze_f"]),
-             PointSpec(element, row["config"], r, "Q", freeze_f=row["freeze_f"]),
-             PointSpec(element, row["config"], r, "D", methods=("ccsd(t)", "ccsdt"), freeze_f=row["freeze_f"]),
-             PointSpec(element, row["config"], r, "T", freeze_f=row["freeze_f"], cv=True),
-             so_spec(element, row, r)]
-    tz, qz, dz, cv, so = _run_points(specs, cache, fn)
-    failed = [s.key() for s, rec in zip(specs, (tz, qz, dz, cv, so)) if rec["status"] != "COMPLETED"]
+    tz_spec = PointSpec(element, row["config"], r, "T", freeze_f=row["freeze_f"])
+    qz_spec = PointSpec(element, row["config"], r, "Q", freeze_f=row["freeze_f"])
+    dz_spec = PointSpec(element, row["config"], r, "D", methods=("ccsd(t)", "ccsdt"), freeze_f=row["freeze_f"])
+    cv_spec = PointSpec(element, row["config"], r, "T", freeze_f=row["freeze_f"], cv=True)
+    specs = [tz_spec, dz_spec, so_spec(element, row, r)]
+    # aQZ and the core-valence point only when they fit the per-point limit; otherwise the
+    # CBS estimate is aTZ (bound: the DZ -> TZ change) and Delta_CV is missing (allowance).
+    with_qz = qz_spec.reserve_mb() <= POINT_LIMIT_MB
+    with_cv = cv_spec.reserve_mb() <= POINT_LIMIT_MB
+    specs += ([qz_spec] if with_qz else []) + ([cv_spec] if with_cv else [])
+    recs = dict(zip([s.key() for s in specs], _run_points(specs, cache, fn)))
+    failed = [k for k, rec in recs.items() if rec["status"] != "COMPLETED"]
     if failed:
         return {"status": "POINTS_FAILED", "failed": failed}
-    e_cbs = float(qz["e_scf"]) + (4 ** 3 * qz["correlation"]["ccsd(t)"] - 3 ** 3 * tz["correlation"]["ccsd(t)"]) / (4 ** 3 - 3 ** 3)
-    return {"status": "COMPLETED", "r_e": r, "e_tz": total(tz), "e_qz": total(qz), "e_cbs": e_cbs,
-            "delta_t": dz["correlation"]["ccsdt"] - dz["correlation"]["ccsd(t)"],
-            "delta_cv": cv["correlation"]["cv_ccsd(t)"] - cv["correlation"]["val_ccsd(t)"],
-            "delta_so": float(so["delta_so_hartree"]), "omega_twice": so.get("omega_twice")}
+    tz, dz, so = recs[tz_spec.key()], recs[dz_spec.key()], recs[so_spec(element, row, r).key()]
+    out = {"status": "COMPLETED", "r_e": r, "e_tz": total(tz), "e_dz": total(dz),
+           "delta_t": dz["correlation"]["ccsdt"] - dz["correlation"]["ccsd(t)"],
+           "delta_so": float(so["delta_so_hartree"]), "omega_twice": so.get("omega_twice"),
+           "qz_computed": with_qz, "cv_computed": with_cv,
+           "memory_mb": {"Q": qz_spec.reserve_mb(), "CV": cv_spec.reserve_mb()}}
+    if with_qz:
+        qz = recs[qz_spec.key()]
+        out["e_qz"] = total(qz)
+        out["e_cbs"] = float(qz["e_scf"]) + (4 ** 3 * qz["correlation"]["ccsd(t)"]
+                                            - 3 ** 3 * tz["correlation"]["ccsd(t)"]) / (4 ** 3 - 3 ** 3)
+    else:
+        out["e_cbs"] = total(tz)
+    if with_cv:
+        cv = recs[cv_spec.key()]
+        out["delta_cv"] = cv["correlation"]["cv_ccsd(t)"] - cv["correlation"]["val_ccsd(t)"]
+    return out
 
 
 def select_charge(element: str, charge: int, screen: Mapping[str, Any], cache: Path, fn, masses) -> dict:
@@ -310,17 +363,22 @@ def select_charge(element: str, charge: int, screen: Mapping[str, Any], cache: P
 def assemble(neutral: Mapping[str, Any], anion: Mapping[str, Any], sel_n: Mapping[str, Any],
              sel_a: Mapping[str, Any]) -> dict:
     """EA_0 and its worst-case interval from the two states (Hartree inputs)."""
-    ea_cbs = (neutral["e_cbs"] - anion["e_cbs"]) * H2EV
-    ea_qz = (neutral["e_qz"] - anion["e_qz"]) * H2EV
-    terms = {"ea_cbs_ev": ea_cbs,
-             "delta_t_ev": (neutral["delta_t"] - anion["delta_t"]) * H2EV,
-             "delta_cv_ev": (neutral["delta_cv"] - anion["delta_cv"]) * H2EV,
-             "delta_so_ev": (neutral["delta_so"] - anion["delta_so"]) * H2EV,
+    ea = lambda key: (neutral[key] - anion[key]) * H2EV
+    ea_cbs = ea("e_cbs")
+    both_qz = neutral.get("qz_computed", True) and anion.get("qz_computed", True)
+    both_cv = neutral.get("cv_computed", True) and anion.get("cv_computed", True)
+    terms = {"ea_cbs_ev": ea_cbs if both_qz else ea("e_tz"),
+             "delta_t_ev": ea("delta_t"),
+             "delta_cv_ev": ea("delta_cv") if both_cv else 0.0,
+             "delta_so_ev": ea("delta_so"),
              "delta_zpe_ev": sel_n["minimum"]["zpe_ev"] - sel_a["minimum"]["zpe_ev"]}
-    bounds = {"cbs": 0.5 * abs(ea_cbs - ea_qz),
+    # CBS: half the TZ -> CBS(T/Q) change; without aQZ the whole DZ -> TZ change.
+    cbs_bound = (0.5 * abs(ea_cbs - ea("e_qz")) if both_qz else abs(ea("e_tz") - ea("e_dz")))
+    bounds = {"cbs": cbs_bound,
               "delta_t": 0.5 * abs(terms["delta_t_ev"]),
               "beyond_ccsdt": max(Q_ALLOWANCE_MIN_EV, abs(terms["delta_t_ev"])),
-              "delta_cv": 0.25 * abs(terms["delta_cv_ev"]) + 0.005,
+              # missing Delta_CV: Ln IP validation (Pr +0.015, Yb +0.008 eV) doubled
+              "delta_cv": 0.25 * abs(terms["delta_cv_ev"]) + 0.005 if both_cv else 0.03,
               "delta_so": 0.3 * abs(terms["delta_so_ev"]),
               "delta_zpe": 0.2 * abs(terms["delta_zpe_ev"]) + 0.001}
     ea0 = ea_cbs + sum(terms[k] for k in ("delta_t_ev", "delta_cv_ev", "delta_so_ev", "delta_zpe_ev"))
@@ -339,7 +397,7 @@ def assemble(neutral: Mapping[str, Any], anion: Mapping[str, Any], sel_n: Mappin
             else:
                 upper += shift
     return {"ea0_ev": ea0, "ea0_lower_ev": lower, "ea0_upper_ev": upper, "terms": terms, "bounds_ev": bounds,
-            "competitor_widening_ev": widen}
+            "competitor_widening_ev": widen, "qz_computed": both_qz, "cv_computed": both_cv}
 
 
 def run_route_b(*, element: str, output_dir: Path, point_fn: Callable[[PointSpec], dict] = compute_point) -> dict:
